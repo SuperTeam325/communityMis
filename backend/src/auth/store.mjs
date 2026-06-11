@@ -43,6 +43,7 @@ export function createMemoryAuthStore(options = {}) {
     listTags,
     listServiceRequests,
     findServiceRequestById,
+    createServiceRequest,
     listReviewsForTargetId,
     createSession,
     findSession,
@@ -188,6 +189,18 @@ export function createMemoryAuthStore(options = {}) {
   function findServiceRequestById(requestId) {
     const request = serviceRequests.get(Number(requestId));
     return request ? clone(withCategory(request)) : null;
+  }
+
+  function createServiceRequest(input) {
+    const request = normalizeServiceRequest({
+      ...input,
+      requestId: nextRequestId,
+      status: "open",
+      visible: true
+    });
+    serviceRequests.set(request.requestId, request);
+    nextRequestId += 1;
+    return clone(withCategory(request));
   }
 
   function listReviewsForTargetId(userId) {

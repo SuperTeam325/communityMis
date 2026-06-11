@@ -53,9 +53,21 @@ export function createApiClient(options = {}) {
     tags: {
       list: () => request("/api/tags")
     },
+    content: {
+      check: (payload, token = null) => request("/api/content/check", {
+        method: "POST",
+        token,
+        body: payload
+      })
+    },
     requests: {
       list: (params = {}) => request(withQuery("/api/requests", params)),
-      detail: (requestId) => request(`/api/requests/${encodeURIComponent(requestId)}`)
+      detail: (requestId) => request(`/api/requests/${encodeURIComponent(requestId)}`),
+      create: (token, payload) => request("/api/requests", {
+        method: "POST",
+        token,
+        body: payload
+      })
     },
     auth: {
       register: (payload) => request("/api/auth/register", {

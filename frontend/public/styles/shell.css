@@ -183,6 +183,40 @@ button.settings-item:disabled {
   opacity: 0.48;
 }
 
+.publish-success-panel {
+  display: grid;
+  gap: var(--space-md, 12px);
+  margin: 0 var(--space-lg, 16px) var(--space-lg, 16px);
+  padding: var(--space-lg, 16px);
+  border: 1px solid color-mix(in oklch, var(--success) 28%, var(--border));
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklch, var(--success) 10%, var(--surface));
+  color: var(--muted);
+}
+
+.publish-success-panel strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--fg);
+  font-size: 16px;
+}
+
+.publish-success-panel p {
+  margin: 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.publish-success-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm, 8px);
+}
+
+.publish-success-actions .btn {
+  min-width: 120px;
+}
+
 .request-detail-title {
   margin-bottom: var(--space-md, 12px);
   color: var(--fg);

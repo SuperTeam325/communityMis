@@ -14,6 +14,7 @@ export function createMysqlAuthStore(options = {}) {
   const sessions = new Map();
   const profileExtras = new Map();
   const settings = new Map();
+  const requestExtras = new Map();
 
   return {
     createUserWithWallet,
@@ -27,6 +28,7 @@ export function createMysqlAuthStore(options = {}) {
     listTags,
     listServiceRequests,
     findServiceRequestById,
+    createServiceRequest,
     listReviewsForTargetId,
     createSession,
     findSession,
@@ -263,7 +265,7 @@ FROM (
 ) q;
 `;
     const rows = await mysqlJson(sql, { optional: true });
-    return Array.isArray(rows) ? rows.map(normalizeServiceRequest) : [];
+    return Array.isArray(rows) ? rows.map(normalizeServiceRequest).map(withRequestExtras) : [];
   }
 
   async function findServiceRequestById(requestId) {
@@ -273,6 +275,69 @@ FROM (
     }
     const requests = await listServiceRequests();
     return requests.find((request) => request.requestId === id) ?? null;
+  }
+
+  async function createServiceRequest(input) {
+    const tags = Array.isArray(input.tags) ? input.tags.map((item) => String(item).trim()).filter(Boolean).slice(0, 8) : [];
+    const sql = `
+INSERT INTO \`service_request\` (
+  \`publisher_id\`,
+  \`category_id\`,
+  \`title\`,
+  \`description\`,
+  \`location\`,
+  \`estimated_hours\`,
+  \`coin_amount\`,
+  \`status\`
+)
+VALUES (
+  ${Number(input.publisherId)},
+  ${Number(input.categoryId)},
+  ${sqlString(input.title)},
+  ${sqlString(input.description)},
+  ${sqlNullableString(input.location)},
+  ${Number(input.estimatedHours).toFixed(1)},
+  ${Number(input.coinAmount).toFixed(2)},
+  'open'
+);
+SET @created_request_id = LAST_INSERT_ID();
+SELECT JSON_OBJECT(
+  'requestId', sr.\`request_id\`,
+  'publisherId', sr.\`publisher_id\`,
+  'categoryId', sr.\`category_id\`,
+  'title', sr.\`title\`,
+  'description', sr.\`description\`,
+  'location', sr.\`location\`,
+  'estimatedHours', CAST(sr.\`estimated_hours\` AS DOUBLE),
+  'coinAmount', CAST(sr.\`coin_amount\` AS DOUBLE),
+  'status', sr.\`status\`,
+  'tags', JSON_ARRAY(),
+  'visible', p.\`status\` = 1,
+  'createdAt', DATE_FORMAT(sr.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
+  'updatedAt', DATE_FORMAT(sr.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
+  'category', IF(c.\`category_id\` IS NULL, NULL, JSON_OBJECT(
+    'categoryId', c.\`category_id\`,
+    'parentId', c.\`parent_id\`,
+    'name', c.\`name\`,
+    'code', c.\`code\`,
+    'description', c.\`description\`,
+    'sortOrder', c.\`sort_order\`,
+    'status', c.\`status\`,
+    'createdAt', DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
+    'updatedAt', DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+  ))
+)
+FROM \`service_request\` sr
+JOIN \`user\` p ON p.\`user_id\` = sr.\`publisher_id\`
+LEFT JOIN \`category\` c ON c.\`category_id\` = sr.\`category_id\`
+WHERE sr.\`request_id\` = @created_request_id
+LIMIT 1;
+`;
+    const created = normalizeServiceRequest(await mysqlJson(sql));
+    if (created) {
+      requestExtras.set(created.requestId, { tags });
+    }
+    return withRequestExtras(created);
   }
 
   async function listReviewsForTargetId(userId) {
@@ -321,6 +386,14 @@ FROM (
 
   function withProfileExtras(user) {
     return mergeProfileExtras(user, profileExtras.get(user?.userId));
+  }
+
+  function withRequestExtras(request) {
+    if (!request) {
+      return null;
+    }
+    const extra = requestExtras.get(request.requestId);
+    return extra ? { ...request, tags: extra.tags ?? request.tags } : request;
   }
 
   function createSession(input) {

@@ -271,6 +271,10 @@ function installLogoutHandlers() {
 
 async function hydrateCurrentRoute(session) {
   try {
+    if (route.id === "post") {
+      await hydratePostRoute(session);
+      return;
+    }
     if (route.id === "tasks") {
       await hydrateTasksRoute();
       return;
@@ -340,6 +344,235 @@ async function hydrateCreditRoute(session) {
   }
   const payload = await api.users.credit(userId, userSession?.token);
   applyCreditDetail(payload);
+}
+
+async function hydratePostRoute(session) {
+  const userSession = session ?? auth.readSession("user");
+  installPublishSubmitHandler(userSession);
+
+  try {
+    const [categoryPayload, tagPayload] = await Promise.all([
+      api.categories.list(),
+      api.tags.list()
+    ]);
+    renderPublishCategories(categoryPayload.categories ?? []);
+    renderPublishTags(tagPayload.tags ?? []);
+  } catch (error) {
+    const button = document.getElementById("submit-btn");
+    if (button) {
+      showInlineMessage(button, publishErrorMessage(error, "catalog"), "error");
+    }
+  }
+}
+
+function installPublishSubmitHandler(userSession) {
+  const button = document.getElementById("submit-btn");
+  if (!button || button.dataset.publishBound === "true") {
+    return;
+  }
+  button.dataset.publishBound = "true";
+  button.addEventListener("click", interceptSubmit(async () => {
+    await submitRequestPublish(userSession);
+  }), true);
+}
+
+function renderPublishCategories(categories) {
+  const grid = document.getElementById("task-tags");
+  if (!grid || !Array.isArray(categories) || categories.length === 0) {
+    return;
+  }
+  grid.innerHTML = categories.map((category) => `
+    <span class="tag-chip" data-category-id="${escapeHtml(category.categoryId)}" data-tag="${escapeHtml(category.name)}">${escapeHtml(category.name)}</span>
+  `).join("");
+  bindSingleSelectGrid(grid);
+}
+
+function renderPublishTags(tags) {
+  const group = ensurePublishTagGroup();
+  const grid = group?.querySelector("#task-skill-tags");
+  if (!grid) {
+    return;
+  }
+
+  const names = (Array.isArray(tags) ? tags : [])
+    .map((tag) => tag.name)
+    .filter(Boolean)
+    .slice(0, 12);
+  const fallback = ["跑腿代取", "代买", "维修", "家政", "宠物照看", "学习辅导"];
+  grid.innerHTML = (names.length > 0 ? names : fallback).map((name) => `
+    <span class="tag-chip" data-tag="${escapeHtml(name)}">${escapeHtml(name)}</span>
+  `).join("");
+  bindMultiSelectGrid(grid);
+}
+
+function ensurePublishTagGroup() {
+  const existing = document.getElementById("task-tag-group");
+  if (existing) {
+    return existing;
+  }
+  const categoryGroup = document.getElementById("task-tags")?.closest(".form-group");
+  if (!categoryGroup) {
+    return null;
+  }
+  categoryGroup.insertAdjacentHTML("afterend", `
+    <div class="form-group" id="task-tag-group">
+      <label>需求标签</label>
+      <div class="tag-grid" id="task-skill-tags"></div>
+      <p class="helper">可选，帮助任务大厅按标签筛选。</p>
+    </div>
+  `);
+  return document.getElementById("task-tag-group");
+}
+
+function bindSingleSelectGrid(grid) {
+  grid.querySelectorAll(".tag-chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const wasSelected = chip.classList.contains("selected");
+      grid.querySelectorAll(".tag-chip").forEach((item) => item.classList.remove("selected"));
+      if (!wasSelected) {
+        chip.classList.add("selected");
+      }
+    });
+  });
+}
+
+function bindMultiSelectGrid(grid) {
+  grid.querySelectorAll(".tag-chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      chip.classList.toggle("selected");
+    });
+  });
+}
+
+async function submitRequestPublish(userSession) {
+  const button = document.getElementById("submit-btn");
+  if (!button) {
+    return;
+  }
+
+  const activeTab = document.querySelector(".publish-tabs button.active");
+  if (activeTab?.dataset.tab !== "task") {
+    showInlineMessage(button, "当前阶段仅支持发布服务需求，请切换到“发任务”。", "error");
+    return;
+  }
+  if (!userSession?.token) {
+    auth.clearSession("user");
+    navigateTo(`/login?redirect=${encodeURIComponent("/post")}`);
+    return;
+  }
+
+  const payload = readPublishRequestForm();
+  const validationMessage = validatePublishRequest(payload);
+  if (validationMessage) {
+    showInlineMessage(button, validationMessage, "error");
+    return;
+  }
+
+  const restore = setLoading(button, "发布中...");
+  try {
+    const check = await api.content.check({
+      scene: "request_publish",
+      fields: [payload.title, payload.description, payload.location, ...payload.tags]
+    }, userSession.token);
+    if (check.allowed === false || check.ok === false) {
+      showInlineMessage(button, check.reason || "内容未通过发布前检查。", "error");
+      return;
+    }
+
+    const result = await api.requests.create(userSession.token, payload);
+    renderPublishSuccessPanel(result.request);
+    showPostToast(`任务（${formatAmount(result.request.coinAmount)} ⏂ 时间币）发布成功！`);
+    showInlineMessage(button, "需求已发布，可以查看详情或进入任务大厅。", "success");
+  } catch (error) {
+    if (error?.status === 401) {
+      auth.clearSession("user");
+      navigateTo(`/login?redirect=${encodeURIComponent("/post")}`);
+      return;
+    }
+    showInlineMessage(button, publishErrorMessage(error), "error");
+  } finally {
+    restore();
+  }
+}
+
+function readPublishRequestForm() {
+  const selectedCategory = document.querySelector("#task-tags .tag-chip.selected");
+  const tags = Array.from(document.querySelectorAll("#task-skill-tags .tag-chip.selected"))
+    .map((chip) => chip.dataset.tag || chip.textContent.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  if (document.getElementById("task-urgent")?.checked && !tags.includes("紧急")) {
+    tags.unshift("紧急");
+  }
+
+  return {
+    title: document.getElementById("task-title")?.value.trim() ?? "",
+    description: document.getElementById("task-description")?.value.trim() ?? "",
+    estimatedHours: document.getElementById("task-hours")?.value ?? "",
+    coinAmount: document.getElementById("task-coins")?.value ?? "",
+    location: document.getElementById("task-location")?.value.trim() ?? "",
+    categoryId: selectedCategory?.dataset.categoryId ?? "",
+    tags
+  };
+}
+
+function validatePublishRequest(payload) {
+  if (!payload.title) {
+    return "请输入任务标题。";
+  }
+  if (!payload.description) {
+    return "请补充任务描述。";
+  }
+  if (!payload.categoryId) {
+    return "请选择服务类别。";
+  }
+  if (!isPositiveNumber(payload.estimatedHours)) {
+    return "预计耗时必须为正数。";
+  }
+  if (!isPositiveNumber(payload.coinAmount)) {
+    return "时间币数量必须为正数。";
+  }
+  if (payload.title.length > 100 || payload.description.length > 2000 || payload.location.length > 120) {
+    return "标题、描述或地点长度超过限制。";
+  }
+  if (payload.tags.some((tag) => tag.length > 30)) {
+    return "单个标签不能超过 30 个字符。";
+  }
+  return null;
+}
+
+function renderPublishSuccessPanel(item) {
+  if (!item) {
+    return;
+  }
+  let panel = document.getElementById("publish-success-panel");
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "publish-success-panel";
+    panel.className = "publish-success-panel";
+    document.querySelector(".submit-bar")?.insertAdjacentElement("beforebegin", panel);
+  }
+  panel.innerHTML = `
+    <div>
+      <strong>需求已发布</strong>
+      <p>${escapeHtml(item.title)} 已进入任务大厅，其他用户现在可以浏览和筛选到它。</p>
+    </div>
+    <div class="publish-success-actions">
+      <a class="btn btn--primary" href="/posts/${encodeURIComponent(item.requestId)}">查看新需求</a>
+      <a class="btn btn--outline" href="/tasks">进入任务大厅</a>
+    </div>
+  `;
+  panel.hidden = false;
+}
+
+function showPostToast(text) {
+  const toast = document.getElementById("toast");
+  if (!toast) {
+    return;
+  }
+  toast.textContent = text;
+  toast.classList.add("show");
+  window.setTimeout(() => toast.classList.remove("show"), 2200);
 }
 
 async function hydrateTasksRoute() {
@@ -1181,6 +1414,11 @@ function positiveInteger(raw, fallback) {
   return Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
+function isPositiveNumber(raw) {
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0;
+}
+
 function routeRequestId() {
   const match = window.location.pathname.match(/^\/posts\/([^/]+)$/);
   const raw = match?.[1];
@@ -1199,6 +1437,38 @@ function taskErrorMessage(error) {
     return "无法连接任务服务，请确认后端服务已启动。";
   }
   return error?.message || "任务数据加载失败，请稍后重试。";
+}
+
+function publishErrorMessage(error, context = "") {
+  const code = error?.payload?.error?.code;
+  if (context === "catalog") {
+    return "类别和标签加载失败，请确认后端服务已启动。";
+  }
+  if (code === "SENSITIVE_CONTENT") {
+    return error.payload.error.message || "内容命中敏感词，不能提交。";
+  }
+  if (code === "INVALID_CATEGORY") {
+    return "请选择有效的服务类别。";
+  }
+  if (code === "INVALID_ESTIMATED_HOURS") {
+    return "预计耗时必须为正数。";
+  }
+  if (code === "INVALID_COIN_AMOUNT") {
+    return "时间币数量必须为正数。";
+  }
+  if (code?.startsWith("INVALID_REQUEST_")) {
+    return "请检查标题、描述、地点和标签长度。";
+  }
+  if (code === "FORBIDDEN") {
+    return "当前账号不能发布服务需求。";
+  }
+  if (code === "USER_DISABLED") {
+    return "该账号已被禁用，不能发布服务需求。";
+  }
+  if (error?.status === 0 || error instanceof TypeError) {
+    return "无法连接发布服务，请确认后端服务已启动。";
+  }
+  return error?.message || "发布失败，请稍后重试。";
 }
 
 function firstCharacter(value) {

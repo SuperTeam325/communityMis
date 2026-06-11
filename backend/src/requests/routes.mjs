@@ -1,12 +1,31 @@
 import { ACTIVE_STATUS } from "../auth/store.mjs";
-import { HttpError, methodNotAllowed, sendJson } from "../http.mjs";
+import { HttpError, methodNotAllowed, readJsonBody, sendJson } from "../http.mjs";
 
 const REQUEST_DETAIL_RE = /^\/api\/requests\/([^/]+)$/;
 const PUBLIC_REQUEST_STATUSES = new Set(["open", "accepted", "completed"]);
 const STATUS_FILTERS = new Set(["open", "accepted", "completed", "cancelled", "all"]);
 const SORTS = new Set(["latest", "oldest", "coin_desc", "coin_asc", "credit_desc", "credit_asc", "hours_desc", "hours_asc"]);
+const REQUEST_BODY_MAX_BYTES = 64 * 1024;
+const LOCAL_SENSITIVE_RULES = [
+  { word: "私下交易", level: "block", reason: "平台交易需通过邻帮完成，不能引导私下交易。" },
+  { word: "现金结算", level: "block", reason: "需求发布不能要求现金结算，请使用时间币。" },
+  { word: "辱骂", level: "block", reason: "内容包含不友善或攻击性表达。" }
+];
 
 export async function handleRequestRoutes({ request, response, url, authService }) {
+  if (url.pathname === "/api/content/check") {
+    allowOnly(request, response, ["POST"]);
+    const body = await readJsonBody(request, { maxBytes: REQUEST_BODY_MAX_BYTES });
+    const result = checkContentPolicy(contentCheckFields(body));
+    sendJson(response, 200, {
+      ok: result.allowed,
+      allowed: result.allowed,
+      reason: result.allowed ? null : contentBlockReason(result.hits),
+      hits: result.hits
+    });
+    return true;
+  }
+
   if (url.pathname === "/api/categories") {
     allowOnly(request, response, ["GET"]);
     const categories = await safeStoreCall(authService.store, "listCategories", []);
@@ -26,7 +45,21 @@ export async function handleRequestRoutes({ request, response, url, authService 
   }
 
   if (url.pathname === "/api/requests") {
-    allowOnly(request, response, ["GET"]);
+    allowOnly(request, response, ["GET", "POST"]);
+    if (request.method === "POST") {
+      const context = await authService.authenticateRequest(request);
+      authService.requireRole(context, ["user"]);
+      const body = await readJsonBody(request, { maxBytes: REQUEST_BODY_MAX_BYTES });
+      const input = await normalizeCreateRequestInput(authService.store, body);
+      assertContentAllowed(input);
+      const created = await authService.store.createServiceRequest({
+        ...input,
+        publisherId: context.user.userId
+      });
+      sendJson(response, 201, await requestDetailPayload(authService.store, created.requestId));
+      return true;
+    }
+
     sendJson(response, 200, await requestListPayload(authService.store, url.searchParams));
     return true;
   }
@@ -39,6 +72,170 @@ export async function handleRequestRoutes({ request, response, url, authService 
   }
 
   return false;
+}
+
+async function normalizeCreateRequestInput(store, input) {
+  if (typeof store.createServiceRequest !== "function") {
+    throw new HttpError(500, "REQUEST_STORE_UNAVAILABLE", "Request publishing is not available.");
+  }
+
+  const categories = await safeStoreCall(store, "listCategories", []);
+  const category = resolveCategory(input, categories);
+  return {
+    categoryId: category.categoryId,
+    title: requiredText(input?.title, 2, 100, "INVALID_REQUEST_TITLE", "Request title is required."),
+    description: requiredText(input?.description, 5, 2000, "INVALID_REQUEST_DESCRIPTION", "Request description is required."),
+    location: optionalInputText(input?.location, 120, "INVALID_REQUEST_LOCATION"),
+    estimatedHours: parsePositiveNumber(
+      input?.estimatedHours ?? input?.estimated_hours,
+      "INVALID_ESTIMATED_HOURS",
+      "Estimated hours must be a positive number.",
+      999.9,
+      1
+    ),
+    coinAmount: parsePositiveNumber(
+      input?.coinAmount ?? input?.coin_amount,
+      "INVALID_COIN_AMOUNT",
+      "Time coin amount must be a positive number.",
+      99999.99,
+      2
+    ),
+    tags: normalizeRequestTags(input?.tags ?? input?.tag)
+  };
+}
+
+function resolveCategory(input, categories) {
+  const rawId = input?.categoryId ?? input?.category_id;
+  const rawText = input?.categoryCode ?? input?.category ?? input?.categoryName;
+
+  if (rawId !== undefined && rawId !== null && rawId !== "") {
+    const categoryId = parsePositiveInt(rawId, "INVALID_CATEGORY_ID");
+    const category = categories.find((item) => item.categoryId === categoryId);
+    if (category) {
+      return category;
+    }
+  }
+
+  const text = optionalInputText(rawText, 50, "INVALID_CATEGORY");
+  if (text) {
+    const normalized = text.toLowerCase();
+    const category = categories.find((item) => [item.code, item.name, String(item.categoryId)]
+      .filter(Boolean)
+      .map((value) => String(value).toLowerCase())
+      .includes(normalized));
+    if (category) {
+      return category;
+    }
+  }
+
+  throw new HttpError(400, "INVALID_CATEGORY", "A valid service category is required.");
+}
+
+function requiredText(value, minLength, maxLength, code, message) {
+  const text = optionalInputText(value, maxLength, code);
+  if (!text || text.length < minLength) {
+    throw new HttpError(400, code, message);
+  }
+  return text;
+}
+
+function optionalInputText(value, maxLength, code) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const text = String(value).trim();
+  if (text.length > maxLength) {
+    throw new HttpError(400, code, "One or more request fields are too long.");
+  }
+  return text || null;
+}
+
+function parsePositiveNumber(raw, code, message, max, fractionDigits) {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0 || value > max) {
+    throw new HttpError(400, code, message);
+  }
+  const factor = 10 ** fractionDigits;
+  return Math.round(value * factor) / factor;
+}
+
+function normalizeRequestTags(rawTags) {
+  const values = Array.isArray(rawTags)
+    ? rawTags
+    : String(rawTags ?? "").split(/[，,]/);
+  const tags = [];
+  const seen = new Set();
+
+  for (const rawTag of values) {
+    const tag = optionalInputText(rawTag, 30, "INVALID_REQUEST_TAGS");
+    if (!tag) {
+      continue;
+    }
+    const key = tag.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    tags.push(tag);
+    seen.add(key);
+    if (tags.length > 8) {
+      throw new HttpError(400, "INVALID_REQUEST_TAGS", "At most 8 request tags are supported.");
+    }
+  }
+
+  return tags;
+}
+
+function contentCheckFields(input) {
+  if (Array.isArray(input?.fields)) {
+    return input.fields;
+  }
+  if (typeof input?.content === "string") {
+    return [input.content];
+  }
+  return [
+    input?.title,
+    input?.description,
+    input?.location,
+    ...(Array.isArray(input?.tags) ? input.tags : [])
+  ];
+}
+
+function assertContentAllowed(input) {
+  const result = checkContentPolicy([
+    input.title,
+    input.description,
+    input.location,
+    ...input.tags
+  ]);
+  if (!result.allowed) {
+    throw new HttpError(400, "SENSITIVE_CONTENT", contentBlockReason(result.hits), {
+      hits: result.hits
+    });
+  }
+}
+
+function checkContentPolicy(fields) {
+  const text = fields
+    .filter((value) => value !== undefined && value !== null)
+    .map((value) => String(value).toLowerCase())
+    .join("\n");
+  const hits = LOCAL_SENSITIVE_RULES
+    .filter((rule) => text.includes(rule.word.toLowerCase()))
+    .map((rule) => ({
+      word: rule.word,
+      level: rule.level,
+      reason: rule.reason
+    }));
+
+  return {
+    allowed: hits.length === 0,
+    hits
+  };
+}
+
+function contentBlockReason(hits) {
+  const first = hits[0];
+  return first ? `内容命中敏感词「${first.word}」：${first.reason}` : "内容未通过发布前检查。";
 }
 
 async function requestListPayload(store, searchParams) {
