@@ -47,6 +47,16 @@ export function createApiClient(options = {}) {
   return {
     request,
     health: () => request("/api/health"),
+    categories: {
+      list: () => request("/api/categories")
+    },
+    tags: {
+      list: () => request("/api/tags")
+    },
+    requests: {
+      list: (params = {}) => request(withQuery("/api/requests", params)),
+      detail: (requestId) => request(`/api/requests/${encodeURIComponent(requestId)}`)
+    },
     auth: {
       register: (payload) => request("/api/auth/register", {
         method: "POST",
@@ -88,6 +98,26 @@ export function createApiClient(options = {}) {
       me: (token) => request("/api/admin/auth/me", { token })
     }
   };
+}
+
+function withQuery(path, params = {}) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item !== undefined && item !== null && item !== "") {
+          query.append(key, String(item));
+        }
+      }
+      continue;
+    }
+    query.set(key, String(value));
+  }
+  const suffix = query.toString();
+  return suffix ? `${path}?${suffix}` : path;
 }
 
 function resolveUrl(baseUrl, requestPath) {

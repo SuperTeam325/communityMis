@@ -23,6 +23,10 @@ export function createMysqlAuthStore(options = {}) {
     updateUserProfile,
     findSettingsByUserId,
     updateSettingsByUserId,
+    listCategories,
+    listTags,
+    listServiceRequests,
+    findServiceRequestById,
     listReviewsForTargetId,
     createSession,
     findSession,
@@ -139,6 +143,136 @@ LIMIT 1;
     const next = mergeSettings(settings.get(id) ?? normalizeSettings(), input);
     settings.set(id, next);
     return clone(next);
+  }
+
+  async function listCategories() {
+    const sql = `
+SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
+  'categoryId', q.\`category_id\`,
+  'parentId', q.\`parent_id\`,
+  'name', q.\`name\`,
+  'code', q.\`code\`,
+  'description', q.\`description\`,
+  'sortOrder', q.\`sort_order\`,
+  'status', q.\`status\`,
+  'createdAt', q.\`created_at\`,
+  'updatedAt', q.\`updated_at\`
+)), JSON_ARRAY())
+FROM (
+  SELECT
+    c.\`category_id\`,
+    c.\`parent_id\`,
+    c.\`name\`,
+    c.\`code\`,
+    c.\`description\`,
+    c.\`sort_order\`,
+    c.\`status\`,
+    DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`updated_at\`
+  FROM \`category\` c
+  WHERE c.\`status\` = 1
+  ORDER BY c.\`sort_order\` ASC, c.\`category_id\` ASC
+) q;
+`;
+    const rows = await mysqlJson(sql, { optional: true });
+    return Array.isArray(rows)
+      ? rows.map(normalizeCategory).filter(Boolean).sort((left, right) => left.sortOrder - right.sortOrder || left.categoryId - right.categoryId)
+      : [];
+  }
+
+  async function listTags() {
+    const sql = `
+SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
+  'skillTags', q.\`skill_tags\`
+)), JSON_ARRAY())
+FROM (
+  SELECT u.\`skill_tags\`
+  FROM \`user\` u
+  WHERE u.\`status\` = 1
+    AND u.\`role\` = 'user'
+    AND u.\`skill_tags\` IS NOT NULL
+  ORDER BY u.\`user_id\` ASC
+) q;
+`;
+    const rows = await mysqlJson(sql, { optional: true });
+    const tagMap = new Map();
+    for (const row of Array.isArray(rows) ? rows : []) {
+      for (const tag of parseSkillTags(row.skillTags)) {
+        addTagCount(tagMap, tag, "userCount");
+      }
+    }
+    return Array.from(tagMap.values())
+      .sort((left, right) => right.userCount - left.userCount || left.name.localeCompare(right.name))
+      .map(clone);
+  }
+
+  async function listServiceRequests() {
+    const sql = `
+SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
+  'requestId', q.\`request_id\`,
+  'publisherId', q.\`publisher_id\`,
+  'categoryId', q.\`category_id\`,
+  'title', q.\`title\`,
+  'description', q.\`description\`,
+  'location', q.\`location\`,
+  'estimatedHours', q.\`estimated_hours\`,
+  'coinAmount', q.\`coin_amount\`,
+  'status', q.\`status\`,
+  'tags', JSON_ARRAY(),
+  'visible', q.\`publisher_status\` = 1,
+  'createdAt', q.\`created_at\`,
+  'updatedAt', q.\`updated_at\`,
+  'category', IF(q.\`category_id\` IS NULL, NULL, JSON_OBJECT(
+    'categoryId', q.\`category_id\`,
+    'parentId', q.\`category_parent_id\`,
+    'name', q.\`category_name\`,
+    'code', q.\`category_code\`,
+    'description', q.\`category_description\`,
+    'sortOrder', q.\`category_sort_order\`,
+    'status', q.\`category_status\`,
+    'createdAt', q.\`category_created_at\`,
+    'updatedAt', q.\`category_updated_at\`
+  ))
+)), JSON_ARRAY())
+FROM (
+  SELECT
+    sr.\`request_id\`,
+    sr.\`publisher_id\`,
+    sr.\`category_id\`,
+    sr.\`title\`,
+    sr.\`description\`,
+    sr.\`location\`,
+    CAST(sr.\`estimated_hours\` AS DOUBLE) AS \`estimated_hours\`,
+    CAST(sr.\`coin_amount\` AS DOUBLE) AS \`coin_amount\`,
+    sr.\`status\`,
+    p.\`status\` AS \`publisher_status\`,
+    DATE_FORMAT(sr.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    DATE_FORMAT(sr.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`updated_at\`,
+    c.\`parent_id\` AS \`category_parent_id\`,
+    c.\`name\` AS \`category_name\`,
+    c.\`code\` AS \`category_code\`,
+    c.\`description\` AS \`category_description\`,
+    c.\`sort_order\` AS \`category_sort_order\`,
+    c.\`status\` AS \`category_status\`,
+    DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`category_created_at\`,
+    DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`category_updated_at\`
+  FROM \`service_request\` sr
+  JOIN \`user\` p ON p.\`user_id\` = sr.\`publisher_id\`
+  LEFT JOIN \`category\` c ON c.\`category_id\` = sr.\`category_id\`
+  ORDER BY sr.\`created_at\` DESC, sr.\`request_id\` DESC
+) q;
+`;
+    const rows = await mysqlJson(sql, { optional: true });
+    return Array.isArray(rows) ? rows.map(normalizeServiceRequest) : [];
+  }
+
+  async function findServiceRequestById(requestId) {
+    const id = Number(requestId);
+    if (!Number.isInteger(id) || id <= 0) {
+      return null;
+    }
+    const requests = await listServiceRequests();
+    return requests.find((request) => request.requestId === id) ?? null;
   }
 
   async function listReviewsForTargetId(userId) {
@@ -314,6 +448,42 @@ function normalizeWallet(wallet) {
   return wallet ?? null;
 }
 
+function normalizeCategory(category) {
+  if (!category) {
+    return null;
+  }
+  return {
+    categoryId: Number(category.categoryId),
+    parentId: category.parentId === undefined || category.parentId === null ? null : Number(category.parentId),
+    name: String(category.name ?? ""),
+    code: String(category.code ?? ""),
+    description: normalizeOptionalString(category.description),
+    sortOrder: Number(category.sortOrder ?? 0),
+    status: Number(category.status ?? ACTIVE_STATUS),
+    createdAt: category.createdAt ?? null,
+    updatedAt: category.updatedAt ?? category.createdAt ?? null
+  };
+}
+
+function normalizeServiceRequest(input) {
+  return {
+    requestId: Number(input.requestId),
+    publisherId: Number(input.publisherId),
+    categoryId: input.categoryId === undefined || input.categoryId === null ? null : Number(input.categoryId),
+    title: String(input.title ?? ""),
+    description: String(input.description ?? ""),
+    location: normalizeOptionalString(input.location),
+    estimatedHours: Number(input.estimatedHours ?? 0),
+    coinAmount: Number(input.coinAmount ?? 0),
+    status: String(input.status ?? "open"),
+    tags: Array.isArray(input.tags) ? input.tags : [],
+    visible: input.visible !== false && input.visible !== 0,
+    createdAt: input.createdAt ?? null,
+    updatedAt: input.updatedAt ?? input.createdAt ?? null,
+    category: normalizeCategory(input.category)
+  };
+}
+
 function parseSkillTags(value) {
   if (Array.isArray(value)) {
     return value;
@@ -456,6 +626,21 @@ function normalizeOptionalString(value) {
 
 function hasOwn(input, key) {
   return Object.prototype.hasOwnProperty.call(input ?? {}, key);
+}
+
+function addTagCount(tagMap, rawTag, field) {
+  const name = String(rawTag ?? "").trim();
+  if (!name) {
+    return;
+  }
+  const key = name.toLowerCase();
+  const entry = tagMap.get(key) ?? {
+    name,
+    userCount: 0,
+    requestCount: 0
+  };
+  entry[field] += 1;
+  tagMap.set(key, entry);
 }
 
 function sqlString(value) {

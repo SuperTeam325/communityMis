@@ -11,12 +11,21 @@ export function createMemoryAuthStore(options = {}) {
   const wallets = new Map();
   const sessions = new Map();
   const settings = new Map();
+  const categories = new Map();
+  const serviceRequests = new Map();
   const reviews = [];
   let nextUserId = options.nextUserId ?? 10000;
   let nextWalletId = options.nextWalletId ?? 20000;
+  let nextRequestId = options.nextRequestId ?? 30000;
 
   for (const seedUser of options.seedUsers ?? defaultSeedUsers()) {
     insertSeedUser(seedUser);
+  }
+  for (const seedCategory of options.seedCategories ?? defaultSeedCategories()) {
+    insertSeedCategory(seedCategory);
+  }
+  for (const seedRequest of options.seedRequests ?? defaultSeedServiceRequests()) {
+    insertSeedRequest(seedRequest);
   }
   for (const seedReview of options.seedReviews ?? defaultSeedReviews()) {
     reviews.push(normalizeReview(seedReview));
@@ -30,6 +39,10 @@ export function createMemoryAuthStore(options = {}) {
     updateUserProfile,
     findSettingsByUserId,
     updateSettingsByUserId,
+    listCategories,
+    listTags,
+    listServiceRequests,
+    findServiceRequestById,
     listReviewsForTargetId,
     createSession,
     findSession,
@@ -132,6 +145,51 @@ export function createMemoryAuthStore(options = {}) {
     return clone(next);
   }
 
+  function listCategories() {
+    return Array.from(categories.values())
+      .filter((category) => category.status === ACTIVE_STATUS)
+      .sort((left, right) => left.sortOrder - right.sortOrder || left.categoryId - right.categoryId)
+      .map(clone);
+  }
+
+  function listTags() {
+    const tagMap = new Map();
+
+    for (const user of users.values()) {
+      if (user.status !== ACTIVE_STATUS || user.role !== "user") {
+        continue;
+      }
+      for (const tag of user.skillTags ?? []) {
+        addTagCount(tagMap, tag, "userCount");
+      }
+    }
+
+    for (const request of serviceRequests.values()) {
+      const publisher = users.get(request.publisherId);
+      if (!isVisibleServiceRequest(request, publisher)) {
+        continue;
+      }
+      for (const tag of request.tags ?? []) {
+        addTagCount(tagMap, tag, "requestCount");
+      }
+    }
+
+    return Array.from(tagMap.values())
+      .sort((left, right) => right.requestCount - left.requestCount || right.userCount - left.userCount || left.name.localeCompare(right.name))
+      .map(clone);
+  }
+
+  function listServiceRequests() {
+    return Array.from(serviceRequests.values())
+      .map(withCategory)
+      .map(clone);
+  }
+
+  function findServiceRequestById(requestId) {
+    const request = serviceRequests.get(Number(requestId));
+    return request ? clone(withCategory(request)) : null;
+  }
+
   function listReviewsForTargetId(userId) {
     const id = Number(userId);
     return reviews
@@ -196,6 +254,28 @@ export function createMemoryAuthStore(options = {}) {
       nextUserId = Math.max(nextUserId, seedUser.userId + 1);
     }
   }
+
+  function insertSeedCategory(seedCategory) {
+    const category = normalizeCategory(seedCategory);
+    categories.set(category.categoryId, category);
+  }
+
+  function insertSeedRequest(seedRequest) {
+    const request = normalizeServiceRequest({
+      ...seedRequest,
+      requestId: seedRequest.requestId ?? nextRequestId
+    });
+    serviceRequests.set(request.requestId, request);
+    nextRequestId = Math.max(nextRequestId, request.requestId + 1);
+  }
+
+  function withCategory(request) {
+    const category = request.categoryId === null ? null : categories.get(request.categoryId);
+    return {
+      ...request,
+      category: category ? clone(category) : null
+    };
+  }
 }
 
 export function defaultSeedUsers() {
@@ -254,6 +334,141 @@ export function defaultSeedUsers() {
       role: "admin",
       status: ACTIVE_STATUS,
       initialBalance: 0
+    }
+  ];
+}
+
+export function defaultSeedCategories() {
+  return [
+    {
+      categoryId: 10,
+      parentId: null,
+      name: "跑腿代办",
+      code: "errand",
+      description: "代取快递、代买日用品、短距离送达",
+      sortOrder: 10,
+      status: ACTIVE_STATUS,
+      createdAt: "2026-06-01T09:00:00.000Z",
+      updatedAt: "2026-06-01T09:00:00.000Z"
+    },
+    {
+      categoryId: 11,
+      parentId: null,
+      name: "家政维修",
+      code: "home_repair",
+      description: "家政清洁、家具安装、轻维修",
+      sortOrder: 20,
+      status: ACTIVE_STATUS,
+      createdAt: "2026-06-01T09:00:00.000Z",
+      updatedAt: "2026-06-01T09:00:00.000Z"
+    },
+    {
+      categoryId: 12,
+      parentId: null,
+      name: "学习辅导",
+      code: "tutoring",
+      description: "作业辅导、技能教学、设备使用指导",
+      sortOrder: 30,
+      status: ACTIVE_STATUS,
+      createdAt: "2026-06-01T09:00:00.000Z",
+      updatedAt: "2026-06-01T09:00:00.000Z"
+    },
+    {
+      categoryId: 13,
+      parentId: null,
+      name: "宠物照看",
+      code: "pet_care",
+      description: "遛狗、喂猫、临时照看",
+      sortOrder: 40,
+      status: ACTIVE_STATUS,
+      createdAt: "2026-06-01T09:00:00.000Z",
+      updatedAt: "2026-06-01T09:00:00.000Z"
+    },
+    {
+      categoryId: 14,
+      parentId: null,
+      name: "社区公益",
+      code: "community",
+      description: "公益活动、邻里通知、社区协作",
+      sortOrder: 50,
+      status: ACTIVE_STATUS,
+      createdAt: "2026-06-01T09:00:00.000Z",
+      updatedAt: "2026-06-01T09:00:00.000Z"
+    }
+  ];
+}
+
+export function defaultSeedServiceRequests() {
+  return [
+    {
+      requestId: 2001,
+      publisherId: 1001,
+      categoryId: 10,
+      title: "帮忙代取快递到 5 号楼",
+      description: "快递在南门驿站，18:00 前送到 5 号楼大厅即可。",
+      location: "南门驿站",
+      estimatedHours: 0.5,
+      coinAmount: 10,
+      status: "open",
+      tags: ["代买", "跑腿代取"],
+      createdAt: "2026-06-04T09:00:00.000Z",
+      updatedAt: "2026-06-04T09:00:00.000Z"
+    },
+    {
+      requestId: 2002,
+      publisherId: 1001,
+      categoryId: 11,
+      title: "帮忙组装书柜",
+      description: "需要自带简单工具，预计 2 小时完成。",
+      location: "3 号楼 1202",
+      estimatedHours: 2,
+      coinAmount: 30,
+      status: "accepted",
+      tags: ["家政", "维修"],
+      createdAt: "2026-06-03T15:00:00.000Z",
+      updatedAt: "2026-06-03T15:00:00.000Z"
+    },
+    {
+      requestId: 2003,
+      publisherId: 1001,
+      categoryId: 10,
+      title: "帮李阿姨代购日用品",
+      description: "按清单在小区超市代买并送到门口。",
+      location: "小区超市",
+      estimatedHours: 1,
+      coinAmount: 18,
+      status: "completed",
+      tags: ["代买", "跑腿代取"],
+      createdAt: "2026-06-02T10:00:00.000Z",
+      updatedAt: "2026-06-02T10:00:00.000Z"
+    },
+    {
+      requestId: 2004,
+      publisherId: 1002,
+      categoryId: 13,
+      title: "周末帮忙遛狗",
+      description: "周六下午照看边牧 1 小时，需有宠物经验。",
+      location: "北区花园",
+      estimatedHours: 1,
+      coinAmount: 20,
+      status: "open",
+      tags: ["宠物照看", "遛狗"],
+      createdAt: "2026-06-05T12:00:00.000Z",
+      updatedAt: "2026-06-05T12:00:00.000Z"
+    },
+    {
+      requestId: 2005,
+      publisherId: 1001,
+      categoryId: 12,
+      title: "辅导初三数学 2 小时",
+      description: "主要讲解函数和几何题，需提前沟通讲义。",
+      location: "线上",
+      estimatedHours: 2,
+      coinAmount: 40,
+      status: "accepted",
+      tags: ["数学辅导", "学习辅导"],
+      createdAt: "2026-05-28T09:30:00.000Z",
+      updatedAt: "2026-05-28T09:30:00.000Z"
     }
   ];
 }
@@ -325,6 +540,39 @@ function normalizeTextList(value) {
   return value.map((item) => String(item).trim()).filter(Boolean).slice(0, 20);
 }
 
+function normalizeCategory(input) {
+  return {
+    categoryId: Number(input.categoryId),
+    parentId: input.parentId === undefined || input.parentId === null ? null : Number(input.parentId),
+    name: String(input.name ?? "").trim(),
+    code: String(input.code ?? "").trim(),
+    description: normalizeOptionalString(input.description),
+    sortOrder: Number(input.sortOrder ?? 0),
+    status: Number(input.status ?? ACTIVE_STATUS),
+    createdAt: input.createdAt ?? new Date().toISOString(),
+    updatedAt: input.updatedAt ?? input.createdAt ?? new Date().toISOString()
+  };
+}
+
+function normalizeServiceRequest(input) {
+  const now = new Date().toISOString();
+  return {
+    requestId: Number(input.requestId),
+    publisherId: Number(input.publisherId),
+    categoryId: input.categoryId === undefined || input.categoryId === null ? null : Number(input.categoryId),
+    title: String(input.title ?? "").trim(),
+    description: String(input.description ?? "").trim(),
+    location: normalizeOptionalString(input.location),
+    estimatedHours: Number(input.estimatedHours ?? input.estimated_hours ?? 0),
+    coinAmount: Number(input.coinAmount ?? input.coin_amount ?? 0),
+    status: String(input.status ?? "open"),
+    tags: normalizeTextList(input.tags),
+    visible: input.visible !== false && input.visible !== 0,
+    createdAt: input.createdAt ?? now,
+    updatedAt: input.updatedAt ?? input.createdAt ?? now
+  };
+}
+
 function normalizeReview(input) {
   return {
     reviewId: Number(input.reviewId),
@@ -338,6 +586,25 @@ function normalizeReview(input) {
     tags: normalizeTextList(input.tags).slice(0, 8),
     createdAt: input.createdAt ?? new Date().toISOString()
   };
+}
+
+function isVisibleServiceRequest(request, publisher) {
+  return request.visible !== false && request.status !== "cancelled" && publisher?.status === ACTIVE_STATUS;
+}
+
+function addTagCount(tagMap, rawTag, field) {
+  const name = String(rawTag ?? "").trim();
+  if (!name) {
+    return;
+  }
+  const key = name.toLowerCase();
+  const entry = tagMap.get(key) ?? {
+    name,
+    userCount: 0,
+    requestCount: 0
+  };
+  entry[field] += 1;
+  tagMap.set(key, entry);
 }
 
 function publicReviewer(user) {
