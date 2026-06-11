@@ -5,10 +5,11 @@ SET NAMES utf8mb4;
 
 INSERT INTO `user` (`user_id`, `username`, `password_hash`, `phone`, `skill_tags`, `role`, `status`, `created_at`)
 VALUES
-  (1001, 'user_a', '$2b$10$stage02.demo.hash.user.a', '13900001001', '["代买","家政","陪诊"]', 'user', 1, '2026-06-01 09:00:00'),
-  (1002, 'user_b', '$2b$10$stage02.demo.hash.user.b', '13900001002', '["维修","搬运","宠物照看"]', 'user', 1, '2026-06-01 09:10:00'),
-  (1003, 'user_c', '$2b$10$stage02.demo.hash.user.c', '13900001003', '["数学辅导","电脑维修"]', 'user', 1, '2026-06-01 09:20:00'),
-  (9001, 'admin_main', '$2b$10$stage02.demo.hash.admin', '13900009001', '["平台治理"]', 'admin', 1, '2026-06-01 08:00:00')
+  (1001, 'user_a', 'pbkdf2_sha256$120000$stage03-user-salt$eLn-2NQC73GLNJDbQqQRQiPkO6p1IrHNeysZP8_VWGY', '13900001001', '["代买","家政","陪诊"]', 'user', 1, '2026-06-01 09:00:00'),
+  (1002, 'user_b', 'pbkdf2_sha256$120000$stage03-user-salt$eLn-2NQC73GLNJDbQqQRQiPkO6p1IrHNeysZP8_VWGY', '13900001002', '["维修","搬运","宠物照看"]', 'user', 1, '2026-06-01 09:10:00'),
+  (1003, 'user_c', 'pbkdf2_sha256$120000$stage03-user-salt$eLn-2NQC73GLNJDbQqQRQiPkO6p1IrHNeysZP8_VWGY', '13900001003', '["数学辅导","电脑维修"]', 'user', 1, '2026-06-01 09:20:00'),
+  (1004, 'disabled_user', 'pbkdf2_sha256$120000$stage03-user-salt$eLn-2NQC73GLNJDbQqQRQiPkO6p1IrHNeysZP8_VWGY', '13900001004', '["临时禁用"]', 'user', 0, '2026-06-01 09:30:00'),
+  (9001, 'admin_main', 'pbkdf2_sha256$120000$stage03-admin-salt$jZySVEMbMbgGnWWJVkjFZFryrahLk5xU3S127JW5Hcs', '13900009001', '["平台治理"]', 'admin', 1, '2026-06-01 08:00:00')
 ON DUPLICATE KEY UPDATE
   `password_hash` = VALUES(`password_hash`),
   `phone` = VALUES(`phone`),
@@ -21,6 +22,7 @@ VALUES
   (1101, 1001, 120.00, 20.00, 1),
   (1102, 1002, 68.50, 0.00, 1),
   (1103, 1003, 45.00, 0.00, 0),
+  (1104, 1004, 0.00, 0.00, 0),
   (1901, 9001, 0.00, 0.00, 0)
 ON DUPLICATE KEY UPDATE
   `balance` = VALUES(`balance`),

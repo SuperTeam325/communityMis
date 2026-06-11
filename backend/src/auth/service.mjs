@@ -1,0 +1,203 @@
+import crypto from "node:crypto";
+import { HttpError } from "../http.mjs";
+import { hashPassword, verifyPassword } from "./password.mjs";
+import { createMemoryAuthStore, ACTIVE_STATUS, INITIAL_TIME_COIN_BALANCE, normalizeUsername } from "./store.mjs";
+import { createSignedSessionToken, verifySignedSessionToken } from "./tokens.mjs";
+
+const ADMIN_ROLES = new Set(["admin", "super_admin"]);
+const DEFAULT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+
+export function createAuthService(options = {}) {
+  const store = options.store ?? createMemoryAuthStore();
+  const sessionSecret = options.sessionSecret ?? process.env.AUTH_SESSION_SECRET ?? crypto.randomBytes(32).toString("base64url");
+  const sessionTtlMs = options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
+
+  return {
+    register,
+    login,
+    loginAdmin,
+    authenticateRequest,
+    requireRole,
+    logout,
+    publicUser,
+    store
+  };
+
+  async function register(input) {
+    const body = normalizeRegistrationInput(input);
+    let created;
+    try {
+      created = await store.createUserWithWallet({
+        username: body.username,
+        passwordHash: hashPassword(body.password),
+        phone: body.phone,
+        skillTags: body.skillTags,
+        role: "user",
+        status: ACTIVE_STATUS,
+        initialBalance: INITIAL_TIME_COIN_BALANCE
+      });
+    } catch (error) {
+      if (error.code === "DUPLICATE_USERNAME") {
+        throw new HttpError(409, "USERNAME_EXISTS", "Username is already registered.");
+      }
+      throw error;
+    }
+
+    return {
+      user: publicUser(created.user),
+      wallet: publicWallet(created.wallet)
+    };
+  }
+
+  async function login(input) {
+    return loginWithPolicy(input, { adminOnly: false });
+  }
+
+  async function loginAdmin(input) {
+    return loginWithPolicy(input, { adminOnly: true });
+  }
+
+  async function authenticateRequest(request) {
+    const token = bearerToken(request);
+    if (!token) {
+      throw new HttpError(401, "UNAUTHENTICATED", "Authentication is required.");
+    }
+
+    const now = new Date();
+    const tokenPayload = verifySignedSessionToken(token, sessionSecret, now);
+    if (!tokenPayload) {
+      throw new HttpError(401, "INVALID_TOKEN", "Authentication token is invalid or expired.");
+    }
+
+    const session = await store.findSession(tokenPayload.sid);
+    if (!session || session.revokedAt || new Date(session.expiresAt).getTime() <= now.getTime()) {
+      throw new HttpError(401, "INVALID_SESSION", "Authentication session is invalid or expired.");
+    }
+
+    const user = await store.findUserById(session.userId);
+    if (!user) {
+      throw new HttpError(401, "INVALID_SESSION", "Authentication session is invalid or expired.");
+    }
+    if (user.status !== ACTIVE_STATUS) {
+      throw new HttpError(403, "USER_DISABLED", "Disabled users cannot perform this operation.");
+    }
+
+    return { token, session, user };
+  }
+
+  function requireRole(context, roles) {
+    if (!roles.includes(context.user.role)) {
+      throw new HttpError(403, "FORBIDDEN", "You do not have permission to access this resource.");
+    }
+    return context;
+  }
+
+  async function logout(context) {
+    await store.revokeSession(context.session.sessionId);
+    return { ok: true };
+  }
+
+  async function loginWithPolicy(input, options) {
+    const body = normalizeLoginInput(input);
+    const user = await store.findUserByUsername(body.username);
+    if (!user || !verifyPassword(body.password, user.passwordHash)) {
+      throw new HttpError(401, "INVALID_CREDENTIALS", "Username or password is incorrect.");
+    }
+    if (user.status !== ACTIVE_STATUS) {
+      throw new HttpError(403, "USER_DISABLED", "Disabled users cannot log in.");
+    }
+    if (options.adminOnly && !ADMIN_ROLES.has(user.role)) {
+      throw new HttpError(403, "FORBIDDEN", "Administrator privileges are required.");
+    }
+
+    const expiresAt = new Date(Date.now() + sessionTtlMs).toISOString();
+    const session = await store.createSession({
+      userId: user.userId,
+      role: user.role,
+      expiresAt
+    });
+    const token = createSignedSessionToken({
+      sid: session.sessionId,
+      uid: user.userId,
+      role: user.role,
+      exp: new Date(expiresAt).getTime()
+    }, sessionSecret);
+
+    return {
+      token,
+      tokenType: "Bearer",
+      expiresAt,
+      user: publicUser(user)
+    };
+  }
+}
+
+export function publicUser(user) {
+  return {
+    userId: user.userId,
+    username: user.username,
+    phone: user.phone,
+    skillTags: user.skillTags,
+    role: user.role,
+    status: user.status,
+    createdAt: user.createdAt
+  };
+}
+
+function publicWallet(wallet) {
+  return {
+    walletId: wallet.walletId,
+    userId: wallet.userId,
+    balance: wallet.balance,
+    frozenBalance: wallet.frozenBalance,
+    version: wallet.version
+  };
+}
+
+function normalizeRegistrationInput(input) {
+  const username = normalizeUsername(input?.username);
+  const password = typeof input?.password === "string" ? input.password : "";
+
+  if (!/^[a-zA-Z0-9_]{3,50}$/.test(username)) {
+    throw new HttpError(400, "INVALID_USERNAME", "Username must be 3-50 letters, numbers, or underscores.");
+  }
+  if (password.length < 8 || password.length > 128) {
+    throw new HttpError(400, "INVALID_PASSWORD", "Password must be 8-128 characters.");
+  }
+
+  return {
+    username,
+    password,
+    phone: optionalText(input?.phone, 20),
+    skillTags: Array.isArray(input?.skillTags) ? input.skillTags.map((item) => String(item).trim()).filter(Boolean).slice(0, 20) : []
+  };
+}
+
+function normalizeLoginInput(input) {
+  const username = normalizeUsername(input?.username);
+  const password = typeof input?.password === "string" ? input.password : "";
+  if (!username || !password) {
+    throw new HttpError(400, "INVALID_LOGIN_BODY", "Username and password are required.");
+  }
+  return { username, password };
+}
+
+function optionalText(value, maxLength) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const text = String(value).trim();
+  if (text.length > maxLength) {
+    throw new HttpError(400, "INVALID_FIELD", "One or more fields are too long.");
+  }
+  return text ? text : null;
+}
+
+function bearerToken(request) {
+  const authorization = request.headers.authorization;
+  if (typeof authorization !== "string") {
+    return null;
+  }
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : null;
+}

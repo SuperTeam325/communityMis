@@ -2,7 +2,8 @@ import { spawn } from "node:child_process";
 
 const scripts = [
   "scripts/validate-stage-01.mjs",
-  "scripts/validate-stage-02.mjs"
+  "scripts/validate-stage-02.mjs",
+  "scripts/validate-stage-03.mjs"
 ];
 
 for (const script of scripts) {
