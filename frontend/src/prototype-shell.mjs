@@ -14,6 +14,27 @@ const api = createApiClient({
   baseUrl: window.__API_BASE_URL__ ?? "http://127.0.0.1:3001"
 });
 const auth = createAuthController({ api });
+const TASK_PAGE_SIZE = 6;
+const TASK_FILTERS = new Map([
+  ["all", { label: "全部任务", category: null, tag: null }],
+  ["express", { label: "快递代取", category: "errand", tag: "跑腿代取" }],
+  ["queue", { label: "排队代办", category: "errand", tag: "排队" }],
+  ["pet", { label: "宠物照看", category: "pet_care", tag: null }],
+  ["shopping", { label: "购物跑腿", category: "errand", tag: "代买" }],
+  ["home", { label: "家政帮手", category: "home_repair", tag: null }],
+  ["other", { label: "其他", category: "community", tag: null }]
+]);
+const TASK_SORTS = new Map([
+  ["latest", "latest"],
+  ["reward", "coin_desc"],
+  ["urgent", "hours_asc"]
+]);
+const API_SORT_TO_VIEW = new Map([...TASK_SORTS.entries()].map(([view, apiValue]) => [apiValue, view]));
+const REQUEST_STATUS_TEXT = new Map([
+  ["open", "待接单"],
+  ["accepted", "已接单"],
+  ["completed", "已完成"]
+]);
 
 window.NeighborApp = {
   route,
@@ -250,6 +271,18 @@ function installLogoutHandlers() {
 
 async function hydrateCurrentRoute(session) {
   try {
+    if (route.id === "tasks") {
+      await hydrateTasksRoute();
+      return;
+    }
+    if (route.id === "post-detail") {
+      await hydratePostDetailRoute();
+      return;
+    }
+    if (route.id === "ai-results") {
+      hydrateAiResultsRoute();
+      return;
+    }
     if (route.id === "profile") {
       await hydrateProfileRoute(session);
       return;
@@ -307,6 +340,445 @@ async function hydrateCreditRoute(session) {
   }
   const payload = await api.users.credit(userId, userSession?.token);
   applyCreditDetail(payload);
+}
+
+async function hydrateTasksRoute() {
+  installTaskControls();
+  await loadTasks(readTaskQuery());
+}
+
+function installTaskControls() {
+  if (document.body.dataset.tasksBound === "true") {
+    return;
+  }
+  document.body.dataset.tasksBound = "true";
+
+  const searchInput = document.querySelector(".search-box input");
+  const filterButton = document.querySelector(".filter-btn");
+  const aiButton = document.getElementById("ai-filter-btn");
+  let searchTimer = null;
+
+  searchInput?.addEventListener("input", () => {
+    window.clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(() => updateTaskQuery({ keyword: searchInput.value.trim(), page: 1 }), 350);
+  });
+  searchInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      window.clearTimeout(searchTimer);
+      updateTaskQuery({ keyword: searchInput.value.trim(), page: 1 });
+    }
+  });
+  filterButton?.addEventListener("click", (event) => {
+    event.preventDefault();
+    updateTaskQuery({ keyword: searchInput?.value.trim() ?? "", page: 1 });
+  });
+
+  for (const chip of document.querySelectorAll("#filter-bar .chip[data-filter], .side-filter[data-filter]")) {
+    chip.addEventListener("click", (event) => {
+      event.preventDefault();
+      updateTaskQuery({ filter: chip.dataset.filter || "all", page: 1 });
+    });
+  }
+
+  for (const chip of document.querySelectorAll(".sort-options .chip[data-sort]")) {
+    chip.addEventListener("click", (event) => {
+      event.preventDefault();
+      updateTaskQuery({ sortView: chip.dataset.sort || "latest", page: 1 });
+    });
+  }
+
+  if (aiButton) {
+    aiButton.onclick = null;
+    aiButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      const state = readTaskQuery();
+      const params = new URLSearchParams();
+      if (state.keyword) {
+        params.set("prompt", state.keyword);
+        params.set("keyword", state.keyword);
+      }
+      if (state.filter !== "all") {
+        params.set("filter", state.filter);
+      }
+      navigateTo(`/ai/results${params.toString() ? `?${params}` : ""}`);
+    });
+  }
+
+  window.addEventListener("popstate", () => {
+    loadTasks(readTaskQuery());
+  });
+}
+
+async function loadTasks(state) {
+  applyTaskControls(state);
+  renderTaskState("loading", "正在加载任务，请稍候。");
+  try {
+    const payload = await api.requests.list(taskApiParams(state));
+    renderTaskList(payload, state);
+  } catch (error) {
+    renderTaskState("error", taskErrorMessage(error), {
+      actionText: "重试",
+      onAction: () => loadTasks(readTaskQuery())
+    });
+  }
+}
+
+function readTaskQuery() {
+  const params = new URLSearchParams(window.location.search);
+  const sortRaw = params.get("sort") || "latest";
+  const filterRaw = params.get("filter");
+  const category = params.get("category");
+  const tag = params.get("tag") || params.get("tags");
+  return {
+    keyword: (params.get("keyword") ?? params.get("q") ?? "").trim(),
+    filter: TASK_FILTERS.has(filterRaw) ? filterRaw : taskFilterFromParams(category, tag),
+    category,
+    tag,
+    status: params.get("status") || "open",
+    sortApi: TASK_SORTS.get(sortRaw) ?? sortRaw,
+    sortView: TASK_SORTS.has(sortRaw) ? sortRaw : (API_SORT_TO_VIEW.get(sortRaw) ?? "latest"),
+    page: positiveInteger(params.get("page"), 1),
+    pageSize: positiveInteger(params.get("pageSize"), TASK_PAGE_SIZE)
+  };
+}
+
+function updateTaskQuery(patch) {
+  const current = readTaskQuery();
+  const next = {
+    ...current,
+    ...patch
+  };
+  const filter = TASK_FILTERS.get(next.filter) ?? TASK_FILTERS.get("all");
+  const sortApi = TASK_SORTS.get(next.sortView) ?? next.sortApi ?? "latest";
+  const params = new URLSearchParams();
+
+  if (next.keyword) {
+    params.set("keyword", next.keyword);
+  }
+  if (next.filter && next.filter !== "all") {
+    params.set("filter", next.filter);
+  }
+  if (filter?.category) {
+    params.set("category", filter.category);
+  }
+  if (filter?.tag) {
+    params.set("tag", filter.tag);
+  }
+  if (next.status && next.status !== "open") {
+    params.set("status", next.status);
+  }
+  if (sortApi !== "latest") {
+    params.set("sort", sortApi);
+  }
+  if (next.page > 1) {
+    params.set("page", String(next.page));
+  }
+  if (next.pageSize !== TASK_PAGE_SIZE) {
+    params.set("pageSize", String(next.pageSize));
+  }
+
+  const target = `${window.location.pathname}${params.toString() ? `?${params}` : ""}`;
+  window.history.pushState({}, "", target);
+  loadTasks(readTaskQuery());
+}
+
+function taskApiParams(state) {
+  const filter = TASK_FILTERS.get(state.filter) ?? TASK_FILTERS.get("all");
+  return {
+    keyword: state.keyword,
+    category: filter?.category ?? state.category,
+    tag: filter?.tag ?? state.tag,
+    status: state.status,
+    sort: state.sortApi,
+    page: state.page,
+    pageSize: state.pageSize
+  };
+}
+
+function applyTaskControls(state) {
+  const searchInput = document.querySelector(".search-box input");
+  if (searchInput && searchInput.value !== state.keyword) {
+    searchInput.value = state.keyword;
+  }
+  document.querySelectorAll("#filter-bar .chip[data-filter], .side-filter[data-filter]").forEach((chip) => {
+    chip.classList.toggle("active", (chip.dataset.filter || "all") === state.filter);
+  });
+  document.querySelectorAll(".sort-options .chip[data-sort]").forEach((chip) => {
+    chip.classList.toggle("active", (chip.dataset.sort || "latest") === state.sortView);
+  });
+}
+
+function renderTaskList(payload, state) {
+  const grid = document.getElementById("task-grid");
+  if (!grid) {
+    return;
+  }
+  const requests = Array.isArray(payload.requests) ? payload.requests : [];
+  const pagination = payload.pagination ?? { page: state.page, pageSize: state.pageSize, total: requests.length, totalPages: 1 };
+  const count = document.getElementById("result-count");
+  if (count) {
+    count.textContent = pagination.total > 0
+      ? `共 ${pagination.total} 个任务 · 第 ${pagination.page}/${Math.max(1, pagination.totalPages)} 页`
+      : "暂无匹配任务";
+  }
+
+  if (requests.length === 0) {
+    renderTaskState("empty", "没有找到符合条件的开放需求。可以换个关键词或切回全部任务。");
+    renderTaskPager(pagination, state);
+    return;
+  }
+
+  grid.classList.remove("task-grid--state");
+  grid.innerHTML = requests.map(taskCardHtml).join("");
+  bindTaskCards();
+  renderTaskPager(pagination, state);
+}
+
+function renderTaskState(kind, message, options = {}) {
+  const grid = document.getElementById("task-grid");
+  if (!grid) {
+    return;
+  }
+  const pager = document.getElementById("task-pager");
+  if (pager) {
+    pager.hidden = true;
+  }
+  const title = kind === "loading" ? "加载中" : kind === "error" ? "加载失败" : "空结果";
+  grid.classList.add("task-grid--state");
+  grid.innerHTML = `
+    <div class="task-runtime-state" data-state="${escapeHtml(kind)}">
+      <strong>${title}</strong>
+      <p>${escapeHtml(message)}</p>
+      ${options.actionText ? `<button class="btn btn--outline" type="button" data-runtime-action>${escapeHtml(options.actionText)}</button>` : ""}
+    </div>
+  `;
+  const action = grid.querySelector("[data-runtime-action]");
+  action?.addEventListener("click", options.onAction);
+  if (kind !== "loading") {
+    renderTaskPager({ page: 1, totalPages: 0, hasPrev: false, hasNext: false }, readTaskQuery());
+  }
+}
+
+function renderTaskPager(pagination, state) {
+  const grid = document.getElementById("task-grid");
+  if (!grid) {
+    return;
+  }
+  let pager = document.getElementById("task-pager");
+  if (!pager) {
+    pager = document.createElement("div");
+    pager.id = "task-pager";
+    pager.className = "task-pager";
+    grid.insertAdjacentElement("afterend", pager);
+  }
+
+  if (!pagination || pagination.totalPages <= 1) {
+    pager.innerHTML = "";
+    pager.hidden = true;
+    return;
+  }
+
+  pager.hidden = false;
+  pager.innerHTML = `
+    <button class="btn btn--outline" type="button" data-page="prev"${pagination.hasPrev ? "" : " disabled"}>上一页</button>
+    <span>${pagination.page} / ${pagination.totalPages}</span>
+    <button class="btn btn--outline" type="button" data-page="next"${pagination.hasNext ? "" : " disabled"}>下一页</button>
+  `;
+  pager.querySelector("[data-page='prev']")?.addEventListener("click", () => {
+    updateTaskQuery({ page: Math.max(1, state.page - 1) });
+  });
+  pager.querySelector("[data-page='next']")?.addEventListener("click", () => {
+    updateTaskQuery({ page: state.page + 1 });
+  });
+}
+
+function taskCardHtml(item) {
+  const publisher = item.publisher ?? {};
+  const credit = item.creditSummary ?? {};
+  const categoryName = item.category?.name ?? "邻里互助";
+  const statusText = REQUEST_STATUS_TEXT.get(item.status) ?? item.status ?? "待确认";
+  const urgent = Number(item.estimatedHours) <= 1 || Number(item.coinAmount) >= 20;
+  return `
+    <article class="task-card${urgent ? " urgent" : ""}" data-request-id="${escapeHtml(item.requestId)}" tabindex="0" role="link" aria-label="查看${escapeHtml(item.title)}详情">
+      <div class="card-top">
+        <span class="task-title">${escapeHtml(item.title)}</span>
+        <span class="reward-badge">⏂ ${escapeHtml(formatAmount(item.coinAmount))}</span>
+      </div>
+      <p class="task-desc">${escapeHtml(item.descriptionSummary || item.description || "发布者暂未填写需求说明。")}</p>
+      <div class="meta-row">
+        <span>${pinIcon()}${escapeHtml(item.location || "地点待确认")}</span>
+        <span>${clockIcon()}${escapeHtml(formatHours(item.estimatedHours))} · ${escapeHtml(reviewTime(item.createdAt))}</span>
+        <span class="badge badge--warning">${escapeHtml(categoryName)} · ${escapeHtml(statusText)}</span>
+      </div>
+      <div class="card-footer">
+        <a class="publisher-info" href="/users/${encodeURIComponent(publisher.userId ?? "demo")}">
+          <div class="avatar sm" style="background:${avatarColor(publisher.userId)};">${escapeHtml(firstCharacter(displayName(publisher)))}</div>
+          <div>
+            <div style="font-weight:500;">${escapeHtml(displayName(publisher))}</div>
+            <div class="rating">${escapeHtml(credit.reviewCount > 0 ? `${starsText(credit.averageRating)} ${formatRating(credit.averageRating)}` : "暂无评价")}</div>
+          </div>
+        </a>
+        <button class="btn btn--primary btn--sm accept-btn" type="button">接单</button>
+      </div>
+    </article>
+  `;
+}
+
+function bindTaskCards() {
+  document.querySelectorAll(".task-card[data-request-id]").forEach((card) => {
+    const openDetail = () => navigateTo(`/posts/${encodeURIComponent(card.dataset.requestId)}`);
+    card.addEventListener("click", (event) => {
+      if (event.target.closest("a") || event.target.closest("button")) {
+        return;
+      }
+      openDetail();
+    });
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openDetail();
+      }
+    });
+  });
+
+  document.querySelectorAll(".task-card .accept-btn").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      button.textContent = "已申请";
+      button.classList.remove("btn--primary");
+      button.classList.add("btn--secondary");
+      button.disabled = true;
+    });
+  });
+}
+
+async function hydratePostDetailRoute() {
+  const requestId = routeRequestId();
+  if (!requestId) {
+    return;
+  }
+  renderRequestDetailLoading();
+  try {
+    const payload = await api.requests.detail(requestId);
+    applyRequestDetail(payload.request);
+  } catch (error) {
+    renderRequestDetailError(taskErrorMessage(error));
+  }
+}
+
+function renderRequestDetailLoading() {
+  const content = document.querySelector(".detail-content");
+  if (content) {
+    content.innerHTML = `<div class="task-runtime-state"><strong>加载中</strong><p>正在读取需求详情。</p></div>`;
+  }
+}
+
+function renderRequestDetailError(message) {
+  const content = document.querySelector(".detail-content");
+  setElementText(".detail-header h2", "需求详情");
+  document.querySelector(".detail-header .back-btn")?.setAttribute("href", "/tasks");
+  if (content) {
+    content.innerHTML = `
+      <div class="task-runtime-state" data-state="error">
+        <strong>详情加载失败</strong>
+        <p>${escapeHtml(message)}</p>
+        <a class="btn btn--outline" href="/tasks">返回任务大厅</a>
+      </div>
+    `;
+  }
+  document.querySelector(".comment-input-bar")?.setAttribute("hidden", "");
+}
+
+function applyRequestDetail(item) {
+  const publisher = item.publisher ?? {};
+  const credit = publisher.credit ?? {};
+  const publisherPath = `/users/${encodeURIComponent(publisher.userId ?? "demo")}`;
+  setElementText(".detail-header h2", "需求详情");
+  document.querySelector(".detail-header .back-btn")?.setAttribute("href", "/tasks");
+
+  const content = document.querySelector(".detail-content");
+  if (!content) {
+    return;
+  }
+  content.innerHTML = `
+    <div class="post-detail-header">
+      <div class="author-row">
+        <a href="${publisherPath}" style="display:flex;align-items:center;gap:var(--space-md);min-width:0;color:inherit;text-decoration:none;">
+          <div class="avatar" style="background:${avatarColor(publisher.userId)};display:flex;align-items:center;justify-content:center;color:#fff;font-size:17px;font-weight:700;">${escapeHtml(firstCharacter(displayName(publisher)))}</div>
+          <div class="author-info">
+            <div class="author-name">${escapeHtml(displayName(publisher))}</div>
+            <div class="author-meta">${escapeHtml(item.category?.name ?? "邻里互助")} · ${escapeHtml(reviewTime(item.createdAt))}发布 · ${escapeHtml(credit.reviewCount > 0 ? `信用 ${formatRating(credit.averageRating)}` : "暂无评价")}</div>
+          </div>
+        </a>
+        <a class="follow-btn" href="${publisherPath}">查看主页</a>
+      </div>
+
+      <div style="margin-bottom:var(--space-md);">
+        <span class="badge badge--success">${escapeHtml(REQUEST_STATUS_TEXT.get(item.status) ?? item.status ?? "待确认")}</span>
+      </div>
+
+      <h1 class="request-detail-title">${escapeHtml(item.title)}</h1>
+      <p class="post-body-text">${escapeHtml(item.description || item.descriptionSummary || "发布者暂未填写需求说明。")}</p>
+      <div class="request-detail-tags">
+        ${(item.tags?.length ? item.tags : [item.category?.name ?? "邻里互助"]).map((tag) => `<span class="badge badge--accent">${escapeHtml(tag)}</span>`).join("")}
+      </div>
+
+      <div class="post-stats-row">
+        时间币 <span>⏂ ${escapeHtml(formatAmount(item.coinAmount))}</span> · 预计 <span>${escapeHtml(formatHours(item.estimatedHours))}</span> · 地点 <span>${escapeHtml(item.location || "待确认")}</span>
+      </div>
+
+      <div class="post-actions-row">
+        <a class="action-btn" href="/messages">${messageIcon()}私信询问</a>
+        <button class="action-btn" id="copy-request-link" type="button">${shareIcon()}复制链接</button>
+        <a class="action-btn" href="/tasks">${searchIcon()}更多任务</a>
+      </div>
+    </div>
+
+    <div class="comment-section">
+      <div class="section-header">
+        <span class="section-title">需求信息</span>
+        <a class="section-action" href="${publisherPath}">发布者主页</a>
+      </div>
+      <div class="request-info-grid">
+        <div><strong>执行地点</strong><span>${escapeHtml(item.location || "待确认")}</span></div>
+        <div><strong>预计耗时</strong><span>${escapeHtml(formatHours(item.estimatedHours))}</span></div>
+        <div><strong>发布时间</strong><span>${escapeHtml(formatDateTime(item.createdAt))}</span></div>
+        <div><strong>更新时间</strong><span>${escapeHtml(formatDateTime(item.updatedAt))}</span></div>
+      </div>
+    </div>
+  `;
+  document.querySelector(".comment-input-bar")?.setAttribute("hidden", "");
+  document.getElementById("copy-request-link")?.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard?.writeText(window.location.href);
+      showGlobalMessage("需求链接已复制。", "success");
+    } catch {
+      showGlobalMessage("当前浏览器不支持自动复制，请手动复制地址栏链接。", "error");
+    }
+  });
+}
+
+function hydrateAiResultsRoute() {
+  const params = new URLSearchParams(window.location.search);
+  const prompt = params.get("prompt") || params.get("keyword") || "帮我筛选合适的邻里需求";
+  setElementText(".prompt-text", `「${prompt}」`);
+  const tags = [];
+  if (params.get("keyword")) {
+    tags.push(`关键词: ${params.get("keyword")}`);
+  }
+  const filter = TASK_FILTERS.get(params.get("filter"));
+  if (filter?.label && params.get("filter") !== "all") {
+    tags.push(`类别: ${filter.label}`);
+  }
+  if (params.get("minCredit")) {
+    tags.push(`信用 >= ${params.get("minCredit")}`);
+  }
+  const parsed = document.querySelector(".parsed-tags");
+  if (parsed && tags.length > 0) {
+    parsed.innerHTML = tags.map((tag) => `<span class="filter-tag">${escapeHtml(tag)}</span>`).join("");
+  }
 }
 
 async function loadCurrentProfile(session) {
@@ -692,6 +1164,43 @@ function profileDetails(user, draft = null) {
   ].filter(Boolean).join(" · ") || "邻帮认证用户";
 }
 
+function taskFilterFromParams(category, tag) {
+  for (const [key, value] of TASK_FILTERS.entries()) {
+    if (key === "all") {
+      continue;
+    }
+    if (value.category === category && (!value.tag || value.tag === tag)) {
+      return key;
+    }
+  }
+  return "all";
+}
+
+function positiveInteger(raw, fallback) {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function routeRequestId() {
+  const match = window.location.pathname.match(/^\/posts\/([^/]+)$/);
+  const raw = match?.[1];
+  return raw && /^\d+$/.test(raw) ? raw : null;
+}
+
+function taskErrorMessage(error) {
+  const code = error?.payload?.error?.code;
+  if (code === "REQUEST_NOT_FOUND") {
+    return "这条需求不存在，或已经不再公开展示。";
+  }
+  if (code === "INVALID_REQUEST_STATUS" || code === "INVALID_REQUEST_SORT" || code?.startsWith("INVALID_")) {
+    return "筛选条件格式不正确，请清空筛选后重试。";
+  }
+  if (error?.status === 0 || error instanceof TypeError) {
+    return "无法连接任务服务，请确认后端服务已启动。";
+  }
+  return error?.message || "任务数据加载失败，请稍后重试。";
+}
+
 function firstCharacter(value) {
   return String(value || "邻").trim().slice(0, 1).toUpperCase();
 }
@@ -702,6 +1211,42 @@ function formatRating(value) {
 
 function formatAmount(value) {
   return Number(value || 0).toFixed(2);
+}
+
+function formatHours(value) {
+  const hours = Number(value);
+  if (!Number.isFinite(hours) || hours <= 0) {
+    return "耗时待确认";
+  }
+  return hours < 1 ? `${Math.round(hours * 60)} 分钟` : `${Number.isInteger(hours) ? hours : hours.toFixed(1)} 小时`;
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return "待确认";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "待确认";
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+}
+
+function avatarColor(seed) {
+  const colors = [
+    "oklch(70% 0.08 28)",
+    "oklch(65% 0.08 175)",
+    "oklch(55% 0.10 255)",
+    "oklch(60% 0.10 28)",
+    "oklch(70% 0.06 175)"
+  ];
+  const index = Math.abs(Number(seed) || 0) % colors.length;
+  return colors[index];
 }
 
 function joinedText(createdAt) {
@@ -774,6 +1319,26 @@ function starsText(rating) {
 function starsHtml(rating) {
   const full = Math.max(0, Math.min(5, Math.round(Number(rating) || 0)));
   return Array.from({ length: 5 }, (_item, index) => `<span class="star${index >= full ? " empty" : ""}">★</span>`).join("");
+}
+
+function pinIcon() {
+  return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/><path d="M12 21.7C17.3 17 20 13 20 10a8 8 0 1 0-16 0c0 3 2.7 7 8 11.7z"/></svg>`;
+}
+
+function clockIcon() {
+  return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+}
+
+function messageIcon() {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
+}
+
+function shareIcon() {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`;
+}
+
+function searchIcon() {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
 }
 
 function escapeHtml(value) {

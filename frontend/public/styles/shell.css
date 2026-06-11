@@ -134,6 +134,103 @@ button.settings-item:disabled {
   font-size: 15px;
 }
 
+.task-grid--state {
+  grid-template-columns: 1fr !important;
+}
+
+.task-runtime-state {
+  display: grid;
+  gap: var(--space-sm, 8px);
+  align-content: center;
+  min-height: 180px;
+  padding: var(--space-xl, 24px);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--muted);
+  text-align: center;
+}
+
+.task-runtime-state strong {
+  color: var(--fg);
+  font-size: 17px;
+}
+
+.task-runtime-state p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.task-runtime-state .btn {
+  justify-self: center;
+}
+
+.task-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md, 12px);
+  max-width: 800px;
+  margin: var(--space-lg, 16px) auto calc(var(--bottom-nav-height, 72px) + var(--space-2xl, 32px));
+  padding-inline: var(--space-lg, 16px);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.task-pager .btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.request-detail-title {
+  margin-bottom: var(--space-md, 12px);
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: 24px;
+  line-height: 1.25;
+}
+
+.request-detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: var(--space-lg, 16px);
+}
+
+.request-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-md, 12px);
+}
+
+.request-info-grid > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: var(--space-md, 12px);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.request-info-grid strong {
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.request-info-grid span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+body[data-route-id="post-detail"] .post-actions-row .action-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
 @media (max-width: 390px) {
   .page,
   .feed-content,
@@ -156,6 +253,14 @@ button.settings-item:disabled {
   }
 
   .runtime-field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .task-pager {
+    padding-inline: var(--space-md, 12px);
+  }
+
+  .request-info-grid {
     grid-template-columns: 1fr;
   }
 }
