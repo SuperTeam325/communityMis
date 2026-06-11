@@ -1,0 +1,60 @@
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+body[data-route-layout="userShell"] {
+  min-width: 0;
+}
+
+body[data-route-layout="adminShell"] .admin-main,
+body[data-route-layout="adminShell"] main,
+body[data-route-layout="userShell"] main,
+body[data-route-layout="userShell"] .page {
+  min-width: 0;
+}
+
+body[data-route-id="post-detail"] .comment-input-bar {
+  width: 100%;
+  margin-inline: 0;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+[data-current-route="true"] {
+  text-decoration-thickness: 2px;
+}
+
+.route-boundary {
+  display: none !important;
+}
+
+@media (max-width: 390px) {
+  .page,
+  .feed-content,
+  .task-grid,
+  .admin-main {
+    max-width: 100%;
+  }
+
+  body[data-route-id="tasks"] .search-row,
+  body[data-route-id="tasks"] .search-row .search-box {
+    min-width: 0;
+  }
+
+  body[data-route-id="tasks"] .search-row {
+    gap: 6px;
+  }
+
+  body[data-route-id="tasks"] .ai-filter-btn {
+    padding-inline: 10px;
+  }
+}

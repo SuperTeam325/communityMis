@@ -1,0 +1,40 @@
+# 邻帮社区互助平台
+
+## 本地启动
+
+当前阶段使用零依赖 Node.js 骨架，不需要先安装第三方包。要求 Node.js 18.18 或更高版本。
+
+```bash
+npm run dev
+```
+
+默认服务：
+
+- 前端原型路由：http://127.0.0.1:5173
+- 后端健康检查：http://127.0.0.1:3001/api/health
+- 前端路由清单：http://127.0.0.1:5173/routes.json
+
+也可以分别启动：
+
+```bash
+npm run dev:frontend
+npm run dev:backend
+```
+
+## 阶段 01 路由
+
+`UISource/index.html` 保持为入口页，`UISource/screens/*.html` 每个原型页面映射为独立生产路由。示例：
+
+- 用户端：`/feed`、`/tasks`、`/post`、`/messages`、`/profile`
+- 详情页演示入口：`/posts/demo`、`/orders/demo`、`/users/demo`、`/disputes/demo`
+- 管理端：`/admin/login`、`/admin/dashboard`、`/admin/users`、`/admin/ai/config`
+
+旧原型 URL 例如 `/screens/feed.html` 会重定向到对应生产路由 `/feed`。
+
+## 验收
+
+```bash
+npm test
+```
+
+验收脚本会检查 41 个 HTML 原型路由覆盖、链接改写、公共组件占位、后端健康检查以及前端路由可访问性。
