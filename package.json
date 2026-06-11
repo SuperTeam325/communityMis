@@ -7,8 +7,10 @@
     "dev": "node scripts/start-local.mjs",
     "dev:frontend": "node frontend/server.mjs",
     "dev:backend": "node backend/server.mjs",
-    "test": "node scripts/validate-stage-01.mjs",
-    "test:stage01": "node scripts/validate-stage-01.mjs"
+    "db:init": "node scripts/init-local-db.mjs",
+    "test": "node scripts/validate-all.mjs",
+    "test:stage01": "node scripts/validate-stage-01.mjs",
+    "test:stage02": "node scripts/validate-stage-02.mjs"
   },
   "engines": {
     "node": ">=18.18"

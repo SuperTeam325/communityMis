@@ -37,4 +37,20 @@ npm run dev:backend
 npm test
 ```
 
-验收脚本会检查 41 个 HTML 原型路由覆盖、链接改写、公共组件占位、后端健康检查以及前端路由可访问性。
+验收脚本会检查 41 个 HTML 原型路由覆盖、链接改写、公共组件占位、后端健康检查以及前端路由可访问性；同时校验阶段 02 的 MySQL 迁移、种子数据幂等性和关键约束。
+
+## 本地数据库
+
+阶段 02 提供 MySQL 8.0+ 迁移和种子数据：
+
+- 迁移脚本：`database/migrations/0002_stage_02_schema.sql`
+- 种子数据：`database/seeds/0002_stage_02_seed.sql`
+- 一键初始化：`npm run db:init`
+
+默认连接参数为 `DB_HOST=127.0.0.1`、`DB_PORT=3306`、`DB_USER=root`、`DB_PASSWORD=`、`DB_NAME=community_mis`。可通过环境变量覆盖，例如：
+
+```bash
+DB_PASSWORD=your_password DB_NAME=community_mis npm run db:init
+```
+
+初始化脚本会创建数据库并按顺序执行 `database/migrations/*.sql` 和 `database/seeds/*.sql`。种子数据使用固定 ID 和 `ON DUPLICATE KEY UPDATE`，重复执行不会产生重复基础数据。
