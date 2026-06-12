@@ -3,6 +3,7 @@ import { HttpError, methodNotAllowed, readJsonBody, sendJson } from "../http.mjs
 
 const PUBLIC_USER_RE = /^\/api\/users\/([^/]+)\/public$/;
 const USER_CREDIT_RE = /^\/api\/users\/([^/]+)\/credit$/;
+const USER_REVIEWS_RE = /^\/api\/users\/([^/]+)\/reviews$/;
 
 export async function handleUserRoutes({ request, response, url, authService }) {
   if (url.pathname === "/api/users/me") {
@@ -54,6 +55,24 @@ export async function handleUserRoutes({ request, response, url, authService }) 
     sendJson(response, 200, {
       user: publicProfileDto(user),
       credit: await creditPayload(authService.store, user.userId)
+    });
+    return true;
+  }
+
+  const reviewsMatch = url.pathname.match(USER_REVIEWS_RE);
+  if (reviewsMatch) {
+    allowOnly(request, response, ["GET"]);
+    const user = await findPublicUser(authService.store, reviewsMatch[1]);
+    const credit = await creditPayload(authService.store, user.userId);
+    sendJson(response, 200, {
+      user: publicProfileDto(user),
+      summary: {
+        averageRating: credit.averageRating,
+        reviewCount: credit.reviewCount,
+        positiveRate: credit.positiveRate,
+        ratingDistribution: credit.ratingDistribution
+      },
+      reviews: credit.reviews
     });
     return true;
   }

@@ -326,6 +326,10 @@ async function hydrateCurrentRoute(session) {
       await hydrateOrdersRoute(session);
       return;
     }
+    if (route.id === "review") {
+      await hydrateReviewRoute(session);
+      return;
+    }
     if (route.id === "ai-results") {
       hydrateAiResultsRoute();
       return;
@@ -1305,8 +1309,11 @@ function orderListActionHtml(order) {
   if (order.status === "both_confirmed") {
     return `<div class="order-actions"><span class="badge badge--success">待阶段 11 结算</span></div>`;
   }
-  if (order.status === "completed") {
+  if (order.status === "completed" && order.canReview) {
     return `<div class="order-actions"><a class="btn btn--outline btn--sm" href="/reviews/new?order=${encodeURIComponent(order.orderId)}">去评价</a></div>`;
+  }
+  if (order.status === "completed" && order.reviewState?.hasReviewed) {
+    return `<div class="order-actions"><span class="badge badge--success">已评价</span></div>`;
   }
   return "";
 }
@@ -1491,6 +1498,12 @@ function orderDetailConfirmActionHtml(order) {
   if (order.canConfirm) {
     return `<button class="btn btn--primary" id="confirm-order" type="button" data-order-confirm="${escapeHtml(order.orderId)}">确认完成</button>`;
   }
+  if (order.canReview) {
+    return `<a class="btn btn--primary" href="/reviews/new?order=${encodeURIComponent(order.orderId)}">去评价</a>`;
+  }
+  if (order.status === "completed" && order.reviewState?.hasReviewed) {
+    return `<button class="btn btn--outline" type="button" disabled>已评价</button>`;
+  }
   if (order.myRole && ["accepted", "payer_confirmed", "both_confirmed"].includes(order.status)) {
     return `<button class="btn btn--outline" type="button" disabled>已确认完成</button>`;
   }
@@ -1517,6 +1530,211 @@ function orderConfirmText(order) {
   const payer = order.payerConfirmed ? "需求方已确认" : "需求方未确认";
   const provider = order.providerConfirmed ? "服务方已确认" : "服务方未确认";
   return `${payer} · ${provider}`;
+}
+
+async function hydrateReviewRoute(session) {
+  const userSession = session ?? auth.readSession("user");
+  const orderId = reviewOrderId();
+  if (!userSession?.token) {
+    return;
+  }
+  if (!orderId) {
+    renderReviewState("error", "缺少订单编号，请从订单列表进入评价。");
+    return;
+  }
+
+  try {
+    const payload = await api.orders.reviews(userSession.token, orderId);
+    applyReviewForm(payload.order, payload.reviewState, userSession);
+  } catch (error) {
+    renderReviewState("error", reviewErrorMessage(error));
+  }
+}
+
+function applyReviewForm(order, reviewState, userSession) {
+  if (!order || !reviewState) {
+    renderReviewState("error", "评价数据不可用，请稍后重试。");
+    return;
+  }
+  if (!reviewState.canReview) {
+    renderReviewReadonly(order, reviewState);
+    return;
+  }
+
+  const target = Number(reviewState.targetId) === Number(order.provider?.userId) ? order.provider : order.publisher;
+  const targetCard = document.querySelector(".target-card");
+  if (targetCard) {
+    targetCard.innerHTML = `
+      <div class="target-label">评价对象</div>
+      <div class="avatar lg" style="background:${avatarColor(target.userId)};display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:24px;font-weight:700;width:64px;height:64px;">${escapeHtml(firstCharacter(displayName(target)))}</div>
+      <div style="font-weight:700;font-size:18px;margin-top:var(--space-sm);">${escapeHtml(displayName(target))}</div>
+      <div style="font-size:12px;color:var(--reward-gold);margin-top:2px;">${escapeHtml(target.credit?.reviewCount > 0 ? `${starsText(target.credit.averageRating)} ${formatRating(target.credit.averageRating)}` : "暂无评价")}</div>
+      <div class="target-order">订单 #ORD-${escapeHtml(order.orderId)} · ${escapeHtml(order.request?.title || "邻帮互助订单")}</div>
+    `;
+  }
+
+  const label = document.querySelector(".star-section .star-label");
+  if (label) {
+    label.textContent = `为${displayName(target)}打分`;
+  }
+  installReviewFormHandlers(order, reviewState, userSession, target);
+}
+
+function installReviewFormHandlers(order, reviewState, userSession, target) {
+  const starButtons = Array.from(document.querySelectorAll("#star-rating button[data-star]"));
+  const tagButtons = Array.from(document.querySelectorAll("#qt-grid .chip[data-tag]"));
+  const textarea = document.getElementById("review-text");
+  const submit = document.getElementById("submit-btn");
+  const count = document.getElementById("char-count");
+  if (!textarea || !submit || starButtons.length === 0) {
+    return;
+  }
+
+  const state = {
+    rating: 0,
+    tags: []
+  };
+  const hints = ["", "非常不满意", "比较不满意", "一般", "满意", "非常满意"];
+  const colors = ["", "c1", "c2", "c3", "c4", "c5"];
+
+  const setStars = (value) => {
+    const rating = Math.max(0, Math.min(5, Number(value) || 0));
+    for (const [index, button] of starButtons.entries()) {
+      button.className = index < rating ? "filled" : "empty";
+      button.setAttribute("aria-pressed", index < rating ? "true" : "false");
+    }
+    const hint = document.getElementById("star-hint");
+    if (hint) {
+      hint.textContent = state.rating > 0 ? `${state.rating} 星 · ${hints[state.rating]}` : " ";
+      hint.className = state.rating > 0 ? `star-hint ${colors[state.rating]}` : "star-hint";
+    }
+  };
+  const updateSubmit = () => {
+    const ok = state.rating > 0 && textarea.value.trim().length >= 5;
+    submit.disabled = !ok;
+    submit.style.opacity = ok ? "1" : "0.45";
+    if (count) {
+      const length = textarea.value.length;
+      count.textContent = `${length} / 500`;
+      count.className = `char-count${length > 450 ? " warn" : ""}`;
+    }
+  };
+
+  for (const button of starButtons) {
+    button.setAttribute("type", "button");
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      state.rating = Number(button.dataset.star);
+      setStars(state.rating);
+      updateSubmit();
+    }, true);
+    button.addEventListener("mouseenter", () => setStars(Number(button.dataset.star)));
+  }
+  document.getElementById("star-rating")?.addEventListener("mouseleave", () => setStars(state.rating));
+
+  for (const button of tagButtons) {
+    button.setAttribute("type", "button");
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const tag = button.dataset.tag || button.textContent.trim();
+      button.classList.toggle("active");
+      state.tags = button.classList.contains("active")
+        ? [...new Set([...state.tags, tag])].slice(0, 8)
+        : state.tags.filter((item) => item !== tag);
+    }, true);
+  }
+
+  textarea.addEventListener("input", (event) => {
+    event.stopImmediatePropagation();
+    updateSubmit();
+  }, true);
+  submit.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (state.rating <= 0 || textarea.value.trim().length < 5) {
+      updateSubmit();
+      return;
+    }
+    const restore = setLoading(submit, "提交中...");
+    try {
+      const result = await api.orders.review(userSession.token, order.orderId, {
+        targetId: reviewState.targetId,
+        rating: state.rating,
+        tags: state.tags,
+        comment: textarea.value.trim()
+      });
+      renderReviewSuccess(order, target, result.review);
+    } catch (error) {
+      restore();
+      showInlineMessage(submit, reviewErrorMessage(error), "error");
+    }
+  }, true);
+
+  setStars(0);
+  updateSubmit();
+}
+
+function renderReviewReadonly(order, reviewState) {
+  const review = reviewState.myReview;
+  const target = Number(reviewState.targetId) === Number(order.provider?.userId) ? order.provider : order.publisher;
+  const title = reviewState.hasReviewed ? "你已提交评价" : "当前订单暂不能评价";
+  const message = reviewState.hasReviewed
+    ? `你已对${displayName(target)}给出 ${review?.rating ?? 0} 星评价。`
+    : order.status === "completed"
+      ? "只有订单双方可以评价对方。"
+      : "订单完成后才能评价。";
+  const body = document.querySelector(".review-body");
+  if (!body) {
+    return;
+  }
+  body.innerHTML = `
+    <div class="success-card">
+      ${checkIcon("56")}
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(message)}</p>
+      ${review?.comment ? `<p style="margin-top:var(--space-md);">${escapeHtml(review.comment)}</p>` : ""}
+      <div style="margin-top:var(--space-xl);display:flex;gap:var(--space-sm);justify-content:center;flex-wrap:wrap;">
+        <a class="btn btn--primary" href="/orders">返回我的订单</a>
+        <a class="btn btn--secondary" href="/credit?userId=${encodeURIComponent(reviewState.targetId ?? "")}">查看信用详情</a>
+      </div>
+    </div>
+  `;
+}
+
+function renderReviewSuccess(order, target, review) {
+  const body = document.querySelector(".review-body");
+  if (!body) {
+    return;
+  }
+  body.innerHTML = `
+    <div class="success-card">
+      ${checkIcon("56")}
+      <h3>评价提交成功！</h3>
+      <p>你对${escapeHtml(displayName(target))}给出了 ${escapeHtml(review?.rating ?? "")} 星评价。信用详情和公开主页评分已更新。</p>
+      <div style="margin-top:var(--space-xl);display:flex;gap:var(--space-sm);justify-content:center;flex-wrap:wrap;">
+        <a class="btn btn--primary" href="/orders">返回我的订单</a>
+        <a class="btn btn--secondary" href="/credit?userId=${encodeURIComponent(target.userId)}">查看信用详情</a>
+        <a class="btn btn--ghost" href="/users/${encodeURIComponent(target.userId)}">公开主页</a>
+      </div>
+    </div>
+  `;
+}
+
+function renderReviewState(kind, message) {
+  const body = document.querySelector(".review-body");
+  if (!body) {
+    return;
+  }
+  const title = kind === "loading" ? "加载中" : "无法评价";
+  body.innerHTML = `
+    <div class="success-card" data-state="${escapeHtml(kind)}">
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(message)}</p>
+      ${kind === "error" ? '<div style="margin-top:var(--space-xl);"><a class="btn btn--primary" href="/orders">返回我的订单</a></div>' : ""}
+    </div>
+  `;
 }
 
 async function hydrateWalletRoute(session) {
@@ -2446,6 +2664,12 @@ function routeOrderId() {
   return raw && /^\d+$/.test(raw) ? raw : null;
 }
 
+function reviewOrderId() {
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get("order") || params.get("orderId") || params.get("order_id");
+  return raw && /^\d+$/.test(raw) ? raw : null;
+}
+
 function taskErrorMessage(error) {
   const code = error?.payload?.error?.code;
   if (code === "REQUEST_NOT_FOUND") {
@@ -2509,6 +2733,38 @@ function walletErrorMessage(error) {
     return "无法连接钱包服务，请确认后端服务已启动。";
   }
   return error?.message || "钱包数据加载失败，请稍后重试。";
+}
+
+function reviewErrorMessage(error) {
+  const code = error?.payload?.error?.code;
+  if (code === "ORDER_NOT_FOUND") {
+    return "这笔订单不存在，或你没有可查看的订单记录。";
+  }
+  if (code === "ORDER_FORBIDDEN" || code === "REVIEW_FORBIDDEN") {
+    return "只有订单相关的需求方和服务方可以评价。";
+  }
+  if (code === "ORDER_NOT_COMPLETED") {
+    return "订单完成后才能提交评价。";
+  }
+  if (code === "REVIEW_ALREADY_EXISTS") {
+    return "你已经评价过该订单的对方，不能重复提交。";
+  }
+  if (code === "INVALID_REVIEW_RATING") {
+    return "请选择 1 到 5 星评分。";
+  }
+  if (code === "INVALID_REVIEW_TARGET") {
+    return "评价对象必须是订单中的另一方。";
+  }
+  if (code === "INVALID_REVIEW_COMMENT") {
+    return "文字评价至少需要 5 个字，最多 500 个字。";
+  }
+  if (code === "INVALID_REVIEW_TAGS") {
+    return "评价标签最多 8 个，每个不超过 30 个字。";
+  }
+  if (error?.status === 0 || error instanceof TypeError) {
+    return "无法连接评价服务，请确认后端服务已启动。";
+  }
+  return error?.message || "评价提交失败，请稍后重试。";
 }
 
 function publishErrorMessage(error, context = "") {

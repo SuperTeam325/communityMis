@@ -25,6 +25,7 @@ export function createMemoryAuthStore(options = {}) {
   let nextTransactionLogId = options.nextTransactionLogId ?? 45000;
   let nextWalletFreezeId = options.nextWalletFreezeId ?? 47000;
   let nextNotificationId = options.nextNotificationId ?? 50000;
+  let nextReviewId = options.nextReviewId ?? 60000;
 
   for (const seedUser of options.seedUsers ?? defaultSeedUsers()) {
     insertSeedUser(seedUser);
@@ -75,6 +76,8 @@ export function createMemoryAuthStore(options = {}) {
     listWalletFreezes,
     createWalletFreeze,
     listNotificationsForUserId,
+    createReview,
+    listReviewsForOrderId,
     listReviewsForTargetId,
     createSession,
     findSession,
@@ -536,15 +539,92 @@ export function createMemoryAuthStore(options = {}) {
       .map(clone);
   }
 
+  function createReview(input) {
+    const orderId = Number(input.orderId);
+    const reviewerId = Number(input.reviewerId);
+    const targetId = Number(input.targetId);
+    const order = serviceOrders.get(orderId);
+
+    if (!order) {
+      throw storeError("ORDER_NOT_FOUND", "Service order was not found.");
+    }
+
+    const request = serviceRequests.get(order.requestId);
+    if (!request || request.visible === false) {
+      throw storeError("ORDER_NOT_FOUND", "Service order was not found.");
+    }
+    if (order.status !== "completed") {
+      throw storeError("ORDER_NOT_COMPLETED", "Only completed orders can be reviewed.");
+    }
+
+    const reviewer = users.get(reviewerId);
+    if (!reviewer || reviewer.status !== ACTIVE_STATUS || reviewer.role !== "user") {
+      throw storeError("REVIEW_FORBIDDEN", "Reviewer is not part of this order.");
+    }
+    const target = users.get(targetId);
+    if (!target || target.status !== ACTIVE_STATUS || target.role !== "user") {
+      throw storeError("REVIEW_TARGET_INVALID", "Review target is invalid.");
+    }
+
+    let direction = null;
+    let expectedTargetId = null;
+    if (request.publisherId === reviewerId) {
+      direction = "publisher_to_provider";
+      expectedTargetId = order.providerId;
+    } else if (order.providerId === reviewerId) {
+      direction = "provider_to_publisher";
+      expectedTargetId = request.publisherId;
+    } else {
+      throw storeError("REVIEW_FORBIDDEN", "Reviewer is not part of this order.");
+    }
+
+    if (targetId !== expectedTargetId || targetId === reviewerId) {
+      throw storeError("REVIEW_TARGET_INVALID", "Review target must be the other party in this order.");
+    }
+    if (reviews.some((review) => review.orderId === orderId && (review.direction === direction || (review.reviewerId === reviewerId && review.targetId === targetId)))) {
+      throw storeError("REVIEW_ALREADY_EXISTS", "This review direction already exists.");
+    }
+
+    const review = normalizeReview({
+      reviewId: nextReviewId,
+      orderId,
+      reviewerId,
+      targetId,
+      direction,
+      rating: input.rating,
+      comment: input.comment,
+      orderTitle: request.title,
+      tags: input.tags,
+      createdAt: input.createdAt ?? new Date().toISOString()
+    });
+    nextReviewId += 1;
+    reviews.push(review);
+    return enrichReview(review);
+  }
+
+  function listReviewsForOrderId(orderId) {
+    const id = Number(orderId);
+    return reviews
+      .filter((review) => review.orderId === id)
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+      .map(enrichReview);
+  }
+
   function listReviewsForTargetId(userId) {
     const id = Number(userId);
     return reviews
       .filter((review) => review.targetId === id)
       .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
-      .map((review) => ({
-        ...clone(review),
-        reviewer: publicReviewer(users.get(review.reviewerId))
-      }));
+      .map(enrichReview);
+  }
+
+  function enrichReview(review) {
+    const output = clone(review);
+    return {
+      ...output,
+      reviewer: publicReviewer(users.get(output.reviewerId)),
+      target: publicReviewer(users.get(output.targetId))
+    };
   }
 
   function createSession(input) {

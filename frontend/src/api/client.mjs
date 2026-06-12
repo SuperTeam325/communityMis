@@ -79,6 +79,12 @@ export function createApiClient(options = {}) {
       confirm: (token, orderId) => request(`/api/orders/${encodeURIComponent(orderId)}/confirm`, {
         method: "POST",
         token
+      }),
+      reviews: (token, orderId) => request(`/api/orders/${encodeURIComponent(orderId)}/reviews`, { token }),
+      review: (token, orderId, payload) => request(`/api/orders/${encodeURIComponent(orderId)}/reviews`, {
+        method: "POST",
+        token,
+        body: payload
       })
     },
     transactions: {
@@ -112,6 +118,7 @@ export function createApiClient(options = {}) {
         body: payload
       }),
       public: (userId, token = null) => request(`/api/users/${encodeURIComponent(userId)}/public`, { token }),
+      reviews: (userId, token = null) => request(`/api/users/${encodeURIComponent(userId)}/reviews`, { token }),
       credit: (userId, token = null) => request(`/api/users/${encodeURIComponent(userId)}/credit`, { token })
     },
     settings: {

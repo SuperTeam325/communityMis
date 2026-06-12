@@ -5,6 +5,7 @@ const REQUEST_DETAIL_RE = /^\/api\/requests\/([^/]+)$/;
 const REQUEST_ACCEPT_RE = /^\/api\/requests\/([^/]+)\/accept$/;
 const ORDER_DETAIL_RE = /^\/api\/orders\/([^/]+)$/;
 const ORDER_CONFIRM_RE = /^\/api\/orders\/([^/]+)\/confirm$/;
+const ORDER_REVIEWS_RE = /^\/api\/orders\/([^/]+)\/reviews$/;
 const PUBLIC_REQUEST_STATUSES = new Set(["open", "accepted", "completed"]);
 const ORDER_STATUSES = new Set(["accepted", "payer_confirmed", "both_confirmed", "completed", "disputed"]);
 const ORDER_CONFIRMABLE_STATUSES = new Set(["accepted", "payer_confirmed", "both_confirmed"]);
@@ -158,6 +159,52 @@ export async function handleRequestRoutes({ request, response, url, authService 
     sendJson(response, 201, await orderDetailPayload(authService.store, order.orderId, {
       viewerId: context.user.userId
     }));
+    return true;
+  }
+
+  const reviewMatch = url.pathname.match(ORDER_REVIEWS_RE);
+  if (reviewMatch) {
+    allowOnly(request, response, ["GET", "POST"]);
+    const context = await authService.authenticateRequest(request);
+    authService.requireRole(context, ["user", "admin", "super_admin"]);
+    const orderId = parseOrderId(reviewMatch[1]);
+    const visible = await findVisibleOrderForViewer(authService.store, orderId, {
+      viewerId: context.user.userId,
+      viewerRole: context.user.role
+    });
+
+    if (request.method === "GET") {
+      sendJson(response, 200, await orderReviewsPayload(authService.store, visible.order, {
+        viewerId: context.user.userId
+      }));
+      return true;
+    }
+
+    authService.requireRole(context, ["user"]);
+    const body = await readJsonBody(request, { maxBytes: REQUEST_BODY_MAX_BYTES });
+    const input = normalizeReviewInput(body, visible.order, context.user.userId);
+    if (typeof authService.store.createReview !== "function") {
+      throw new HttpError(500, "REVIEW_STORE_UNAVAILABLE", "Review submission is not available.");
+    }
+
+    let review;
+    try {
+      review = await authService.store.createReview({
+        orderId,
+        reviewerId: context.user.userId,
+        targetId: input.targetId,
+        rating: input.rating,
+        tags: input.tags,
+        comment: input.comment
+      });
+    } catch (error) {
+      throw reviewError(error);
+    }
+
+    sendJson(response, 201, {
+      review: reviewDto(review),
+      reviews: (await reviewsForOrder(authService.store, orderId)).map(reviewDto)
+    });
     return true;
   }
 
@@ -326,6 +373,59 @@ function normalizeRequestTags(rawTags) {
     seen.add(key);
     if (tags.length > 8) {
       throw new HttpError(400, "INVALID_REQUEST_TAGS", "At most 8 request tags are supported.");
+    }
+  }
+
+  return tags;
+}
+
+function normalizeReviewInput(input, order, reviewerId) {
+  const rating = Math.round(Number(input?.rating));
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    throw new HttpError(400, "INVALID_REVIEW_RATING", "Review rating must be an integer between 1 and 5.");
+  }
+
+  const targetId = parsePositiveInt(input?.targetId ?? input?.target_id, "INVALID_REVIEW_TARGET");
+  const reviewer = Number(reviewerId);
+  let allowedTargetId = null;
+  if (Number(order.publisher?.userId) === reviewer) {
+    allowedTargetId = Number(order.provider?.userId);
+  } else if (Number(order.provider?.userId) === reviewer) {
+    allowedTargetId = Number(order.publisher?.userId);
+  }
+
+  if (allowedTargetId === null || targetId !== allowedTargetId) {
+    throw new HttpError(400, "INVALID_REVIEW_TARGET", "Review target must be the other party in this order.");
+  }
+
+  return {
+    targetId,
+    rating,
+    tags: normalizeReviewTags(input?.tags ?? input?.tag),
+    comment: requiredText(input?.comment, 5, 500, "INVALID_REVIEW_COMMENT", "Review comment must be at least 5 characters.")
+  };
+}
+
+function normalizeReviewTags(rawTags) {
+  const values = Array.isArray(rawTags)
+    ? rawTags
+    : String(rawTags ?? "").split(/[，,]/);
+  const tags = [];
+  const seen = new Set();
+
+  for (const rawTag of values) {
+    const tag = optionalInputText(rawTag, 30, "INVALID_REVIEW_TAGS");
+    if (!tag) {
+      continue;
+    }
+    const key = tag.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    tags.push(tag);
+    seen.add(key);
+    if (tags.length > 8) {
+      throw new HttpError(400, "INVALID_REVIEW_TAGS", "At most 8 review tags are supported.");
     }
   }
 
@@ -501,6 +601,7 @@ async function orderDetailPayload(store, rawOrderId, options = {}) {
       request: enrichedRequest,
       provider,
       providerCredit: await creditSummary(store, provider.userId),
+      reviews: await reviewsForOrder(store, order.orderId),
       viewerId: options.viewerId
     })
   };
@@ -573,6 +674,22 @@ async function walletFreezesPayload(store, userId, searchParams) {
   };
 }
 
+async function orderReviewsPayload(store, order, options = {}) {
+  const reviews = await reviewsForOrder(store, order.orderId);
+  return {
+    order,
+    reviewState: reviewStateForOrder(order, reviews, options.viewerId),
+    reviews: reviews.map(reviewDto)
+  };
+}
+
+async function reviewsForOrder(store, orderId) {
+  if (typeof store.listReviewsForOrderId === "function") {
+    return await store.listReviewsForOrderId(orderId);
+  }
+  return [];
+}
+
 async function enrichOrder(store, order, categoryMap, options = {}) {
   if (!order || !ORDER_STATUSES.has(String(order.status ?? ""))) {
     return null;
@@ -601,6 +718,7 @@ async function enrichOrder(store, order, categoryMap, options = {}) {
     request: enrichedRequest,
     provider,
     providerCredit: await creditSummary(store, provider.userId),
+    reviews: await reviewsForOrder(store, order.orderId),
     viewerId: options.viewerId
   });
 }
@@ -780,9 +898,15 @@ function requestDetailDto(item) {
 }
 
 function serviceOrderDto(item) {
-  const { order, request, provider, providerCredit, viewerId } = item;
+  const { order, request, provider, providerCredit, reviews = [], viewerId } = item;
   const myRole = orderMyRole(request.publisherId, order.providerId, viewerId);
   const confirmation = orderConfirmationState(order);
+  const reviewState = reviewStateForOrder({
+    orderId: order.orderId,
+    status: order.status,
+    publisher: { userId: request.publisherId },
+    provider: { userId: order.providerId }
+  }, reviews, viewerId);
   return {
     orderId: order.orderId,
     requestId: order.requestId,
@@ -793,6 +917,8 @@ function serviceOrderDto(item) {
     confirmation,
     myRole,
     canConfirm: Boolean(myRole) && ORDER_CONFIRMABLE_STATUSES.has(order.status) && !confirmation[myRole === "posted" ? "payerConfirmed" : "providerConfirmed"],
+    canReview: reviewState.canReview,
+    reviewState,
     settlementReady: order.status === "both_confirmed",
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,
@@ -815,6 +941,30 @@ function orderConfirmationState(order) {
     providerConfirmed: Boolean(order.providerConfirmed),
     bothConfirmed: Boolean(order.payerConfirmed) && Boolean(order.providerConfirmed),
     settlementReady: order.status === "both_confirmed"
+  };
+}
+
+function reviewStateForOrder(order, reviews, viewerId) {
+  const viewer = Number(viewerId);
+  const publisherId = Number(order.publisher?.userId);
+  const providerId = Number(order.provider?.userId);
+  const isPublisher = publisherId === viewer;
+  const isProvider = providerId === viewer;
+  const targetId = isPublisher ? providerId : isProvider ? publisherId : null;
+  const direction = isPublisher ? "publisher_to_provider" : isProvider ? "provider_to_publisher" : null;
+  const myReview = Array.isArray(reviews)
+    ? reviews.find((review) => Number(review.reviewerId) === viewer && Number(review.targetId) === targetId)
+      ?? reviews.find((review) => review.direction === direction)
+      ?? null
+    : null;
+
+  return {
+    canReview: order.status === "completed" && targetId !== null && !myReview,
+    hasReviewed: Boolean(myReview),
+    reviewerId: Number.isFinite(viewer) ? viewer : null,
+    targetId,
+    direction,
+    myReview: myReview ? reviewDto(myReview) : null
   };
 }
 
@@ -923,6 +1073,23 @@ function walletFreezeDto(item) {
     timeline: Array.isArray(item.timeline) ? item.timeline.map(timelineDto) : [],
     createdAt: item.createdAt,
     releasedAt: item.releasedAt ?? null
+  };
+}
+
+function reviewDto(item) {
+  return {
+    reviewId: item.reviewId,
+    orderId: item.orderId,
+    reviewerId: item.reviewerId,
+    targetId: item.targetId,
+    direction: item.direction,
+    rating: item.rating,
+    comment: item.comment ?? null,
+    orderTitle: item.orderTitle ?? null,
+    tags: item.tags ?? [],
+    reviewer: item.reviewer ? publicPublisherDto(item.reviewer) : null,
+    target: item.target ? publicPublisherDto(item.target) : null,
+    createdAt: item.createdAt
   };
 }
 
@@ -1331,6 +1498,25 @@ function confirmError(error) {
   }
   if (error?.code === "ORDER_WALLET_NOT_FOUND") {
     return new HttpError(409, "ORDER_WALLET_NOT_FOUND", "Order wallet was not found.");
+  }
+  return error;
+}
+
+function reviewError(error) {
+  if (error?.code === "ORDER_NOT_FOUND") {
+    return new HttpError(404, "ORDER_NOT_FOUND", "Service order was not found.");
+  }
+  if (error?.code === "ORDER_NOT_COMPLETED") {
+    return new HttpError(409, "ORDER_NOT_COMPLETED", "Only completed orders can be reviewed.");
+  }
+  if (error?.code === "REVIEW_FORBIDDEN") {
+    return new HttpError(403, "REVIEW_FORBIDDEN", "Only order participants can submit a review.");
+  }
+  if (error?.code === "REVIEW_TARGET_INVALID") {
+    return new HttpError(400, "INVALID_REVIEW_TARGET", "Review target must be the other party in this order.");
+  }
+  if (error?.code === "REVIEW_ALREADY_EXISTS" || error?.code === "DUPLICATE_ENTRY") {
+    return new HttpError(409, "REVIEW_ALREADY_EXISTS", "This review direction already exists.");
   }
   return error;
 }

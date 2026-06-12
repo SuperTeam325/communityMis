@@ -15,6 +15,7 @@ export function createMysqlAuthStore(options = {}) {
   const profileExtras = new Map();
   const settings = new Map();
   const requestExtras = new Map();
+  const reviewExtras = new Map();
 
   return {
     createUserWithWallet,
@@ -38,6 +39,8 @@ export function createMysqlAuthStore(options = {}) {
     listWalletTransactions,
     listWalletFreezes,
     createWalletFreeze,
+    createReview,
+    listReviewsForOrderId,
     listReviewsForTargetId,
     createSession,
     findSession,
@@ -911,7 +914,128 @@ SELECT JSON_OBJECT('walletFound', @wallet_found, 'logId', @created_log_id);
     return freezePayload.freezes.find((freeze) => freeze.freezeId === Number(result.logId)) ?? freezePayload.freezes[0] ?? null;
   }
 
+  async function createReview(input) {
+    const orderId = Number(input.orderId);
+    const reviewerId = Number(input.reviewerId);
+    const targetId = Number(input.targetId);
+    const rating = Math.min(5, Math.max(1, Math.round(Number(input.rating) || 0)));
+    const comment = normalizeOptionalString(input.comment);
+    const tags = normalizeReviewTags(input.tags);
+    const sql = `
+START TRANSACTION;
+SET @order_id = ${orderId};
+SET @reviewer_id = ${reviewerId};
+SET @target_id = ${targetId};
+SET @rating = ${rating};
+SET @order_found = 0;
+SET @completed = 0;
+SET @authorized = 0;
+SET @target_valid = 0;
+SET @direction = NULL;
+SET @created_review_id = NULL;
+SELECT
+  @order_found := 1,
+  @request_id := so.\`request_id\`,
+  @publisher_id := sr.\`publisher_id\`,
+  @provider_id := so.\`provider_id\`,
+  @completed := IF(so.\`status\` = 'completed', 1, 0),
+  @direction := CASE
+    WHEN sr.\`publisher_id\` = @reviewer_id THEN 'publisher_to_provider'
+    WHEN so.\`provider_id\` = @reviewer_id THEN 'provider_to_publisher'
+    ELSE NULL
+  END,
+  @authorized := IF(
+    reviewer.\`user_id\` IS NOT NULL
+      AND reviewer.\`status\` = 1
+      AND reviewer.\`role\` = 'user'
+      AND (sr.\`publisher_id\` = @reviewer_id OR so.\`provider_id\` = @reviewer_id),
+    1,
+    0
+  ),
+  @target_valid := IF(
+    target.\`user_id\` IS NOT NULL
+      AND target.\`status\` = 1
+      AND target.\`role\` = 'user'
+      AND (
+        (sr.\`publisher_id\` = @reviewer_id AND so.\`provider_id\` = @target_id)
+        OR (so.\`provider_id\` = @reviewer_id AND sr.\`publisher_id\` = @target_id)
+      ),
+    1,
+    0
+  )
+FROM \`service_order\` so
+JOIN \`service_request\` sr ON sr.\`request_id\` = so.\`request_id\`
+LEFT JOIN \`user\` reviewer ON reviewer.\`user_id\` = @reviewer_id
+LEFT JOIN \`user\` target ON target.\`user_id\` = @target_id
+WHERE so.\`order_id\` = @order_id
+FOR UPDATE;
+INSERT INTO \`review\` (
+  \`order_id\`,
+  \`reviewer_id\`,
+  \`target_id\`,
+  \`direction\`,
+  \`rating\`,
+  \`comment\`
+)
+SELECT
+  @order_id,
+  @reviewer_id,
+  @target_id,
+  @direction,
+  @rating,
+  ${sqlNullableString(comment)}
+WHERE @order_found = 1
+  AND @completed = 1
+  AND @authorized = 1
+  AND @target_valid = 1;
+SET @created_review_id = IF(ROW_COUNT() = 1, LAST_INSERT_ID(), NULL);
+COMMIT;
+SELECT JSON_OBJECT(
+  'orderFound', @order_found,
+  'completed', @completed,
+  'authorized', @authorized,
+  'targetValid', @target_valid,
+  'reviewId', @created_review_id
+);
+`;
+    let result;
+    try {
+      result = await mysqlJson(sql);
+    } catch (error) {
+      if (error.code === "DUPLICATE_ENTRY") {
+        throw storeError("REVIEW_ALREADY_EXISTS", "This review direction already exists.");
+      }
+      throw error;
+    }
+
+    if (Number(result?.orderFound ?? 0) !== 1) {
+      throw storeError("ORDER_NOT_FOUND", "Service order was not found.");
+    }
+    if (Number(result?.completed ?? 0) !== 1) {
+      throw storeError("ORDER_NOT_COMPLETED", "Only completed orders can be reviewed.");
+    }
+    if (Number(result?.authorized ?? 0) !== 1) {
+      throw storeError("REVIEW_FORBIDDEN", "Reviewer is not part of this order.");
+    }
+    if (Number(result?.targetValid ?? 0) !== 1) {
+      throw storeError("REVIEW_TARGET_INVALID", "Review target must be the other party in this order.");
+    }
+
+    const reviewId = Number(result.reviewId);
+    reviewExtras.set(reviewId, { tags });
+    const orderReviews = await listReviewsForOrderId(orderId);
+    return orderReviews.find((review) => review.reviewId === reviewId) ?? null;
+  }
+
+  async function listReviewsForOrderId(orderId) {
+    return listReviews(`r.\`order_id\` = ${Number(orderId)}`);
+  }
+
   async function listReviewsForTargetId(userId) {
+    return listReviews(`r.\`target_id\` = ${Number(userId)}`);
+  }
+
+  async function listReviews(whereSql) {
     const sql = `
 SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
   'reviewId', q.\`review_id\`,
@@ -928,6 +1052,11 @@ SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
     'userId', q.\`reviewer_id\`,
     'username', q.\`reviewer_username\`,
     'displayName', q.\`reviewer_display_name\`
+  ),
+  'target', JSON_OBJECT(
+    'userId', q.\`target_id\`,
+    'username', q.\`target_username\`,
+    'displayName', q.\`target_display_name\`
   )
 )), JSON_ARRAY())
 FROM (
@@ -942,17 +1071,20 @@ FROM (
     sr.\`title\` AS \`order_title\`,
     DATE_FORMAT(r.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
     reviewer.\`username\` AS \`reviewer_username\`,
-    reviewer.\`username\` AS \`reviewer_display_name\`
+    reviewer.\`username\` AS \`reviewer_display_name\`,
+    target.\`username\` AS \`target_username\`,
+    target.\`username\` AS \`target_display_name\`
   FROM \`review\` r
   JOIN \`user\` reviewer ON reviewer.\`user_id\` = r.\`reviewer_id\`
+  JOIN \`user\` target ON target.\`user_id\` = r.\`target_id\`
   LEFT JOIN \`service_order\` so ON so.\`order_id\` = r.\`order_id\`
   LEFT JOIN \`service_request\` sr ON sr.\`request_id\` = so.\`request_id\`
-  WHERE r.\`target_id\` = ${Number(userId)}
-  ORDER BY r.\`created_at\` DESC
+  WHERE ${whereSql}
+  ORDER BY r.\`created_at\` DESC, r.\`review_id\` DESC
 ) q;
 `;
     const rows = await mysqlJson(sql, { optional: true });
-    return Array.isArray(rows) ? rows.map(normalizeReview) : [];
+    return Array.isArray(rows) ? rows.map(normalizeReview).map(withReviewExtras) : [];
   }
 
   function withProfileExtras(user) {
@@ -965,6 +1097,11 @@ FROM (
     }
     const extra = requestExtras.get(request.requestId);
     return extra ? { ...request, tags: extra.tags ?? request.tags } : request;
+  }
+
+  function withReviewExtras(review) {
+    const extra = reviewExtras.get(review?.reviewId);
+    return extra ? { ...review, tags: extra.tags ?? review.tags } : review;
   }
 
   function createSession(input) {
@@ -1335,8 +1472,33 @@ function normalizeReview(input) {
     orderTitle: normalizeOptionalString(input.orderTitle),
     tags: Array.isArray(input.tags) ? input.tags : [],
     createdAt: input.createdAt ?? new Date().toISOString(),
-    reviewer: input.reviewer ?? null
+    reviewer: input.reviewer ?? null,
+    target: input.target ?? null
   };
+}
+
+function normalizeReviewTags(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const tags = [];
+  const seen = new Set();
+  for (const item of value) {
+    const tag = normalizeOptionalString(item);
+    if (!tag || tag.length > 30) {
+      continue;
+    }
+    const key = tag.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    tags.push(tag);
+    seen.add(key);
+    if (tags.length >= 8) {
+      break;
+    }
+  }
+  return tags;
 }
 
 function deriveServiceCategories(skillTags) {
