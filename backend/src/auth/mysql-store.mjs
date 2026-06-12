@@ -56,6 +56,12 @@ export function createMysqlAuthStore(options = {}) {
     createJuryVote,
     listJuryVotesForDisputeId,
     findJuryVote,
+    listAdminUsers,
+    updateUserStatus,
+    adminDashboardMetrics,
+    listAdminTransactions,
+    createAuditLog,
+    listAuditLogs,
     createSession,
     findSession,
     revokeSession
@@ -1917,6 +1923,370 @@ FROM (
     return extra ? { ...vote, reason: extra.reason ?? vote.reason } : vote;
   }
 
+  async function listAdminUsers(query = {}) {
+    const status = String(query.status ?? "all").trim().toLowerCase();
+    const keyword = normalizeOptionalString(query.keyword);
+    const minCredit = query.minCredit === undefined || query.minCredit === null ? null : Number(query.minCredit);
+    const maxCredit = query.maxCredit === undefined || query.maxCredit === null ? null : Number(query.maxCredit);
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(50, positiveInteger(query.pageSize, 10));
+    const offset = (page - 1) * pageSize;
+    const conditions = [];
+    if (status === "active") {
+      conditions.push("u.`status` = 1");
+    } else if (status === "disabled") {
+      conditions.push("u.`status` = 0");
+    }
+    if (keyword) {
+      const like = sqlLike(keyword);
+      conditions.push(`(LOWER(u.\`username\`) LIKE ${like} OR CAST(u.\`user_id\` AS CHAR) LIKE ${like} OR u.\`phone\` LIKE ${like})`);
+    }
+    if (minCredit !== null) {
+      conditions.push(`COALESCE(cr.\`average_rating\`, 0) >= ${minCredit}`);
+    }
+    if (maxCredit !== null) {
+      conditions.push(`COALESCE(cr.\`average_rating\`, 0) <= ${maxCredit}`);
+    }
+    const whereSql = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const sql = `
+SELECT JSON_OBJECT(
+  'items', COALESCE(JSON_ARRAYAGG(${adminUserJsonObjectSql("q")}), JSON_ARRAY()),
+  'total', (
+    SELECT COUNT(*)
+    FROM \`user\` u
+    LEFT JOIN (
+      SELECT \`target_id\`, AVG(\`rating\`) AS \`average_rating\`
+      FROM \`review\`
+      GROUP BY \`target_id\`
+    ) cr ON cr.\`target_id\` = u.\`user_id\`
+    ${whereSql}
+  )
+)
+FROM (
+  SELECT
+    u.\`user_id\`,
+    u.\`username\`,
+    u.\`password_hash\`,
+    u.\`phone\`,
+    u.\`skill_tags\`,
+    u.\`role\`,
+    u.\`status\`,
+    DATE_FORMAT(u.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    DATE_FORMAT(u.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`updated_at\`,
+    w.\`wallet_id\`,
+    CAST(w.\`balance\` AS DOUBLE) AS \`balance\`,
+    CAST(w.\`frozen_balance\` AS DOUBLE) AS \`frozen_balance\`,
+    w.\`version\`,
+    COALESCE(cr.\`average_rating\`, 0) AS \`average_rating\`,
+    COALESCE(cr.\`review_count\`, 0) AS \`review_count\`,
+    COALESCE(cr.\`positive_rate\`, 0) AS \`positive_rate\`,
+    COALESCE(oc.\`order_count\`, 0) AS \`order_count\`
+  FROM \`user\` u
+  LEFT JOIN \`wallet\` w ON w.\`user_id\` = u.\`user_id\`
+  LEFT JOIN (
+    SELECT
+      \`target_id\`,
+      AVG(\`rating\`) AS \`average_rating\`,
+      COUNT(*) AS \`review_count\`,
+      ROUND(SUM(IF(\`rating\` >= 4, 1, 0)) / COUNT(*) * 100) AS \`positive_rate\`
+    FROM \`review\`
+    GROUP BY \`target_id\`
+  ) cr ON cr.\`target_id\` = u.\`user_id\`
+  LEFT JOIN (
+    SELECT q.\`user_id\`, COUNT(*) AS \`order_count\`
+    FROM (
+      SELECT sr.\`publisher_id\` AS \`user_id\`, so.\`order_id\`
+      FROM \`service_order\` so
+      JOIN \`service_request\` sr ON sr.\`request_id\` = so.\`request_id\`
+      UNION ALL
+      SELECT so.\`provider_id\` AS \`user_id\`, so.\`order_id\`
+      FROM \`service_order\` so
+    ) q
+    GROUP BY q.\`user_id\`
+  ) oc ON oc.\`user_id\` = u.\`user_id\`
+  ${whereSql}
+  ORDER BY u.\`created_at\` DESC, u.\`user_id\` DESC
+  LIMIT ${pageSize} OFFSET ${offset}
+) q;
+`;
+    const result = await mysqlJson(sql, { optional: true });
+    return {
+      users: Array.isArray(result?.items) ? result.items.map(normalizeAdminUser) : [],
+      total: Number(result?.total ?? 0)
+    };
+  }
+
+  async function updateUserStatus(input) {
+    const userId = Number(input.userId);
+    const status = Number(input.status) === ACTIVE_STATUS ? 1 : 0;
+    const action = status === 1 ? "admin.user.enable" : "admin.user.disable";
+    const reason = normalizeOptionalString(input.reason) ?? (status === 1 ? "管理员启用账号" : "管理员禁用账号");
+    const ipAddress = normalizeOptionalString(input.ipAddress);
+    const detail = JSON.stringify({ nextStatus: status, reason });
+    const sql = `
+START TRANSACTION;
+SET @target_user_id = ${userId};
+SET @previous_status = NULL;
+SELECT @previous_status := u.\`status\`
+FROM \`user\` u
+WHERE u.\`user_id\` = @target_user_id
+FOR UPDATE;
+UPDATE \`user\`
+SET \`status\` = ${status}
+WHERE \`user_id\` = @target_user_id
+LIMIT 1;
+SET @updated_rows = ROW_COUNT();
+INSERT INTO \`audit_log\` (
+  \`actor_id\`,
+  \`actor_role\`,
+  \`action\`,
+  \`target_type\`,
+  \`target_id\`,
+  \`ip_address\`,
+  \`detail\`
+)
+SELECT
+  ${input.actorId === undefined || input.actorId === null ? "NULL" : Number(input.actorId)},
+  ${sqlString(input.actorRole ?? "admin")},
+  ${sqlString(action)},
+  'user',
+  @target_user_id,
+  ${sqlNullableString(ipAddress)},
+  JSON_MERGE_PATCH(CAST(${sqlString(detail)} AS JSON), JSON_OBJECT('previousStatus', @previous_status))
+WHERE @updated_rows = 1;
+SET @created_audit_id = IF(@updated_rows = 1, LAST_INSERT_ID(), NULL);
+COMMIT;
+SELECT JSON_OBJECT('updatedRows', @updated_rows, 'auditId', @created_audit_id);
+`;
+    const result = await mysqlJson(sql);
+    if (Number(result?.updatedRows ?? 0) !== 1) {
+      throw storeError("USER_NOT_FOUND", "User was not found.");
+    }
+    if (status !== ACTIVE_STATUS) {
+      revokeSessionsForUser(userId);
+    }
+    const user = await findUserById(userId);
+    const auditLog = await findAuditLogById(result.auditId);
+    const listed = await listAdminUsers({ keyword: String(userId), page: 1, pageSize: 1 });
+    const matched = listed.users.find((item) => Number(item.user?.userId ?? item.userId) === userId);
+    return {
+      user,
+      summary: matched?.summary ?? {},
+      auditLog
+    };
+  }
+
+  async function adminDashboardMetrics() {
+    const sql = `
+SELECT JSON_OBJECT(
+  'userCount', (SELECT COUNT(*) FROM \`user\`),
+  'activeUserCount', (SELECT COUNT(*) FROM \`user\` WHERE \`status\` = 1),
+  'disabledUserCount', (SELECT COUNT(*) FROM \`user\` WHERE \`status\` = 0),
+  'openRequestCount', (SELECT COUNT(*) FROM \`service_request\` WHERE \`status\` = 'open'),
+  'orderCount', (SELECT COUNT(*) FROM \`service_order\`),
+  'disputeCount', (SELECT COUNT(*) FROM \`dispute\` WHERE \`status\` <> 'cancelled'),
+  'circulatingCoins', (SELECT COALESCE(SUM(\`amount\`), 0) FROM \`transaction_log\`),
+  'frozenCoins', (
+    SELECT COALESCE(SUM(tl.\`amount\`), 0)
+    FROM \`transaction_log\` tl
+    LEFT JOIN \`service_order\` so ON so.\`order_id\` = tl.\`order_id\`
+    WHERE tl.\`type\` = 'freeze'
+      AND (so.\`status\` IS NULL OR so.\`status\` <> 'completed')
+  ),
+  'transactionCount', (SELECT COUNT(*) FROM \`transaction_log\`),
+  'pendingAuditCount', (SELECT COUNT(*) FROM \`audit_log\`)
+);
+`;
+    const result = await mysqlJson(sql);
+    return {
+      ...result,
+      circulatingCoins: Number(result?.circulatingCoins ?? 0),
+      frozenCoins: Number(result?.frozenCoins ?? 0)
+    };
+  }
+
+  async function listAdminTransactions(query = {}) {
+    const type = String(query.type ?? "all").trim().toLowerCase();
+    const keyword = normalizeOptionalString(query.keyword);
+    const orderId = query.orderId === undefined || query.orderId === null ? null : Number(query.orderId);
+    const userId = query.userId === undefined || query.userId === null ? null : Number(query.userId);
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(100, positiveInteger(query.pageSize, 20));
+    const offset = (page - 1) * pageSize;
+    const conditions = [];
+    if (type !== "all") {
+      conditions.push(`tl.\`type\` = ${sqlString(type)}`);
+    }
+    if (orderId !== null) {
+      conditions.push(`tl.\`order_id\` = ${orderId}`);
+    }
+    if (userId !== null) {
+      conditions.push(`tl.\`user_id\` = ${userId}`);
+    }
+    if (keyword) {
+      const like = sqlLike(keyword);
+      conditions.push(`(
+        CAST(tl.\`log_id\` AS CHAR) LIKE ${like}
+        OR CAST(tl.\`order_id\` AS CHAR) LIKE ${like}
+        OR LOWER(COALESCE(tl.\`remark\`, '')) LIKE ${like}
+        OR LOWER(COALESCE(sr.\`title\`, '')) LIKE ${like}
+        OR LOWER(COALESCE(u.\`username\`, '')) LIKE ${like}
+        OR LOWER(COALESCE(publisher.\`username\`, '')) LIKE ${like}
+        OR LOWER(COALESCE(provider.\`username\`, '')) LIKE ${like}
+      )`);
+    }
+    const whereSql = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const sql = `
+SELECT JSON_OBJECT(
+  'items', COALESCE(JSON_ARRAYAGG(${adminTransactionJsonObjectSql("q")}), JSON_ARRAY()),
+  'total', (
+    SELECT COUNT(*)
+    FROM \`transaction_log\` tl
+    LEFT JOIN \`user\` u ON u.\`user_id\` = tl.\`user_id\`
+    LEFT JOIN \`service_order\` so ON so.\`order_id\` = tl.\`order_id\`
+    LEFT JOIN \`service_request\` sr ON sr.\`request_id\` = so.\`request_id\`
+    LEFT JOIN \`user\` publisher ON publisher.\`user_id\` = sr.\`publisher_id\`
+    LEFT JOIN \`user\` provider ON provider.\`user_id\` = so.\`provider_id\`
+    LEFT JOIN \`dispute\` d ON d.\`order_id\` = tl.\`order_id\`
+    ${whereSql}
+  ),
+  'summary', (
+    SELECT JSON_OBJECT(
+      'transactionCount', COUNT(*),
+      'circulatingCoins', COALESCE(SUM(tl.\`amount\`), 0),
+      'frozenCoins', COALESCE(SUM(IF(tl.\`type\` = 'freeze', tl.\`amount\`, 0)), 0),
+      'reviewCount', SUM(IF(d.\`dispute_id\` IS NOT NULL OR tl.\`type\` = 'refund', 1, 0))
+    )
+    FROM \`transaction_log\` tl
+    LEFT JOIN \`user\` u ON u.\`user_id\` = tl.\`user_id\`
+    LEFT JOIN \`service_order\` so ON so.\`order_id\` = tl.\`order_id\`
+    LEFT JOIN \`service_request\` sr ON sr.\`request_id\` = so.\`request_id\`
+    LEFT JOIN \`user\` publisher ON publisher.\`user_id\` = sr.\`publisher_id\`
+    LEFT JOIN \`user\` provider ON provider.\`user_id\` = so.\`provider_id\`
+    LEFT JOIN \`dispute\` d ON d.\`order_id\` = tl.\`order_id\`
+    ${whereSql}
+  )
+)
+FROM (
+  SELECT
+    tl.\`log_id\`,
+    tl.\`user_id\`,
+    tl.\`order_id\`,
+    tl.\`type\`,
+    CAST(tl.\`amount\` AS DOUBLE) AS \`amount\`,
+    CAST(tl.\`balance_after\` AS DOUBLE) AS \`balance_after\`,
+    tl.\`remark\`,
+    DATE_FORMAT(tl.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    so.\`request_id\`,
+    d.\`dispute_id\`,
+    sr.\`title\` AS \`related_title\`,
+    IF(d.\`dispute_id\` IS NOT NULL AND tl.\`type\` = 'freeze', 'dispute', IF(tl.\`order_id\` IS NOT NULL, 'order', 'system')) AS \`business_type\`,
+    IF(d.\`dispute_id\` IS NOT NULL AND tl.\`type\` = 'freeze', d.\`dispute_id\`, tl.\`order_id\`) AS \`business_id\`,
+    u.\`username\` AS \`user_username\`,
+    u.\`phone\` AS \`user_phone\`,
+    u.\`role\` AS \`user_role\`,
+    u.\`status\` AS \`user_status\`,
+    so.\`status\` AS \`order_status\`,
+    CAST(so.\`coin_amount\` AS DOUBLE) AS \`order_coin_amount\`,
+    publisher.\`user_id\` AS \`publisher_id\`,
+    publisher.\`username\` AS \`publisher_username\`,
+    provider.\`user_id\` AS \`provider_id\`,
+    provider.\`username\` AS \`provider_username\`
+  FROM \`transaction_log\` tl
+  LEFT JOIN \`user\` u ON u.\`user_id\` = tl.\`user_id\`
+  LEFT JOIN \`service_order\` so ON so.\`order_id\` = tl.\`order_id\`
+  LEFT JOIN \`service_request\` sr ON sr.\`request_id\` = so.\`request_id\`
+  LEFT JOIN \`user\` publisher ON publisher.\`user_id\` = sr.\`publisher_id\`
+  LEFT JOIN \`user\` provider ON provider.\`user_id\` = so.\`provider_id\`
+  LEFT JOIN \`dispute\` d ON d.\`order_id\` = tl.\`order_id\`
+  ${whereSql}
+  ORDER BY tl.\`created_at\` DESC, tl.\`log_id\` DESC
+  LIMIT ${pageSize} OFFSET ${offset}
+) q;
+`;
+    const result = await mysqlJson(sql, { optional: true });
+    return {
+      transactions: Array.isArray(result?.items) ? result.items.map(normalizeAdminTransaction) : [],
+      total: Number(result?.total ?? 0),
+      summary: result?.summary ?? null
+    };
+  }
+
+  async function createAuditLog(input) {
+    const detailJson = JSON.stringify(input.detail ?? {});
+    const sql = `
+INSERT INTO \`audit_log\` (
+  \`actor_id\`,
+  \`actor_role\`,
+  \`action\`,
+  \`target_type\`,
+  \`target_id\`,
+  \`ip_address\`,
+  \`detail\`
+)
+VALUES (
+  ${input.actorId === undefined || input.actorId === null ? "NULL" : Number(input.actorId)},
+  ${sqlString(input.actorRole ?? "admin")},
+  ${sqlString(input.action ?? "admin.operation")},
+  ${sqlString(input.targetType ?? "system")},
+  ${input.targetId === undefined || input.targetId === null ? "NULL" : Number(input.targetId)},
+  ${sqlNullableString(input.ipAddress)},
+  CAST(${sqlString(detailJson)} AS JSON)
+);
+SET @created_audit_id = LAST_INSERT_ID();
+SELECT ${auditLogJsonObjectSql("a")}
+FROM \`audit_log\` a
+WHERE a.\`audit_id\` = @created_audit_id
+LIMIT 1;
+`;
+    return normalizeAuditLog(await mysqlJson(sql));
+  }
+
+  async function listAuditLogs(query = {}) {
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(100, positiveInteger(query.pageSize, 20));
+    const offset = (page - 1) * pageSize;
+    const sql = `
+SELECT JSON_OBJECT(
+  'items', COALESCE(JSON_ARRAYAGG(${auditLogJsonObjectSql("q")}), JSON_ARRAY()),
+  'total', (SELECT COUNT(*) FROM \`audit_log\`)
+)
+FROM (
+  SELECT *
+  FROM \`audit_log\`
+  ORDER BY \`created_at\` DESC, \`audit_id\` DESC
+  LIMIT ${pageSize} OFFSET ${offset}
+) q;
+`;
+    const result = await mysqlJson(sql, { optional: true });
+    return {
+      auditLogs: Array.isArray(result?.items) ? result.items.map(normalizeAuditLog) : [],
+      total: Number(result?.total ?? 0)
+    };
+  }
+
+  async function findAuditLogById(auditId) {
+    if (!auditId) {
+      return null;
+    }
+    const sql = `
+SELECT ${auditLogJsonObjectSql("a")}
+FROM \`audit_log\` a
+WHERE a.\`audit_id\` = ${Number(auditId)}
+LIMIT 1;
+`;
+    return normalizeAuditLog(await mysqlJson(sql, { optional: true }));
+  }
+
+  function revokeSessionsForUser(userId) {
+    const now = new Date().toISOString();
+    for (const session of sessions.values()) {
+      if (Number(session.userId) === Number(userId) && !session.revokedAt) {
+        session.revokedAt = now;
+      }
+    }
+  }
+
   function createSession(input) {
     const now = new Date().toISOString();
     const session = {
@@ -2094,6 +2464,93 @@ function walletFreezeJsonObjectSql(alias) {
   )`;
 }
 
+function adminUserJsonObjectSql(alias) {
+  return `JSON_OBJECT(
+    'user', JSON_OBJECT(
+      'userId', ${alias}.\`user_id\`,
+      'username', ${alias}.\`username\`,
+      'passwordHash', ${alias}.\`password_hash\`,
+      'phone', ${alias}.\`phone\`,
+      'skillTags', ${alias}.\`skill_tags\`,
+      'role', ${alias}.\`role\`,
+      'status', ${alias}.\`status\`,
+      'createdAt', ${alias}.\`created_at\`,
+      'updatedAt', ${alias}.\`updated_at\`
+    ),
+    'summary', JSON_OBJECT(
+      'wallet', IF(${alias}.\`wallet_id\` IS NULL, NULL, JSON_OBJECT(
+        'walletId', ${alias}.\`wallet_id\`,
+        'userId', ${alias}.\`user_id\`,
+        'balance', ${alias}.\`balance\`,
+        'frozenBalance', ${alias}.\`frozen_balance\`,
+        'version', ${alias}.\`version\`
+      )),
+      'credit', JSON_OBJECT(
+        'averageRating', ${alias}.\`average_rating\`,
+        'reviewCount', ${alias}.\`review_count\`,
+        'positiveRate', ${alias}.\`positive_rate\`
+      ),
+      'orderCount', ${alias}.\`order_count\`
+    )
+  )`;
+}
+
+function adminTransactionJsonObjectSql(alias) {
+  return `JSON_OBJECT(
+    'logId', ${alias}.\`log_id\`,
+    'userId', ${alias}.\`user_id\`,
+    'orderId', ${alias}.\`order_id\`,
+    'requestId', ${alias}.\`request_id\`,
+    'disputeId', ${alias}.\`dispute_id\`,
+    'type', ${alias}.\`type\`,
+    'amount', ${alias}.\`amount\`,
+    'balanceAfter', ${alias}.\`balance_after\`,
+    'remark', ${alias}.\`remark\`,
+    'relatedTitle', ${alias}.\`related_title\`,
+    'businessType', ${alias}.\`business_type\`,
+    'businessId', ${alias}.\`business_id\`,
+    'createdAt', ${alias}.\`created_at\`,
+    'user', IF(${alias}.\`user_id\` IS NULL, NULL, JSON_OBJECT(
+      'userId', ${alias}.\`user_id\`,
+      'username', ${alias}.\`user_username\`,
+      'displayName', ${alias}.\`user_username\`,
+      'phone', ${alias}.\`user_phone\`,
+      'role', ${alias}.\`user_role\`,
+      'status', ${alias}.\`user_status\`
+    )),
+    'order', IF(${alias}.\`order_id\` IS NULL, NULL, JSON_OBJECT(
+      'orderId', ${alias}.\`order_id\`,
+      'requestId', ${alias}.\`request_id\`,
+      'status', ${alias}.\`order_status\`,
+      'coinAmount', ${alias}.\`order_coin_amount\`,
+      'publisher', IF(${alias}.\`publisher_id\` IS NULL, NULL, JSON_OBJECT(
+        'userId', ${alias}.\`publisher_id\`,
+        'username', ${alias}.\`publisher_username\`,
+        'displayName', ${alias}.\`publisher_username\`
+      )),
+      'provider', IF(${alias}.\`provider_id\` IS NULL, NULL, JSON_OBJECT(
+        'userId', ${alias}.\`provider_id\`,
+        'username', ${alias}.\`provider_username\`,
+        'displayName', ${alias}.\`provider_username\`
+      ))
+    ))
+  )`;
+}
+
+function auditLogJsonObjectSql(alias) {
+  return `JSON_OBJECT(
+    'auditId', ${alias}.\`audit_id\`,
+    'actorId', ${alias}.\`actor_id\`,
+    'actorRole', ${alias}.\`actor_role\`,
+    'action', ${alias}.\`action\`,
+    'targetType', ${alias}.\`target_type\`,
+    'targetId', ${alias}.\`target_id\`,
+    'ipAddress', ${alias}.\`ip_address\`,
+    'detail', ${alias}.\`detail\`,
+    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+  )`;
+}
+
 function notificationJsonObjectSql(alias) {
   return `JSON_OBJECT(
     'notificationId', ${alias}.\`notification_id\`,
@@ -2241,6 +2698,68 @@ function normalizeWalletFreeze(input) {
   return {
     ...freeze,
     timeline: freeze.timeline.length > 0 ? freeze.timeline : freezeTimeline(freeze)
+  };
+}
+
+function normalizeAdminUser(input) {
+  const user = normalizeUser(input.user);
+  const summary = input.summary ?? {};
+  return {
+    user,
+    summary: {
+      wallet: summary.wallet ? normalizeWallet(summary.wallet) : null,
+      credit: {
+        averageRating: Number(summary.credit?.averageRating ?? 0),
+        reviewCount: Number(summary.credit?.reviewCount ?? 0),
+        positiveRate: Number(summary.credit?.positiveRate ?? 0)
+      },
+      orderCount: Number(summary.orderCount ?? 0)
+    }
+  };
+}
+
+function normalizeAdminTransaction(input) {
+  return {
+    logId: Number(input.logId),
+    userId: input.userId === undefined || input.userId === null ? null : Number(input.userId),
+    orderId: input.orderId === undefined || input.orderId === null ? null : Number(input.orderId),
+    requestId: input.requestId === undefined || input.requestId === null ? null : Number(input.requestId),
+    disputeId: input.disputeId === undefined || input.disputeId === null ? null : Number(input.disputeId),
+    type: String(input.type ?? ""),
+    amount: Number(input.amount ?? 0),
+    balanceAfter: input.balanceAfter === undefined || input.balanceAfter === null ? null : Number(input.balanceAfter),
+    remark: normalizeOptionalString(input.remark),
+    relatedTitle: normalizeOptionalString(input.relatedTitle),
+    businessType: normalizeOptionalString(input.businessType) ?? "system",
+    businessId: input.businessId === undefined || input.businessId === null ? null : Number(input.businessId),
+    createdAt: input.createdAt ?? null,
+    user: input.user ? normalizeUser(input.user) : null,
+    order: input.order ? {
+      orderId: Number(input.order.orderId),
+      requestId: input.order.requestId === undefined || input.order.requestId === null ? null : Number(input.order.requestId),
+      status: String(input.order.status ?? ""),
+      coinAmount: Number(input.order.coinAmount ?? 0),
+      publisher: normalizeDisputeUser(input.order.publisher),
+      provider: normalizeDisputeUser(input.order.provider)
+    } : null
+  };
+}
+
+function normalizeAuditLog(input) {
+  if (!input) {
+    return null;
+  }
+  const detail = input.detail ?? null;
+  return {
+    auditId: Number(input.auditId ?? input.audit_id),
+    actorId: input.actorId === undefined || input.actorId === null ? null : Number(input.actorId),
+    actorRole: String(input.actorRole ?? input.actor_role ?? "admin"),
+    action: String(input.action ?? ""),
+    targetType: String(input.targetType ?? input.target_type ?? ""),
+    targetId: input.targetId === undefined || input.targetId === null ? null : Number(input.targetId),
+    ipAddress: normalizeOptionalString(input.ipAddress ?? input.ip_address),
+    detail: typeof detail === "string" ? parseJsonObject(detail) : detail,
+    createdAt: input.createdAt ?? input.created_at ?? null
   };
 }
 
@@ -2665,8 +3184,21 @@ function sqlNullableString(value) {
   return sqlString(value);
 }
 
+function sqlLike(value) {
+  return sqlString(`%${String(value).trim().toLowerCase().replace(/[%_]/g, "\\$&")}%`);
+}
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function parseJsonObject(value) {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function throwAcceptFailure(result, providerId) {

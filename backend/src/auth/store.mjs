@@ -22,6 +22,7 @@ export function createMemoryAuthStore(options = {}) {
   const disputes = new Map();
   const disputeEvidence = new Map();
   const juryVotes = new Map();
+  const auditLogs = new Map();
   let nextUserId = options.nextUserId ?? 10000;
   let nextWalletId = options.nextWalletId ?? 20000;
   let nextRequestId = options.nextRequestId ?? 30000;
@@ -34,6 +35,7 @@ export function createMemoryAuthStore(options = {}) {
   let nextDisputeId = options.nextDisputeId ?? 65000;
   let nextDisputeEvidenceId = options.nextDisputeEvidenceId ?? 66000;
   let nextJuryVoteId = options.nextJuryVoteId ?? 67000;
+  let nextAuditLogId = options.nextAuditLogId ?? 68000;
 
   for (const seedUser of options.seedUsers ?? defaultSeedUsers()) {
     insertSeedUser(seedUser);
@@ -71,6 +73,9 @@ export function createMemoryAuthStore(options = {}) {
   }
   for (const seedVote of options.seedJuryVotes ?? (options.seedRequests === undefined ? defaultSeedJuryVotes() : [])) {
     insertSeedJuryVote(seedVote);
+  }
+  for (const seedAuditLog of options.seedAuditLogs ?? (options.seedRequests === undefined ? defaultSeedAuditLogs() : [])) {
+    insertSeedAuditLog(seedAuditLog);
   }
 
   return {
@@ -111,6 +116,12 @@ export function createMemoryAuthStore(options = {}) {
     createJuryVote,
     listJuryVotesForDisputeId,
     findJuryVote,
+    listAdminUsers,
+    updateUserStatus,
+    adminDashboardMetrics,
+    listAdminTransactions,
+    createAuditLog,
+    listAuditLogs,
     createSession,
     findSession,
     revokeSession
@@ -1052,6 +1063,142 @@ export function createMemoryAuthStore(options = {}) {
     };
   }
 
+  function listAdminUsers(query = {}) {
+    const status = normalizeAdminStatusFilter(query.status);
+    const keyword = normalizeOptionalString(query.keyword)?.toLowerCase() ?? null;
+    const minCredit = query.minCredit === undefined || query.minCredit === null ? null : Number(query.minCredit);
+    const maxCredit = query.maxCredit === undefined || query.maxCredit === null ? null : Number(query.maxCredit);
+    const page = positiveInteger(query.page, 1);
+    const pageSize = positiveInteger(query.pageSize, 10);
+
+    const filtered = Array.from(users.values())
+      .map((user) => ({
+        user,
+        summary: userAdminSummary(user, { wallets, serviceOrders, serviceRequests, reviews })
+      }))
+      .filter((item) => status === "all" || item.user.status === (status === "active" ? ACTIVE_STATUS : DISABLED_STATUS))
+      .filter((item) => minCredit === null || item.summary.credit.averageRating >= minCredit)
+      .filter((item) => maxCredit === null || item.summary.credit.averageRating <= maxCredit)
+      .filter((item) => !keyword || adminUserHaystack(item.user).includes(keyword))
+      .sort((left, right) => new Date(right.user.createdAt).getTime() - new Date(left.user.createdAt).getTime() || right.user.userId - left.user.userId);
+
+    const offset = (page - 1) * pageSize;
+    return {
+      users: filtered.slice(offset, offset + pageSize).map((item) => ({
+        user: clone(item.user),
+        summary: clone(item.summary)
+      })),
+      total: filtered.length
+    };
+  }
+
+  function updateUserStatus(input) {
+    const user = users.get(Number(input.userId));
+    if (!user) {
+      throw storeError("USER_NOT_FOUND", "User was not found.");
+    }
+    const previousStatus = Number(user.status);
+    const nextStatus = Number(input.status) === ACTIVE_STATUS ? ACTIVE_STATUS : DISABLED_STATUS;
+    const now = new Date().toISOString();
+    user.status = nextStatus;
+    user.updatedAt = now;
+    if (nextStatus !== ACTIVE_STATUS) {
+      revokeSessionsForUser(user.userId, now, sessions);
+    }
+    const auditLog = createAuditLog({
+      actorId: input.actorId ?? null,
+      actorRole: input.actorRole ?? "admin",
+      action: nextStatus === ACTIVE_STATUS ? "admin.user.enable" : "admin.user.disable",
+      targetType: "user",
+      targetId: user.userId,
+      ipAddress: input.ipAddress ?? null,
+      detail: {
+        previousStatus,
+        nextStatus,
+        reason: normalizeOptionalString(input.reason) ?? null,
+        username: user.username
+      },
+      createdAt: now
+    });
+    return {
+      user: clone(user),
+      summary: clone(userAdminSummary(user, { wallets, serviceOrders, serviceRequests, reviews })),
+      auditLog
+    };
+  }
+
+  function adminDashboardMetrics() {
+    const userList = Array.from(users.values());
+    const orderList = Array.from(serviceOrders.values());
+    const requestList = Array.from(serviceRequests.values());
+    const disputeList = Array.from(disputes.values());
+    const transactionList = Array.from(transactionLogs.values());
+    const freezeList = Array.from(walletFreezes.values());
+    return {
+      userCount: userList.length,
+      activeUserCount: userList.filter((user) => user.status === ACTIVE_STATUS).length,
+      disabledUserCount: userList.filter((user) => user.status !== ACTIVE_STATUS).length,
+      openRequestCount: requestList.filter((item) => item.status === "open" && item.visible !== false).length,
+      orderCount: orderList.length,
+      disputeCount: disputeList.filter((item) => !["cancelled"].includes(item.status)).length,
+      circulatingCoins: roundMoney(sumTransactions(transactionList)),
+      frozenCoins: roundMoney(freezeList.filter(isUnreleasedFreeze).reduce((sum, item) => sum + Number(item.amount ?? 0), 0)),
+      transactionCount: transactionList.length,
+      pendingAuditCount: auditLogs.size
+    };
+  }
+
+  function listAdminTransactions(query = {}) {
+    const type = normalizeWalletFilter(query.type, "all");
+    const keyword = normalizeOptionalString(query.keyword)?.toLowerCase() ?? null;
+    const orderId = query.orderId === undefined || query.orderId === null ? null : Number(query.orderId);
+    const userId = query.userId === undefined || query.userId === null ? null : Number(query.userId);
+    const page = positiveInteger(query.page, 1);
+    const pageSize = positiveInteger(query.pageSize, 20);
+
+    const filtered = Array.from(transactionLogs.values())
+      .map(enrichAdminTransactionLog)
+      .filter((item) => type === "all" || item.type === type)
+      .filter((item) => orderId === null || item.orderId === orderId)
+      .filter((item) => userId === null || item.userId === userId)
+      .filter((item) => !keyword || adminTransactionHaystack(item).includes(keyword))
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime() || right.logId - left.logId);
+
+    const offset = (page - 1) * pageSize;
+    return {
+      transactions: filtered.slice(offset, offset + pageSize).map(clone),
+      total: filtered.length,
+      summary: {
+        transactionCount: filtered.length,
+        circulatingCoins: roundMoney(sumTransactions(filtered)),
+        frozenCoins: roundMoney(filtered.filter((item) => item.type === "freeze").reduce((sum, item) => sum + Number(item.amount ?? 0), 0)),
+        reviewCount: filtered.filter((item) => item.disputeId || item.type === "refund").length
+      }
+    };
+  }
+
+  function createAuditLog(input) {
+    const auditLog = normalizeAuditLog({
+      ...input,
+      auditId: input.auditId ?? nextAuditLogId
+    });
+    auditLogs.set(auditLog.auditId, auditLog);
+    nextAuditLogId = Math.max(nextAuditLogId, auditLog.auditId + 1);
+    return clone(auditLog);
+  }
+
+  function listAuditLogs(query = {}) {
+    const page = positiveInteger(query.page, 1);
+    const pageSize = positiveInteger(query.pageSize, 20);
+    const filtered = Array.from(auditLogs.values())
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime() || right.auditId - left.auditId);
+    const offset = (page - 1) * pageSize;
+    return {
+      auditLogs: filtered.slice(offset, offset + pageSize).map(clone),
+      total: filtered.length
+    };
+  }
+
   function createSession(input) {
     const now = new Date().toISOString();
     const session = {
@@ -1202,6 +1349,15 @@ export function createMemoryAuthStore(options = {}) {
     nextJuryVoteId = Math.max(nextJuryVoteId, vote.voteId + 1);
   }
 
+  function insertSeedAuditLog(seedAuditLog) {
+    const auditLog = normalizeAuditLog({
+      ...seedAuditLog,
+      auditId: seedAuditLog.auditId ?? nextAuditLogId
+    });
+    auditLogs.set(auditLog.auditId, auditLog);
+    nextAuditLogId = Math.max(nextAuditLogId, auditLog.auditId + 1);
+  }
+
   function createNotification(input) {
     const notification = normalizeNotification({
       ...input,
@@ -1341,6 +1497,24 @@ export function createMemoryAuthStore(options = {}) {
       relatedTitle: request?.title ?? null,
       businessType: disputeId !== null ? "dispute" : (log.orderId !== null ? "order" : "system"),
       businessId: disputeId ?? log.orderId ?? null
+    };
+  }
+
+  function enrichAdminTransactionLog(log) {
+    const enriched = enrichTransactionLog(log);
+    const user = enriched.userId === null ? null : users.get(enriched.userId);
+    const order = enriched.orderId === null ? null : serviceOrders.get(enriched.orderId);
+    const request = order ? serviceRequests.get(order.requestId) : null;
+    const publisher = request ? users.get(request.publisherId) : null;
+    const provider = order ? users.get(order.providerId) : null;
+    return {
+      ...enriched,
+      user: user ? clone(user) : null,
+      order: order ? {
+        ...clone(order),
+        publisher: publicReviewer(publisher),
+        provider: publicReviewer(provider)
+      } : null
     };
   }
 
@@ -1841,6 +2015,33 @@ export function defaultSeedDisputeEvidence() {
   ];
 }
 
+export function defaultSeedAuditLogs() {
+  return [
+    {
+      auditId: 8401,
+      actorId: 9001,
+      actorRole: "admin",
+      action: "seed.init",
+      targetType: "database",
+      targetId: null,
+      ipAddress: "127.0.0.1",
+      detail: { stage: "02", scope: "schema-and-seed" },
+      createdAt: "2026-06-01T08:45:00.000Z"
+    },
+    {
+      auditId: 8402,
+      actorId: 9001,
+      actorRole: "admin",
+      action: "dispute.review",
+      targetType: "dispute",
+      targetId: 8001,
+      ipAddress: "127.0.0.1",
+      detail: { status: "admin_review", aiSummary: true },
+      createdAt: "2026-05-28T11:05:00.000Z"
+    }
+  ];
+}
+
 export function defaultSeedJuryVotes() {
   return [
     {
@@ -2063,6 +2264,21 @@ function normalizeJuryVote(input) {
     jurorId: Number(input.jurorId ?? input.juror_id),
     vote: normalizeJuryVoteValue(input.vote),
     reason: normalizeOptionalString(input.reason),
+    createdAt: input.createdAt ?? input.created_at ?? new Date().toISOString()
+  };
+}
+
+function normalizeAuditLog(input) {
+  const detail = input.detail ?? null;
+  return {
+    auditId: Number(input.auditId ?? input.audit_id),
+    actorId: input.actorId === undefined || input.actorId === null ? null : Number(input.actorId),
+    actorRole: String(input.actorRole ?? input.actor_role ?? "admin"),
+    action: String(input.action ?? "admin.operation"),
+    targetType: String(input.targetType ?? input.target_type ?? "system"),
+    targetId: input.targetId === undefined || input.targetId === null ? null : Number(input.targetId),
+    ipAddress: normalizeOptionalString(input.ipAddress ?? input.ip_address),
+    detail: typeof detail === "string" ? parseJsonObject(detail) : detail,
     createdAt: input.createdAt ?? input.created_at ?? new Date().toISOString()
   };
 }
@@ -2325,6 +2541,11 @@ function normalizeDisputeStatus(value) {
     : "pending";
 }
 
+function normalizeAdminStatusFilter(value) {
+  const text = String(value ?? "all").trim().toLowerCase();
+  return ["active", "disabled", "all"].includes(text) ? text : "all";
+}
+
 function normalizeEvidenceType(value) {
   const text = String(value ?? "").trim().toLowerCase();
   return ["text", "image", "file", "chat"].includes(text) ? text : "text";
@@ -2373,6 +2594,81 @@ function disputeProgress(dispute, evidence) {
 
 function displayUserName(user) {
   return user?.displayName ?? user?.username ?? "邻帮用户";
+}
+
+function userAdminSummary(user, collections) {
+  const { wallets, serviceOrders, serviceRequests, reviews } = collections;
+  const wallet = wallets.get(user.userId) ?? null;
+  const userOrders = Array.from(serviceOrders.values()).filter((order) => {
+    const request = serviceRequests.get(order.requestId);
+    return order.providerId === user.userId || request?.publisherId === user.userId;
+  });
+  return {
+    wallet: wallet ? clone(wallet) : null,
+    credit: creditSummaryFromReviews(reviews.filter((review) => review.targetId === user.userId)),
+    orderCount: userOrders.length
+  };
+}
+
+function creditSummaryFromReviews(items) {
+  let sum = 0;
+  let positiveCount = 0;
+  for (const review of items) {
+    const rating = Math.min(5, Math.max(1, Number(review.rating) || 1));
+    sum += rating;
+    if (rating >= 4) {
+      positiveCount += 1;
+    }
+  }
+  const reviewCount = items.length;
+  const averageRating = reviewCount > 0 ? round1(sum / reviewCount) : 0;
+  return {
+    averageRating,
+    reviewCount,
+    positiveRate: reviewCount > 0 ? Math.round((positiveCount / reviewCount) * 100) : 0
+  };
+}
+
+function adminUserHaystack(user) {
+  return [
+    user.userId,
+    user.username,
+    user.displayName,
+    user.phone,
+    user.role,
+    ...(user.skillTags ?? [])
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function adminTransactionHaystack(item) {
+  return [
+    item.logId,
+    item.userId,
+    item.orderId,
+    item.requestId,
+    item.disputeId,
+    item.type,
+    item.remark,
+    item.relatedTitle,
+    item.user?.username,
+    item.user?.displayName,
+    item.order?.publisher?.username,
+    item.order?.publisher?.displayName,
+    item.order?.provider?.username,
+    item.order?.provider?.displayName
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function sumTransactions(items) {
+  return items.reduce((sum, item) => sum + Number(item.amount ?? 0), 0);
+}
+
+function revokeSessionsForUser(userId, revokedAt, sessions) {
+  for (const session of sessions.values()) {
+    if (Number(session.userId) === Number(userId) && !session.revokedAt) {
+      session.revokedAt = revokedAt;
+    }
+  }
 }
 
 function compareNotifications(left, right) {
@@ -2435,4 +2731,13 @@ function storeError(code, message) {
   const error = new Error(message);
   error.code = code;
   return error;
+}
+
+function parseJsonObject(value) {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }

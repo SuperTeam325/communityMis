@@ -172,6 +172,16 @@ export function createApiClient(options = {}) {
         body: payload
       }),
       me: (token) => request("/api/admin/auth/me", { token })
+    },
+    admin: {
+      dashboard: (token) => request("/api/admin/dashboard", { token }),
+      users: (token, params = {}) => request(withQuery("/api/admin/users", params), { token }),
+      updateUserStatus: (token, userId, payload) => request(`/api/admin/users/${encodeURIComponent(userId)}/status`, {
+        method: "PUT",
+        token,
+        body: payload
+      }),
+      transactions: (token, params = {}) => request(withQuery("/api/admin/transactions", params), { token })
     }
   };
 }

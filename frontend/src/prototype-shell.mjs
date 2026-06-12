@@ -83,6 +83,20 @@ const NOTIFICATION_TYPE_LABEL = new Map([
   ["social", "互动"],
   ["system", "系统公告"]
 ]);
+const ADMIN_USERS_PAGE_SIZE = 10;
+const ADMIN_TRANSACTIONS_PAGE_SIZE = 20;
+const ADMIN_USER_STATUS_LABEL = new Map([
+  ["active", "正常"],
+  ["disabled", "已禁用"]
+]);
+const ADMIN_TRANSACTION_TYPE_LABEL = new Map([
+  ["income", "收入"],
+  ["expense", "支出"],
+  ["freeze", "冻结"],
+  ["release", "释放"],
+  ["refund", "退款"],
+  ["system_fee", "系统"]
+]);
 
 window.NeighborApp = {
   route,
@@ -301,14 +315,20 @@ function bindAdminLoginForm() {
 function installLogoutHandlers() {
   const logoutButtons = [
     document.getElementById("logout-button"),
-    document.getElementById("confirm-logout")
+    document.getElementById("confirm-logout"),
+    ...document.querySelectorAll("[data-admin-logout]")
   ].filter(Boolean);
   for (const logoutButton of logoutButtons) {
     logoutButton.addEventListener("click", interceptSubmit(async () => {
       const restore = setLoading(logoutButton, "退出中...");
       try {
-        await auth.logoutUser();
-        navigateTo("/login");
+        if (route.surface === "admin") {
+          await auth.logoutAdmin();
+          navigateTo("/admin/login");
+        } else {
+          await auth.logoutUser();
+          navigateTo("/login");
+        }
       } catch (error) {
         restore();
         showInlineMessage(logoutButton, authErrorMessage(error), "error");
@@ -389,6 +409,18 @@ async function hydrateCurrentRoute(session) {
     }
     if (route.id === "notifications") {
       await hydrateNotificationsRoute(session);
+      return;
+    }
+    if (route.id === "admin-dashboard") {
+      await hydrateAdminDashboardRoute(session);
+      return;
+    }
+    if (route.id === "admin-users") {
+      await hydrateAdminUsersRoute(session);
+      return;
+    }
+    if (route.id === "admin-transactions") {
+      await hydrateAdminTransactionsRoute(session);
     }
   } catch (error) {
     showGlobalMessage(authErrorMessage(error), "error");
@@ -2624,6 +2656,820 @@ function walletTransactionIcon(tone) {
     return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
   }
   return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>';
+}
+
+async function hydrateAdminDashboardRoute(session) {
+  const adminSession = session ?? auth.readSession("admin");
+  if (!adminSession?.token) {
+    return;
+  }
+  applyAdminIdentity(adminSession.user);
+  try {
+    const payload = await api.admin.dashboard(adminSession.token);
+    renderAdminDashboard(payload);
+  } catch (error) {
+    showGlobalMessage(adminErrorMessage(error), "error");
+  }
+}
+
+async function hydrateAdminUsersRoute(session) {
+  const adminSession = session ?? auth.readSession("admin");
+  if (!adminSession?.token) {
+    return;
+  }
+  applyAdminIdentity(adminSession.user);
+  installAdminUsersControls(adminSession);
+  await loadAdminUsers(readAdminUsersQuery(), adminSession);
+}
+
+async function hydrateAdminTransactionsRoute(session) {
+  const adminSession = session ?? auth.readSession("admin");
+  if (!adminSession?.token) {
+    return;
+  }
+  applyAdminIdentity(adminSession.user);
+  installAdminTransactionsControls(adminSession);
+  await loadAdminTransactions(readAdminTransactionsQuery(), adminSession);
+}
+
+function applyAdminIdentity(user) {
+  const name = user?.displayName || user?.username;
+  if (!name) {
+    return;
+  }
+  document.querySelectorAll(".admin-badge").forEach((element) => {
+    const icon = element.querySelector("svg")?.outerHTML ?? "";
+    element.innerHTML = `${icon} 管理员 · ${escapeHtml(name)}`;
+  });
+}
+
+function renderAdminDashboard(payload) {
+  const metrics = payload.metrics ?? {};
+  const values = document.querySelectorAll(".stat-card .stat-value");
+  const labels = document.querySelectorAll(".stat-card .stat-label");
+  const subs = document.querySelectorAll(".stat-card .stat-sub");
+  const statRows = [
+    {
+      value: formatInteger(metrics.userCount),
+      label: "注册用户总数",
+      sub: `${formatInteger(metrics.activeUserCount)} 个正常账号`,
+      tone: "up"
+    },
+    {
+      value: `⏂ ${formatAmount(metrics.circulatingCoins)}`,
+      label: "时间币流通总量",
+      sub: `${formatInteger(metrics.transactionCount)} 条全平台流水`,
+      tone: "up"
+    },
+    {
+      value: formatInteger(metrics.openRequestCount),
+      label: "待接单需求",
+      sub: `${formatInteger(metrics.orderCount)} 个订单记录`,
+      tone: "up"
+    },
+    {
+      value: formatInteger(metrics.disputeCount),
+      label: "待处理争议",
+      sub: `${formatInteger(metrics.pendingAuditCount)} 条审计记录`,
+      tone: "warn"
+    }
+  ];
+  statRows.forEach((item, index) => {
+    if (values[index]) {
+      values[index].textContent = item.value;
+    }
+    if (labels[index]) {
+      labels[index].textContent = item.label;
+    }
+    if (subs[index]) {
+      subs[index].classList.remove("up", "down", "warn");
+      subs[index].classList.add(item.tone);
+      subs[index].textContent = item.sub;
+    }
+  });
+
+  const list = document.querySelector(".activity-list");
+  if (!list) {
+    return;
+  }
+  const logs = Array.isArray(payload.recentAuditLogs) ? payload.recentAuditLogs : [];
+  if (logs.length === 0) {
+    list.innerHTML = `
+      <div class="activity-row">
+        <div class="ar-dot info"></div>
+        <div class="ar-text">暂无管理操作审计记录</div>
+        <div class="ar-time">--</div>
+      </div>
+    `;
+    return;
+  }
+  list.innerHTML = logs.map(adminActivityHtml).join("");
+}
+
+function adminActivityHtml(log) {
+  const tone = log.action?.includes("disable") ? "danger" : log.action?.includes("enable") ? "success" : "info";
+  const actor = log.actor?.displayName || log.actor?.username || `#${log.actorId || "--"}`;
+  const target = log.target?.displayName || log.target?.username || (log.targetId ? `#${log.targetId}` : "平台记录");
+  return `
+    <div class="activity-row">
+      <div class="ar-dot ${escapeHtml(tone)}"></div>
+      <div class="ar-text"><strong>${escapeHtml(actor)}</strong> ${escapeHtml(adminAuditActionLabel(log.action))} <strong>${escapeHtml(target)}</strong></div>
+      <div class="ar-time">${escapeHtml(formatDateTime(log.createdAt))}</div>
+      <a class="ar-action" href="/admin/audit-log">审计 →</a>
+    </div>
+  `;
+}
+
+function installAdminUsersControls(adminSession) {
+  if (document.body.dataset.adminUsersBound === "true") {
+    return;
+  }
+  document.body.dataset.adminUsersBound = "true";
+
+  const search = document.getElementById("userSearch");
+  search?.addEventListener("input", debounce((event) => {
+    updateAdminUsersQuery({ keyword: event.target.value.trim(), page: 1 }, adminSession);
+  }, 250), true);
+
+  document.querySelectorAll(".au-filter-group .chip").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      updateAdminUsersQuery(adminUserFilterPatch(button.textContent), adminSession);
+    }, true);
+  });
+
+  window.addEventListener("popstate", () => {
+    loadAdminUsers(readAdminUsersQuery(), adminSession);
+  });
+}
+
+async function loadAdminUsers(state, adminSession) {
+  applyAdminUsersControls(state);
+  renderAdminUsersState("loading", "正在加载用户列表。");
+  try {
+    const payload = await api.admin.users(adminSession.token, adminUsersApiParams(state));
+    renderAdminUsers(payload, state, adminSession);
+  } catch (error) {
+    renderAdminUsersState("error", adminErrorMessage(error), {
+      actionText: "重试",
+      onAction: () => loadAdminUsers(readAdminUsersQuery(), adminSession)
+    });
+  }
+}
+
+function readAdminUsersQuery() {
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get("status") || "all";
+  return {
+    keyword: params.get("keyword") || params.get("q") || "",
+    status: ["all", "active", "disabled"].includes(status) ? status : "all",
+    minCredit: params.get("minCredit") || "",
+    maxCredit: params.get("maxCredit") || "",
+    page: positiveInteger(params.get("page"), 1),
+    pageSize: positiveInteger(params.get("pageSize"), ADMIN_USERS_PAGE_SIZE)
+  };
+}
+
+function updateAdminUsersQuery(patch, adminSession) {
+  const next = {
+    ...readAdminUsersQuery(),
+    ...patch
+  };
+  const params = new URLSearchParams();
+  if (next.keyword) {
+    params.set("keyword", next.keyword);
+  }
+  if (next.status && next.status !== "all") {
+    params.set("status", next.status);
+  }
+  if (next.minCredit !== "" && next.minCredit !== undefined) {
+    params.set("minCredit", next.minCredit);
+  }
+  if (next.maxCredit !== "" && next.maxCredit !== undefined) {
+    params.set("maxCredit", next.maxCredit);
+  }
+  if (next.page > 1) {
+    params.set("page", String(next.page));
+  }
+  if (next.pageSize !== ADMIN_USERS_PAGE_SIZE) {
+    params.set("pageSize", String(next.pageSize));
+  }
+  window.history.pushState({}, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`);
+  loadAdminUsers(readAdminUsersQuery(), adminSession);
+}
+
+function adminUsersApiParams(state) {
+  return {
+    keyword: state.keyword,
+    status: state.status,
+    minCredit: state.minCredit,
+    maxCredit: state.maxCredit,
+    page: state.page,
+    pageSize: state.pageSize
+  };
+}
+
+function applyAdminUsersControls(state) {
+  const search = document.getElementById("userSearch");
+  if (search && search.value !== state.keyword) {
+    search.value = state.keyword;
+  }
+  document.querySelectorAll(".au-filter-group .chip").forEach((button) => {
+    const patch = adminUserFilterPatch(button.textContent);
+    const active = (patch.status ?? "all") === state.status
+      && (patch.minCredit ?? "") === (state.minCredit ?? "")
+      && (patch.maxCredit ?? "") === (state.maxCredit ?? "");
+    button.classList.toggle("active", active);
+  });
+}
+
+function renderAdminUsers(payload, state, adminSession) {
+  const tbody = document.getElementById("userTableBody");
+  if (!tbody) {
+    return;
+  }
+  const users = Array.isArray(payload.users) ? payload.users : [];
+  if (users.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9"><div class="tx-empty"><p>暂无符合条件的用户。</p></div></td></tr>`;
+  } else {
+    tbody.innerHTML = users.map(adminUserRowHtml).join("");
+    tbody.querySelectorAll("[data-admin-status]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        updateAdminUserStatus(button, adminSession);
+      }, true);
+    });
+  }
+  renderAdminUsersPager(payload.pagination, state, adminSession);
+}
+
+function renderAdminUsersState(kind, message, options = {}) {
+  const tbody = document.getElementById("userTableBody");
+  const pageInfo = document.querySelector(".au-page-info");
+  const pageButtons = document.querySelector(".au-page-btns");
+  if (!tbody) {
+    return;
+  }
+  const title = kind === "loading" ? "加载中" : kind === "error" ? "加载失败" : "空结果";
+  tbody.innerHTML = `
+    <tr>
+      <td colspan="9">
+        <div class="tx-empty" data-state="${escapeHtml(kind)}">
+          <p><strong>${escapeHtml(title)}</strong></p>
+          <p>${escapeHtml(message)}</p>
+          ${options.actionText ? `<button class="btn btn--secondary btn--sm" type="button" data-runtime-action>${escapeHtml(options.actionText)}</button>` : ""}
+        </div>
+      </td>
+    </tr>
+  `;
+  tbody.querySelector("[data-runtime-action]")?.addEventListener("click", options.onAction);
+  if (pageInfo) {
+    pageInfo.textContent = "";
+  }
+  if (pageButtons) {
+    pageButtons.innerHTML = "";
+  }
+}
+
+function adminUserRowHtml(user) {
+  const score = Number(user.credit?.averageRating ?? 0);
+  const status = user.statusText === "disabled" ? "disabled" : "active";
+  const nextStatus = status === "active" ? "disabled" : "active";
+  const actionDanger = status === "active" ? " danger" : "";
+  const actionText = status === "active" ? "禁用" : "启用";
+  return `
+    <tr>
+      <td>
+        <div class="user-cell">
+          <div class="user-avatar" style="background:${escapeHtml(avatarColor(user.userId))}">${escapeHtml(firstCharacter(user.displayName || user.username))}</div>
+          <div>
+            <div class="user-name">${escapeHtml(user.displayName || user.username)}</div>
+            <div class="user-id">#U${escapeHtml(user.userId)}</div>
+          </div>
+        </div>
+      </td>
+      <td>${escapeHtml(user.phone || "--")}</td>
+      <td>${escapeHtml(user.role === "admin" || user.role === "super_admin" ? "管理员" : "普通用户")}</td>
+      <td>
+        <div class="credit-bar">
+          <span style="font-weight:600;font-size:14px">${escapeHtml(formatRating(score))}</span>
+          <div class="bar-track"><div class="bar-fill ${escapeHtml(creditClass(score))}" style="width:${escapeHtml(Math.min(100, Math.max(0, score * 20)))}%"></div></div>
+        </div>
+      </td>
+      <td>${escapeHtml(formatAmount(user.wallet?.balance ?? 0))}</td>
+      <td>${escapeHtml(user.orderCount ?? 0)} 单</td>
+      <td>${escapeHtml(formatDateOnly(user.createdAt))}</td>
+      <td><span class="status-pill ${escapeHtml(status)}">${escapeHtml(ADMIN_USER_STATUS_LABEL.get(status) || status)}</span></td>
+      <td>
+        <div class="action-row">
+          <button class="action-btn" type="button" data-admin-view="${escapeHtml(user.userId)}">查看</button>
+          <button class="action-btn${actionDanger}" type="button" data-admin-status="${escapeHtml(nextStatus)}" data-user-id="${escapeHtml(user.userId)}">${escapeHtml(actionText)}</button>
+        </div>
+      </td>
+    </tr>
+  `;
+}
+
+function renderAdminUsersPager(pagination, state, adminSession) {
+  const pageInfo = document.querySelector(".au-page-info");
+  const pageButtons = document.querySelector(".au-page-btns");
+  if (!pageInfo || !pageButtons) {
+    return;
+  }
+  const total = pagination?.total ?? 0;
+  const start = total === 0 ? 0 : (pagination.page - 1) * pagination.pageSize + 1;
+  const end = Math.min(total, pagination.page * pagination.pageSize);
+  pageInfo.textContent = `共 ${formatInteger(total)} 条，显示第 ${formatInteger(start)}-${formatInteger(end)} 条`;
+  pageButtons.innerHTML = `
+    <button class="au-page-btn${pagination?.hasPrev ? "" : " disabled"}" type="button" data-page="prev"${pagination?.hasPrev ? "" : " disabled"}>←</button>
+    <button class="au-page-btn active" type="button">${escapeHtml(pagination?.page ?? 1)}</button>
+    <button class="au-page-btn${pagination?.hasNext ? "" : " disabled"}" type="button" data-page="next"${pagination?.hasNext ? "" : " disabled"}>→</button>
+  `;
+  pageButtons.querySelector("[data-page='prev']")?.addEventListener("click", () => {
+    updateAdminUsersQuery({ page: Math.max(1, state.page - 1) }, adminSession);
+  });
+  pageButtons.querySelector("[data-page='next']")?.addEventListener("click", () => {
+    updateAdminUsersQuery({ page: state.page + 1 }, adminSession);
+  });
+}
+
+async function updateAdminUserStatus(button, adminSession) {
+  const userId = button.dataset.userId;
+  const status = button.dataset.adminStatus;
+  if (!userId || !status) {
+    return;
+  }
+  const restore = setLoading(button, status === "disabled" ? "禁用中..." : "启用中...");
+  try {
+    const reason = status === "disabled" ? "管理员后台禁用账号" : "管理员后台恢复账号";
+    await api.admin.updateUserStatus(adminSession.token, userId, { status, reason });
+    showGlobalMessage(status === "disabled" ? "用户已禁用，登录态已失效。" : "用户已恢复正常。", "success");
+    await loadAdminUsers(readAdminUsersQuery(), adminSession);
+  } catch (error) {
+    restore();
+    showInlineMessage(button, adminErrorMessage(error), "error");
+  }
+}
+
+function adminUserFilterPatch(text) {
+  const label = String(text || "").trim();
+  if (label.includes("正常")) {
+    return { status: "active", minCredit: "", maxCredit: "", page: 1 };
+  }
+  if (label.includes("禁用")) {
+    return { status: "disabled", minCredit: "", maxCredit: "", page: 1 };
+  }
+  if (label.includes("受限")) {
+    return { status: "all", minCredit: "2.5", maxCredit: "4", page: 1 };
+  }
+  if (label.includes("低信用")) {
+    return { status: "all", minCredit: "", maxCredit: "2.5", page: 1 };
+  }
+  return { status: "all", minCredit: "", maxCredit: "", page: 1 };
+}
+
+function creditClass(value) {
+  const score = Number(value || 0);
+  if (score >= 4) {
+    return "high";
+  }
+  if (score >= 2.5) {
+    return "mid";
+  }
+  return "low";
+}
+
+function installAdminTransactionsControls(adminSession) {
+  if (document.body.dataset.adminTransactionsBound === "true") {
+    return;
+  }
+  document.body.dataset.adminTransactionsBound = "true";
+
+  document.getElementById("searchInput")?.addEventListener("input", debounce((event) => {
+    updateAdminTransactionsQuery({ keyword: event.target.value.trim(), page: 1 }, adminSession);
+  }, 250), true);
+  for (const id of ["typeFilter", "statusFilter", "riskFilter"]) {
+    document.getElementById(id)?.addEventListener("change", (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      updateAdminTransactionsQuery({ [adminTransactionFilterName(id)]: event.target.value, page: 1 }, adminSession);
+    }, true);
+  }
+  document.getElementById("resetBtn")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    updateAdminTransactionsQuery({ keyword: "", type: "", status: "", risk: "", page: 1 }, adminSession);
+  }, true);
+  document.getElementById("exportBtn")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    exportAdminTransactionsCsv();
+  }, true);
+  window.addEventListener("popstate", () => {
+    loadAdminTransactions(readAdminTransactionsQuery(), adminSession);
+  });
+}
+
+async function loadAdminTransactions(state, adminSession) {
+  applyAdminTransactionsControls(state);
+  renderAdminTransactionsState("loading", "正在加载平台流水。");
+  try {
+    const payload = await api.admin.transactions(adminSession.token, adminTransactionsApiParams(state));
+    window.__adminTransactions = Array.isArray(payload.transactions) ? payload.transactions : [];
+    renderAdminTransactionSummary(payload.summary);
+    renderAdminTransactions(payload, state, adminSession);
+  } catch (error) {
+    renderAdminTransactionsState("error", adminErrorMessage(error), {
+      actionText: "重试",
+      onAction: () => loadAdminTransactions(readAdminTransactionsQuery(), adminSession)
+    });
+  }
+}
+
+function readAdminTransactionsQuery() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    keyword: params.get("keyword") || params.get("q") || "",
+    type: params.get("type") || "",
+    status: params.get("status") || "",
+    risk: params.get("risk") || "",
+    page: positiveInteger(params.get("page"), 1),
+    pageSize: positiveInteger(params.get("pageSize"), ADMIN_TRANSACTIONS_PAGE_SIZE)
+  };
+}
+
+function updateAdminTransactionsQuery(patch, adminSession) {
+  const next = {
+    ...readAdminTransactionsQuery(),
+    ...patch
+  };
+  const params = new URLSearchParams();
+  for (const key of ["keyword", "type", "status", "risk"]) {
+    if (next[key]) {
+      params.set(key, next[key]);
+    }
+  }
+  if (next.page > 1) {
+    params.set("page", String(next.page));
+  }
+  if (next.pageSize !== ADMIN_TRANSACTIONS_PAGE_SIZE) {
+    params.set("pageSize", String(next.pageSize));
+  }
+  window.history.pushState({}, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`);
+  loadAdminTransactions(readAdminTransactionsQuery(), adminSession);
+}
+
+function adminTransactionsApiParams(state) {
+  return {
+    keyword: state.keyword,
+    type: state.type,
+    page: state.page,
+    pageSize: state.pageSize
+  };
+}
+
+function applyAdminTransactionsControls(state) {
+  const search = document.getElementById("searchInput");
+  if (search && search.value !== state.keyword) {
+    search.value = state.keyword;
+  }
+  setSelectValue("typeFilter", state.type);
+  setSelectValue("statusFilter", state.status);
+  setSelectValue("riskFilter", state.risk);
+}
+
+function renderAdminTransactions(payload, state, adminSession) {
+  const tbody = document.getElementById("transactionBody");
+  const count = document.getElementById("resultCount");
+  if (!tbody) {
+    return;
+  }
+  let transactions = Array.isArray(payload.transactions) ? payload.transactions : [];
+  transactions = transactions.filter((item) => {
+    return (!state.status || item.status === state.status) && (!state.risk || item.risk === state.risk);
+  });
+  if (count) {
+    count.textContent = `显示 ${formatInteger(transactions.length)} 条 / 共 ${formatInteger(payload.pagination?.total ?? transactions.length)} 条`;
+  }
+  if (transactions.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8"><div class="tx-empty"><p>没有符合条件的流水。</p></div></td></tr>`;
+    renderAdminTransactionInspector(null);
+    clearAdminTransactionPager();
+    return;
+  }
+  tbody.innerHTML = transactions.map((item, index) => adminTransactionRowHtml(item, index === 0)).join("");
+  tbody.querySelectorAll("tr[data-tx-id]").forEach((row) => {
+    row.addEventListener("click", (event) => {
+      if (event.target.closest("a,button")) {
+        return;
+      }
+      tbody.querySelectorAll("tr").forEach((item) => item.classList.remove("selected"));
+      row.classList.add("selected");
+      renderAdminTransactionInspector(transactions.find((item) => String(item.logId) === row.dataset.txId));
+    });
+  });
+  renderAdminTransactionInspector(transactions[0]);
+  renderAdminTransactionPager(payload.pagination, state, adminSession);
+}
+
+function renderAdminTransactionsState(kind, message, options = {}) {
+  const tbody = document.getElementById("transactionBody");
+  const count = document.getElementById("resultCount");
+  if (!tbody) {
+    return;
+  }
+  const title = kind === "loading" ? "加载中" : kind === "error" ? "加载失败" : "空结果";
+  tbody.innerHTML = `
+    <tr>
+      <td colspan="8">
+        <div class="tx-empty" data-state="${escapeHtml(kind)}">
+          <p><strong>${escapeHtml(title)}</strong></p>
+          <p>${escapeHtml(message)}</p>
+          ${options.actionText ? `<button class="btn btn--secondary btn--sm" type="button" data-runtime-action>${escapeHtml(options.actionText)}</button>` : ""}
+        </div>
+      </td>
+    </tr>
+  `;
+  tbody.querySelector("[data-runtime-action]")?.addEventListener("click", options.onAction);
+  if (count) {
+    count.textContent = "显示 0 条";
+  }
+  renderAdminTransactionInspector(null);
+  clearAdminTransactionPager();
+}
+
+function renderAdminTransactionSummary(summary = {}) {
+  const values = document.querySelectorAll(".kpi-card .kpi-value");
+  if (values[0]) {
+    values[0].textContent = formatInteger(summary.transactionCount);
+  }
+  if (values[1]) {
+    values[1].textContent = `⏂ ${formatAmount(summary.circulatingCoins)}`;
+  }
+  if (values[2]) {
+    values[2].textContent = `⏂ ${formatAmount(Math.abs(Number(summary.frozenCoins ?? 0)))}`;
+  }
+  if (values[3]) {
+    values[3].textContent = formatInteger(summary.reviewCount);
+  }
+}
+
+function adminTransactionRowHtml(item, selected) {
+  const typeClass = adminTransactionTypeClass(item.type);
+  const statusClass = `status-${item.status || "settled"}`;
+  const riskClass = `risk-${item.risk || "low"}`;
+  const amountClass = item.type === "freeze" ? "amount-lock" : Number(item.amount) >= 0 ? "amount-pos" : "amount-neg";
+  const sign = Number(item.amount) > 0 ? "+" : "";
+  const href = item.orderId ? `/orders/${encodeURIComponent(item.orderId)}` : item.href || "#";
+  const title = item.relatedTitle || item.remark || item.businessType || "--";
+  return `
+    <tr data-tx-id="${escapeHtml(item.logId)}" class="${selected ? "selected" : ""}">
+      <td>${escapeHtml(`TX-${item.logId}`)}</td>
+      <td>${escapeHtml(formatDateTime(item.createdAt))}</td>
+      <td><span class="type-badge ${escapeHtml(typeClass)}">${escapeHtml(ADMIN_TRANSACTION_TYPE_LABEL.get(item.type) || item.type || "流水")}</span></td>
+      <td><a href="${escapeHtml(href)}">${escapeHtml(item.orderId ? `订单 #${item.orderId}` : title)}</a></td>
+      <td>${escapeHtml(adminTransactionCounterpartyText(item))}</td>
+      <td class="${escapeHtml(amountClass)}">${escapeHtml(sign)}${escapeHtml(formatAmount(item.amount))}</td>
+      <td><span class="status-badge ${escapeHtml(statusClass)}">${escapeHtml(adminTransactionStatusLabel(item.status))}</span></td>
+      <td><span class="risk-badge ${escapeHtml(riskClass)}">${escapeHtml(adminTransactionRiskLabel(item.risk))}</span></td>
+    </tr>
+  `;
+}
+
+function renderAdminTransactionPager(pagination, state, adminSession) {
+  const tbody = document.getElementById("transactionBody");
+  const tablePanel = tbody?.closest(".table-panel");
+  if (!tablePanel || !pagination) {
+    return;
+  }
+  let pager = tablePanel.querySelector("[data-admin-tx-pager]");
+  if (!pager) {
+    pager = document.createElement("div");
+    pager.className = "au-pagination";
+    pager.dataset.adminTxPager = "true";
+    tablePanel.append(pager);
+  }
+  if (pagination.totalPages <= 1) {
+    pager.innerHTML = "";
+    return;
+  }
+  pager.innerHTML = `
+    <div class="au-page-info">第 ${escapeHtml(pagination.page)} / ${escapeHtml(pagination.totalPages)} 页</div>
+    <div class="au-page-btns">
+      <button class="au-page-btn${pagination.hasPrev ? "" : " disabled"}" type="button" data-page="prev"${pagination.hasPrev ? "" : " disabled"}>←</button>
+      <button class="au-page-btn${pagination.hasNext ? "" : " disabled"}" type="button" data-page="next"${pagination.hasNext ? "" : " disabled"}>→</button>
+    </div>
+  `;
+  pager.querySelector("[data-page='prev']")?.addEventListener("click", () => {
+    updateAdminTransactionsQuery({ page: Math.max(1, state.page - 1) }, adminSession);
+  });
+  pager.querySelector("[data-page='next']")?.addEventListener("click", () => {
+    updateAdminTransactionsQuery({ page: state.page + 1 }, adminSession);
+  });
+}
+
+function clearAdminTransactionPager() {
+  document.querySelector("[data-admin-tx-pager]")?.replaceChildren();
+}
+
+function renderAdminTransactionInspector(item) {
+  const inspector = document.getElementById("inspectorBody");
+  if (!inspector) {
+    return;
+  }
+  if (!item) {
+    inspector.innerHTML = '<p class="muted" style="font-size:14px;line-height:1.7;">没有符合条件的流水。调整筛选条件后再试。</p>';
+    return;
+  }
+  const typeClass = adminTransactionTypeClass(item.type);
+  inspector.innerHTML = `
+    <div class="detail-card">
+      <span class="type-badge ${escapeHtml(typeClass)}">${escapeHtml(ADMIN_TRANSACTION_TYPE_LABEL.get(item.type) || item.type || "流水")}</span>
+      <h3 style="font-size:16px;margin:10px 0 4px">${escapeHtml(item.relatedTitle || item.remark || "平台流水")}</h3>
+      <p class="muted" style="font-size:13px;line-height:1.6">${escapeHtml(item.remark || "系统记录的时间币流水。")}</p>
+    </div>
+    <div class="detail-card">
+      <div class="detail-line"><span>流水 ID</span><strong>TX-${escapeHtml(item.logId)}</strong></div>
+      <div class="detail-line"><span>关联订单</span><strong>${escapeHtml(item.orderId ? `#${item.orderId}` : "--")}</strong></div>
+      <div class="detail-line"><span>交易用户</span><strong>${escapeHtml(adminTransactionCounterpartyText(item))}</strong></div>
+      <div class="detail-line"><span>金额</span><strong>${escapeHtml(formatAmount(item.amount))} ⏂</strong></div>
+      <div class="detail-line"><span>状态</span><strong>${escapeHtml(adminTransactionStatusLabel(item.status))}</strong></div>
+      <div class="detail-line"><span>风险</span><strong>${escapeHtml(adminTransactionRiskLabel(item.risk))}</strong></div>
+    </div>
+    <div class="detail-card">
+      <div class="timeline">
+        <div class="timeline-item"><span class="timeline-dot"></span><div class="timeline-text"><strong>创建时间</strong><span>${escapeHtml(formatDateTime(item.createdAt))}</span></div></div>
+        <div class="timeline-item"><span class="timeline-dot"></span><div class="timeline-text"><strong>审计关联</strong><span>${escapeHtml(`TX-${item.logId} 已纳入平台流水审计`)}</span></div></div>
+        <div class="timeline-item"><span class="timeline-dot"></span><div class="timeline-text"><strong>处理建议</strong><span>${escapeHtml(adminTransactionSuggestion(item))}</span></div></div>
+      </div>
+    </div>
+  `;
+}
+
+function exportAdminTransactionsCsv() {
+  const rows = window.__adminTransactions ?? [];
+  if (rows.length === 0) {
+    showGlobalMessage("当前没有可导出的流水。", "error");
+    return;
+  }
+  const header = ["流水ID", "时间", "类型", "订单", "用户", "金额", "状态", "风险", "备注"];
+  const lines = [
+    header.join(","),
+    ...rows.map((item) => [
+      `TX-${item.logId}`,
+      formatDateTime(item.createdAt),
+      ADMIN_TRANSACTION_TYPE_LABEL.get(item.type) || item.type || "",
+      item.orderId ? `订单 #${item.orderId}` : "",
+      adminTransactionCounterpartyText(item),
+      formatAmount(item.amount),
+      adminTransactionStatusLabel(item.status),
+      adminTransactionRiskLabel(item.risk),
+      item.remark || ""
+    ].map(csvCell).join(","))
+  ];
+  const blob = new Blob([`\ufeff${lines.join("\n")}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `admin-transactions-${Date.now()}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function adminTransactionFilterName(id) {
+  if (id === "typeFilter") {
+    return "type";
+  }
+  if (id === "statusFilter") {
+    return "status";
+  }
+  return "risk";
+}
+
+function adminTransactionCounterpartyText(item) {
+  const publisher = item.order?.publisher?.displayName || item.order?.publisher?.username;
+  const provider = item.order?.provider?.displayName || item.order?.provider?.username;
+  if (publisher || provider) {
+    return `${publisher || "需求方"} / ${provider || "服务方"}`;
+  }
+  return item.user?.displayName || item.user?.username || (item.userId ? `用户 #${item.userId}` : "--");
+}
+
+function setSelectValue(id, value) {
+  const element = document.getElementById(id);
+  if (element) {
+    element.value = value ?? "";
+  }
+}
+
+function adminTransactionTypeClass(type) {
+  if (type === "income") {
+    return "type-income";
+  }
+  if (type === "expense" || type === "system_fee") {
+    return "type-expense";
+  }
+  if (type === "freeze") {
+    return "type-freeze";
+  }
+  if (type === "release") {
+    return "type-release";
+  }
+  if (type === "refund") {
+    return "type-refund";
+  }
+  return "type-expense";
+}
+
+function adminTransactionStatusLabel(status) {
+  if (status === "pending") {
+    return "处理中";
+  }
+  if (status === "review") {
+    return "待核查";
+  }
+  return "已入账";
+}
+
+function adminTransactionRiskLabel(risk) {
+  if (risk === "high") {
+    return "高风险";
+  }
+  if (risk === "mid") {
+    return "中风险";
+  }
+  return "低风险";
+}
+
+function adminTransactionSuggestion(item) {
+  if (item.risk === "high") {
+    return "建议进入人工复核，核对订单、纠纷和重复退款记录。";
+  }
+  if (item.status === "pending") {
+    return "等待订单完成或超时释放，持续保留审计链路。";
+  }
+  return "正常流水记录，可通过审计日志追踪来源。";
+}
+
+function adminAuditActionLabel(action) {
+  if (action === "admin.user.disable") {
+    return "禁用了用户";
+  }
+  if (action === "admin.user.enable") {
+    return "启用了用户";
+  }
+  return "记录了管理操作";
+}
+
+function formatInteger(value) {
+  return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 0 }).format(Number(value || 0));
+}
+
+function formatDateOnly(value) {
+  if (!value) {
+    return "--";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "--";
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(date);
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+function debounce(fn, delay) {
+  let timer = 0;
+  return (...args) => {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => fn(...args), delay);
+  };
+}
+
+function adminErrorMessage(error) {
+  const code = error?.payload?.error?.code;
+  if (code === "ADMIN_REQUIRED" || code === "FORBIDDEN") {
+    return "当前账号无管理权限。";
+  }
+  if (code === "USER_NOT_FOUND") {
+    return "用户不存在或已被移除。";
+  }
+  if (code === "INVALID_USER_STATUS") {
+    return "用户状态参数无效。";
+  }
+  if (code === "CANNOT_UPDATE_SELF_STATUS" || code === "ADMIN_SELF_DISABLE_NOT_ALLOWED") {
+    return "不能修改当前登录管理员自己的状态。";
+  }
+  return authErrorMessage(error);
 }
 
 async function hydrateWalletFreezeRoute(session) {
