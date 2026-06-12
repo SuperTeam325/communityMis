@@ -2,7 +2,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { buildRouteIndexHtml, PROJECT_ROOT, renderPrototypeHtml, UI_SOURCE_ROOT } from "./src/prototypeRenderer.mjs";
+import { buildRouteIndexHtml, PRODUCTION_UI_ROOT, PROJECT_ROOT, renderPrototypeHtml } from "./src/prototypeRenderer.mjs";
 import { resolveRoute, routePath, routes } from "./src/routes.mjs";
 
 const CURRENT_FILE = fileURLToPath(import.meta.url);
@@ -22,8 +22,8 @@ const MIME_TYPES = new Map([
 ]);
 
 const staticMounts = [
-  { prefix: "/css/", root: path.join(UI_SOURCE_ROOT, "css") },
-  { prefix: "/js/", root: path.join(UI_SOURCE_ROOT, "js") },
+  { prefix: "/css/", root: path.join(PRODUCTION_UI_ROOT, "css") },
+  { prefix: "/js/", root: path.join(PRODUCTION_UI_ROOT, "js") },
   { prefix: "/assets/styles/", root: path.join(FRONTEND_ROOT, "public", "styles") },
   { prefix: "/assets/app/", root: path.join(FRONTEND_ROOT, "src") }
 ];

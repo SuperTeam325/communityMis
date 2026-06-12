@@ -265,6 +265,34 @@ body[data-route-id="post-detail"] .post-actions-row .action-btn svg {
   height: 20px;
 }
 
+body[data-route-id="feed"] .feed-runtime-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md, 12px);
+  margin-bottom: var(--space-md, 12px);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+body[data-route-id="feed"] .feed-runtime-summary strong {
+  color: var(--fg);
+}
+
+body[data-route-id="feed"] .task-card .publisher {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+body[data-route-id="feed"] .feed-runtime-state {
+  margin-top: var(--space-xl, 24px);
+}
+
+body[data-route-id="feed"] .feed-pager {
+  margin-bottom: 0;
+}
+
 .request-accept-btn:disabled {
   cursor: not-allowed;
   opacity: 0.58;

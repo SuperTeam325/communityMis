@@ -10,7 +10,7 @@ npm run dev
 
 默认服务：
 
-- 前端原型路由：http://127.0.0.1:5173
+- 前端生产页面：http://127.0.0.1:5173
 - 后端健康检查：http://127.0.0.1:3001/api/health
 - 前端路由清单：http://127.0.0.1:5173/routes.json
 
@@ -21,12 +21,12 @@ npm run dev:frontend
 npm run dev:backend
 ```
 
-## 阶段 01 路由
+## 生产路由
 
-`UISource/index.html` 保持为入口页，`UISource/screens/*.html` 每个原型页面映射为独立生产路由。示例：
+前端沿用 `frontend/public/ui` 中从设计原型整理出的视觉资源，并通过浏览器运行时脚本调用后端 `/api/*` 接口加载真实数据。示例：
 
 - 用户端：`/feed`、`/tasks`、`/post`、`/messages`、`/profile`
-- 详情页演示入口：`/posts/demo`、`/orders/demo`、`/users/demo`、`/disputes/demo`
+- 详情页：`/posts/:id`、`/orders/:id`、`/users/:id`、`/disputes/:id`
 - 管理端：`/admin/login`、`/admin/dashboard`、`/admin/users`、`/admin/ai/config`
 
 旧原型 URL 例如 `/screens/feed.html` 会重定向到对应生产路由 `/feed`。

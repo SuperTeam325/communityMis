@@ -56,7 +56,7 @@ function checkStaticAuthWiring() {
   record(loginHtml.includes("/assets/app/prototype-shell.mjs"), "login page loads production shell");
   record(loginHtml.includes('id="login-submit"') && loginHtml.includes('id="register-submit"'), "login page exposes login and inline register controls");
   record(registerHtml.includes('id="register-form"') && registerHtml.includes('id="agreement"'), "register page exposes rule agreement form");
-  record(adminLoginHtml.includes('id="admin-login-form"') && adminLoginHtml.includes("admin_main"), "admin login page exposes real seed account hint");
+  record(adminLoginHtml.includes('id="admin-login-form"') && !adminLoginHtml.includes("admin_main"), "admin login page exposes form without static seed account hint");
   record(profileHtml.includes('id="logout-button"') && profileHtml.includes("/admin/login"), "profile page exposes logout and admin entry");
   record(routes.some((item) => item.surface === "admin") && routes.some((item) => item.surface === "user"), "route table separates user and admin surfaces");
 }

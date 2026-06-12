@@ -14,6 +14,7 @@ const api = createApiClient({
   baseUrl: window.__API_BASE_URL__ ?? "http://127.0.0.1:3001"
 });
 const auth = createAuthController({ api });
+let feedCategoriesCache = null;
 const TASK_PAGE_SIZE = 6;
 const TASK_FILTERS = new Map([
   ["all", { label: "全部任务", category: null, tag: null }],
@@ -90,6 +91,7 @@ const ADMIN_SENSITIVE_WORDS_PAGE_SIZE = 20;
 const ADMIN_RISK_CONTENT_PAGE_SIZE = 20;
 const ADMIN_AUDIT_LOG_PAGE_SIZE = 15;
 const ADMIN_AI_PAGE_SIZE = 20;
+const FEED_PAGE_SIZE = 8;
 const ADMIN_USER_STATUS_LABEL = new Map([
   ["active", "正常"],
   ["disabled", "已禁用"]
@@ -255,27 +257,21 @@ function bindRegisterPageForm() {
   form.addEventListener("submit", interceptSubmit(async () => {
     const username = document.getElementById("username")?.value.trim() ?? "";
     const phone = document.getElementById("phone")?.value.trim() ?? "";
-    const phoneCode = document.getElementById("phone-code")?.value.trim() ?? "";
     const email = document.getElementById("email")?.value.trim() ?? "";
-    const emailCode = document.getElementById("email-code")?.value.trim() ?? "";
     const password = document.getElementById("password")?.value ?? "";
     const agreement = document.getElementById("agreement")?.checked ?? false;
     const emailFilled = email.length > 0;
     const usernameOk = isValidUsername(username);
     const phoneOk = /^1[3-9]\d{9}$/.test(phone);
-    const phoneCodeOk = phoneCode === "246810";
     const emailOk = !emailFilled || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-    const emailCodeOk = !emailFilled || emailCode === "135790";
     const passwordOk = isValidPassword(password);
 
     setFieldError("username", "username-error", !usernameOk, "用户名需为 3-50 位英文、数字或下划线。");
     setFieldError("phone", "phone-error", !phoneOk);
-    setFieldError("phone-code", "phone-code-error", !phoneCodeOk);
     setFieldError("email", "email-error", !emailOk);
-    setFieldError("email-code", "email-code-error", !emailCodeOk);
     setFieldError("password", "password-error", !passwordOk, "密码需至少 8 位。");
 
-    if (!usernameOk || !phoneOk || !phoneCodeOk || !emailOk || !emailCodeOk || !passwordOk) {
+    if (!usernameOk || !phoneOk || !emailOk || !passwordOk) {
       showInlineMessage(button, "请先修正表单中的红色提示。", "error");
       return;
     }
@@ -363,6 +359,10 @@ function installLogoutHandlers() {
 
 async function hydrateCurrentRoute(session) {
   try {
+    if (route.id === "feed") {
+      await hydrateFeedRoute(session);
+      return;
+    }
     if (route.id === "post") {
       await hydratePostRoute(session);
       return;
@@ -505,6 +505,15 @@ async function hydrateCurrentRoute(session) {
   } catch (error) {
     showGlobalMessage(authErrorMessage(error), "error");
   }
+}
+
+async function hydrateFeedRoute(session) {
+  const userSession = session ?? auth.readSession("user");
+  installFeedControls(userSession);
+  await Promise.all([
+    loadFeed(readFeedQuery(), userSession),
+    hydrateFeedNotificationDot(userSession)
+  ]);
 }
 
 async function hydrateProfileRoute(session) {
@@ -888,6 +897,336 @@ function showPostToast(text) {
   toast.textContent = text;
   toast.classList.add("show");
   window.setTimeout(() => toast.classList.remove("show"), 2200);
+}
+
+function installFeedControls(userSession) {
+  if (document.body.dataset.feedBound === "true") {
+    return;
+  }
+  document.body.dataset.feedBound = "true";
+
+  const searchInput = document.querySelector(".feed-header .search-bar input");
+  let searchTimer = null;
+  searchInput?.addEventListener("input", () => {
+    window.clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(() => {
+      updateFeedQuery({ keyword: searchInput.value.trim(), page: 1 }, userSession);
+    }, 350);
+  });
+  searchInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      window.clearTimeout(searchTimer);
+      updateFeedQuery({ keyword: searchInput.value.trim(), page: 1 }, userSession);
+    }
+  });
+
+  document.querySelectorAll(".feed-header .category-tabs .chip").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      updateFeedQuery({ filter: button.dataset.filter || "all", page: 1 }, userSession);
+    });
+  });
+
+  window.addEventListener("popstate", () => {
+    loadFeed(readFeedQuery(), userSession);
+  });
+}
+
+async function loadFeed(state, userSession) {
+  applyFeedControls(state);
+  renderFeedState("loading", "正在加载邻里互助动态。");
+  try {
+    const [requestPayload, categoryPayload] = await Promise.all([
+      api.requests.list(feedApiParams(state)),
+      loadFeedCategories()
+    ]);
+    renderFeedCategories(categoryPayload.categories ?? [], state, userSession);
+    renderFeedList(requestPayload, state, userSession);
+  } catch (error) {
+    renderFeedState("error", taskErrorMessage(error), {
+      actionText: "重试",
+      onAction: () => loadFeed(readFeedQuery(), userSession)
+    });
+  }
+}
+
+async function loadFeedCategories() {
+  if (!feedCategoriesCache) {
+    feedCategoriesCache = api.categories.list().catch((error) => {
+      feedCategoriesCache = null;
+      throw error;
+    });
+  }
+  return feedCategoriesCache;
+}
+
+function readFeedQuery() {
+  const params = new URLSearchParams(window.location.search);
+  const filterRaw = params.get("filter");
+  const category = params.get("category");
+  const tag = params.get("tag") || params.get("tags");
+  return {
+    keyword: (params.get("keyword") ?? params.get("q") ?? "").trim(),
+    filter: TASK_FILTERS.has(filterRaw) ? filterRaw : taskFilterFromParams(category, tag),
+    category,
+    tag,
+    status: params.get("status") || "open",
+    sortApi: params.get("sort") || "latest",
+    page: positiveInteger(params.get("page"), 1),
+    pageSize: positiveInteger(params.get("pageSize"), FEED_PAGE_SIZE)
+  };
+}
+
+function updateFeedQuery(patch, userSession) {
+  const current = readFeedQuery();
+  const next = {
+    ...current,
+    ...patch
+  };
+  const filter = TASK_FILTERS.get(next.filter) ?? TASK_FILTERS.get("all");
+  const params = new URLSearchParams();
+
+  if (next.keyword) {
+    params.set("keyword", next.keyword);
+  }
+  if (next.filter && next.filter !== "all") {
+    params.set("filter", next.filter);
+  }
+  if (filter?.category) {
+    params.set("category", filter.category);
+  } else if (next.category) {
+    params.set("category", next.category);
+  }
+  if (filter?.tag) {
+    params.set("tag", filter.tag);
+  } else if (next.tag) {
+    params.set("tag", next.tag);
+  }
+  if (next.status && next.status !== "open") {
+    params.set("status", next.status);
+  }
+  if (next.sortApi && next.sortApi !== "latest") {
+    params.set("sort", next.sortApi);
+  }
+  if (next.page > 1) {
+    params.set("page", String(next.page));
+  }
+  if (next.pageSize !== FEED_PAGE_SIZE) {
+    params.set("pageSize", String(next.pageSize));
+  }
+
+  const target = `${window.location.pathname}${params.toString() ? `?${params}` : ""}`;
+  window.history.pushState({}, "", target);
+  loadFeed(readFeedQuery(), userSession);
+}
+
+function feedApiParams(state) {
+  const filter = TASK_FILTERS.get(state.filter) ?? TASK_FILTERS.get("all");
+  return {
+    keyword: state.keyword,
+    category: filter?.category ?? state.category,
+    tag: filter?.tag ?? state.tag,
+    status: state.status,
+    sort: state.sortApi,
+    page: state.page,
+    pageSize: state.pageSize
+  };
+}
+
+function applyFeedControls(state) {
+  const searchInput = document.querySelector(".feed-header .search-bar input");
+  if (searchInput && searchInput.value !== state.keyword) {
+    searchInput.value = state.keyword;
+  }
+  document.querySelectorAll(".feed-header .category-tabs .chip").forEach((button) => {
+    const categoryCode = button.dataset.categoryCode;
+    const active = categoryCode
+      ? categoryCode === state.category
+      : (button.dataset.filter || "all") === state.filter && !state.category;
+    button.classList.toggle("active", active);
+  });
+}
+
+function renderFeedCategories(categories, state, userSession) {
+  const tabs = document.querySelector(".feed-header .category-tabs");
+  if (!tabs) {
+    return;
+  }
+
+  const staticFilters = [
+    ["all", "全部"],
+    ["express", "快递代取"],
+    ["queue", "排队代办"],
+    ["pet", "宠物照看"],
+    ["shopping", "购物跑腿"],
+    ["home", "家政帮手"],
+    ["other", "其他"]
+  ];
+  const staticLabels = new Set(staticFilters.map(([, label]) => label));
+  const categoryButtons = (Array.isArray(categories) ? categories : [])
+    .filter((category) => category?.code && !staticLabels.has(category.name))
+    .slice(0, 4)
+    .map((category) => {
+      const active = category.code === state.category;
+      return `<button class="chip${active ? " active" : ""}" data-filter="all" data-category-code="${escapeAttribute(category.code)}">${escapeHtml(category.name)}</button>`;
+    });
+
+  tabs.innerHTML = `
+    ${staticFilters.map(([filter, label]) => {
+      const active = filter === state.filter && !state.category;
+      return `<button class="chip${active ? " active" : ""}" data-filter="${escapeHtml(filter)}">${escapeHtml(label)}</button>`;
+    }).join("")}
+    ${categoryButtons.join("")}
+  `;
+
+  tabs.querySelectorAll(".chip[data-filter]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      const categoryCode = button.dataset.categoryCode;
+      if (categoryCode) {
+        updateFeedQuery({ filter: "all", category: categoryCode, tag: null, page: 1 }, userSession);
+        return;
+      }
+      updateFeedQuery({ filter: button.dataset.filter || "all", category: null, tag: null, page: 1 }, userSession);
+    });
+  });
+}
+
+function renderFeedList(payload, state, userSession) {
+  const content = document.querySelector(".feed-content");
+  if (!content) {
+    return;
+  }
+  const requests = Array.isArray(payload.requests) ? payload.requests : [];
+  const pagination = payload.pagination ?? { page: state.page, pageSize: state.pageSize, total: requests.length, totalPages: 1 };
+
+  if (requests.length === 0) {
+    renderFeedState("empty", state.keyword ? "没有找到匹配的开放需求，可以换个关键词试试。" : "当前暂无开放需求。");
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="feed-runtime-summary" role="status">
+      <span>真实任务流</span>
+      <strong>${escapeHtml(pagination.total)} 个开放需求</strong>
+    </div>
+    ${requests.map(feedRequestCardHtml).join("")}
+  `;
+  bindTaskCards();
+  bindFeedAcceptButtons(userSession);
+  renderFeedPager(pagination, state, userSession);
+}
+
+function feedRequestCardHtml(item) {
+  const publisher = item.publisher ?? {};
+  const categoryName = item.category?.name ?? "邻里互助";
+  const urgent = Number(item.estimatedHours) <= 1 || Number(item.coinAmount) >= 20;
+  return `
+    <article class="task-card${urgent ? " urgent" : ""}" data-request-id="${escapeHtml(item.requestId)}" tabindex="0" role="link" aria-label="查看${escapeHtml(item.title)}详情">
+      <div class="task-top">
+        <span class="task-title">${escapeHtml(item.title)}</span>
+        <span class="reward-tag">⏂ ${escapeHtml(formatAmount(item.coinAmount))}</span>
+      </div>
+      <p class="task-desc">${escapeHtml(item.descriptionSummary || item.description || "发布者暂未填写需求说明。")}</p>
+      <div class="task-meta">
+        <span>${pinIcon()}${escapeHtml(item.location || "地点待确认")}</span>
+        <span>${clockIcon()}${escapeHtml(formatHours(item.estimatedHours))} · ${escapeHtml(reviewTime(item.createdAt))}</span>
+        <span class="badge badge--warning">${escapeHtml(categoryName)}</span>
+      </div>
+      <div class="task-footer">
+        <a class="publisher" href="/users/${encodeURIComponent(publisher.userId ?? "demo")}">
+          <div class="avatar" style="background:${avatarColor(publisher.userId)};">${escapeHtml(firstCharacter(displayName(publisher)))}</div>
+          <span>${escapeHtml(displayName(publisher))} · ${escapeHtml(reviewTime(item.createdAt))}</span>
+        </a>
+        <button class="btn btn--primary btn--sm accept-btn" type="button">我要接单</button>
+      </div>
+    </article>
+  `;
+}
+
+function bindFeedAcceptButtons(userSession) {
+  document.querySelectorAll(".feed-content .task-card .accept-btn").forEach((button) => {
+    button.replaceWith(button.cloneNode(true));
+  });
+  document.querySelectorAll(".feed-content .task-card .accept-btn").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const card = button.closest(".task-card[data-request-id]");
+      const requestId = card?.dataset.requestId;
+      if (!requestId) {
+        return;
+      }
+      if (!userSession?.token) {
+        navigateTo(`/login?redirect=${encodeURIComponent(`/posts/${requestId}`)}`);
+        return;
+      }
+      const title = card.querySelector(".task-title")?.textContent?.trim() || "这条需求";
+      if (!window.confirm(`确认接单「${title}」？接单后会创建订单并通知发布者。`)) {
+        return;
+      }
+      const restore = setLoading(button, "接单中...");
+      try {
+        const result = await api.requests.accept(userSession.token, requestId);
+        navigateTo(`/orders/${encodeURIComponent(result.order.orderId)}`);
+      } catch (error) {
+        restore();
+        showGlobalMessage(acceptErrorMessage(error), "error");
+      }
+    });
+  });
+}
+
+function renderFeedPager(pagination, state, userSession) {
+  const content = document.querySelector(".feed-content");
+  if (!content || !pagination || pagination.totalPages <= 1) {
+    return;
+  }
+  content.insertAdjacentHTML("beforeend", `
+    <div class="task-pager feed-pager">
+      <button class="btn btn--outline" type="button" data-page="prev"${pagination.hasPrev ? "" : " disabled"}>上一页</button>
+      <span>${pagination.page} / ${pagination.totalPages}</span>
+      <button class="btn btn--outline" type="button" data-page="next"${pagination.hasNext ? "" : " disabled"}>下一页</button>
+    </div>
+  `);
+  const pager = content.querySelector(".feed-pager");
+  pager?.querySelector("[data-page='prev']")?.addEventListener("click", () => {
+    updateFeedQuery({ page: Math.max(1, state.page - 1) }, userSession);
+  });
+  pager?.querySelector("[data-page='next']")?.addEventListener("click", () => {
+    updateFeedQuery({ page: state.page + 1 }, userSession);
+  });
+}
+
+function renderFeedState(kind, message, options = {}) {
+  const content = document.querySelector(".feed-content");
+  if (!content) {
+    return;
+  }
+  const title = kind === "loading" ? "加载中" : kind === "error" ? "加载失败" : "暂无动态";
+  content.innerHTML = `
+    <div class="task-runtime-state feed-runtime-state" data-state="${escapeHtml(kind)}">
+      <strong>${escapeHtml(title)}</strong>
+      <p>${escapeHtml(message)}</p>
+      ${options.actionText ? `<button class="btn btn--outline" type="button" data-runtime-action>${escapeHtml(options.actionText)}</button>` : ""}
+    </div>
+  `;
+  content.querySelector("[data-runtime-action]")?.addEventListener("click", options.onAction);
+}
+
+async function hydrateFeedNotificationDot(userSession) {
+  const dot = document.querySelector(".feed-header .icon-btn .dot");
+  if (!dot || !userSession?.token) {
+    dot?.setAttribute("hidden", "");
+    return;
+  }
+  try {
+    const payload = await api.notifications.list(userSession.token, { pageSize: 1 });
+    dot.hidden = Number(payload.unreadTotal ?? 0) <= 0;
+  } catch {
+    dot.hidden = true;
+  }
 }
 
 async function hydrateTasksRoute() {

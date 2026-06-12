@@ -37,11 +37,20 @@ function checkStaticAcceptanceWiring() {
   const startLocal = fs.readFileSync(path.join(projectRoot, "scripts", "start-local.mjs"), "utf8");
   record(startLocal.includes("3001") && startLocal.includes("5173"), "local launcher keeps backend 3001 and frontend 5173 defaults");
 
+  const rendererSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "prototypeRenderer.mjs"), "utf8");
+  const frontendServerSource = fs.readFileSync(path.join(projectRoot, "frontend", "server.mjs"), "utf8");
+  record(rendererSource.includes("PRODUCTION_UI_ROOT") && rendererSource.includes("public\", \"ui"), "prototype renderer reads copied production UI resources");
+  record(frontendServerSource.includes("PRODUCTION_UI_ROOT") && !frontendServerSource.includes("UI_SOURCE_ROOT"), "frontend static mounts serve copied production UI assets");
+  record(fs.existsSync(path.join(projectRoot, "frontend", "public", "ui", "index.html")), "production UI entry copy exists");
+  record(fs.existsSync(path.join(projectRoot, "frontend", "public", "ui", "css", "common.css")), "production UI CSS copy exists");
+  record(fs.existsSync(path.join(projectRoot, "frontend", "public", "ui", "js", "ai-modal.js")), "production UI JS copy exists");
+
   for (const [width, height] of [[390, 844], [820, 1180], [1440, 900], [1920, 1080]]) {
     record(responsiveViewports.some((item) => item.width === width && item.height === height), `responsive viewport registered: ${width}x${height}`);
   }
 
   for (const id of [
+    "feed",
     "tasks",
     "post",
     "order-detail",
@@ -72,10 +81,62 @@ function checkStaticAcceptanceWiring() {
     record(html.includes("/assets/app/prototype-shell.mjs"), `${id} page loads production shell for browser acceptance`);
   }
 
+  const shellSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "prototype-shell.mjs"), "utf8");
+  record(shellSource.includes("hydrateFeedRoute") && shellSource.includes("api.requests.list(feedApiParams"), "feed page hydrates real request data from backend API");
+  checkProductionUiHasNoDemoContent();
+
   const readme = fs.readFileSync(path.join(projectRoot, "README.md"), "utf8");
   for (const expected of ["user_a / user123456", "user_b / user123456", "admin_main / admin123456", "npm run test:stage22"]) {
     record(readme.includes(expected), `README documents acceptance detail: ${expected}`);
   }
+}
+
+function checkProductionUiHasNoDemoContent() {
+  const productionUiRoot = path.join(projectRoot, "frontend", "public", "ui");
+  const bannedPatterns = [
+    /示例|演示|Demo|demo|测试账号|演示码|验证码：/,
+    /张叔|李阿姨|王大壮|陈阿姨|刘奶奶|赵姐|小王|张三|李四|阳光花园/,
+    /ORD-240|DSP-240|AUD-\d|ERR-\d|LB-\d|backup-2026/,
+    /aiResponses|getResponse\(|Mock AI|addMockEvidence|mockNames|DSP-20240604/
+  ];
+  const files = listFiles(productionUiRoot, [".html", ".js"]);
+  const offenders = [];
+  for (const file of files) {
+    const source = fs.readFileSync(file, "utf8");
+    for (const pattern of bannedPatterns) {
+      const match = source.match(pattern);
+      if (match) {
+        offenders.push(`${path.relative(projectRoot, file)}: ${match[0]}`);
+        break;
+      }
+    }
+  }
+  record(offenders.length === 0, offenders.length === 0
+    ? "production UI resources contain no demo static business content"
+    : `production UI resources still contain demo content: ${offenders.slice(0, 8).join("; ")}`);
+
+  const aiModal = fs.readFileSync(path.join(productionUiRoot, "js", "ai-modal.js"), "utf8");
+  record(aiModal.includes("/api/ai/chat") && !aiModal.includes("aiResponses"), "AI modal calls backend chat API instead of local mock responses");
+
+  for (const id of ["feed", "tasks", "orders", "wallet", "messages", "ai-assistant", "ai-results", "profile", "admin-system", "admin-ai-config"]) {
+    const html = renderPrototypeHtml(routeById.get(id));
+    const hasDemo = bannedPatterns.some((pattern) => pattern.test(html));
+    record(!hasDemo, `${id} rendered page is stripped of demo business content`);
+  }
+}
+
+function listFiles(root, extensions) {
+  const entries = fs.readdirSync(root, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const filePath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...listFiles(filePath, extensions));
+    } else if (extensions.includes(path.extname(entry.name))) {
+      files.push(filePath);
+    }
+  }
+  return files;
 }
 
 async function checkCoreBusinessFlow() {
