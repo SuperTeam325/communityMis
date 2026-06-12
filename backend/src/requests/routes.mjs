@@ -6,6 +6,7 @@ const REQUEST_ACCEPT_RE = /^\/api\/requests\/([^/]+)\/accept$/;
 const ORDER_DETAIL_RE = /^\/api\/orders\/([^/]+)$/;
 const ORDER_CONFIRM_RE = /^\/api\/orders\/([^/]+)\/confirm$/;
 const ORDER_REVIEWS_RE = /^\/api\/orders\/([^/]+)\/reviews$/;
+const NOTIFICATION_READ_RE = /^\/api\/notifications\/([^/]+)\/read$/;
 const PUBLIC_REQUEST_STATUSES = new Set(["open", "accepted", "completed"]);
 const ORDER_STATUSES = new Set(["accepted", "payer_confirmed", "both_confirmed", "completed", "disputed"]);
 const ORDER_CONFIRMABLE_STATUSES = new Set(["accepted", "payer_confirmed", "both_confirmed"]);
@@ -17,6 +18,8 @@ const ORDER_SORTS = new Set(["latest", "oldest", "coin_desc", "coin_asc"]);
 const WALLET_TRANSACTION_TYPES = new Set(["all", "income", "expense", "freeze", "release", "refund"]);
 const WALLET_FREEZE_STATUSES = new Set(["all", "active", "dispute", "released"]);
 const WALLET_FREEZE_REASONS = new Set(["all", "order", "dispute"]);
+const NOTIFICATION_TYPES = new Set(["all", "system", "order", "wallet", "review", "dispute", "ai", "social"]);
+const NOTIFICATION_READ_FILTERS = new Set(["all", "read", "unread"]);
 const REQUEST_BODY_MAX_BYTES = 64 * 1024;
 const LOCAL_SENSITIVE_RULES = [
   { word: "私下交易", level: "block", reason: "平台交易需通过邻帮完成，不能引导私下交易。" },
@@ -133,6 +136,37 @@ export async function handleRequestRoutes({ request, response, url, authService 
     const context = await authService.authenticateRequest(request);
     authService.requireRole(context, ["user"]);
     sendJson(response, 200, await walletFreezesPayload(authService.store, context.user.userId, url.searchParams));
+    return true;
+  }
+
+  if (url.pathname === "/api/notifications") {
+    allowOnly(request, response, ["GET"]);
+    const context = await authService.authenticateRequest(request);
+    authService.requireRole(context, ["user"]);
+    sendJson(response, 200, await notificationListPayload(authService.store, context.user.userId, url.searchParams));
+    return true;
+  }
+
+  if (url.pathname === "/api/notifications/read-all") {
+    allowOnly(request, response, ["POST"]);
+    const context = await authService.authenticateRequest(request);
+    authService.requireRole(context, ["user"]);
+    if (typeof authService.store.markAllNotificationsRead !== "function") {
+      throw new HttpError(500, "NOTIFICATION_STORE_UNAVAILABLE", "Notification read state is not available.");
+    }
+    const result = await authService.store.markAllNotificationsRead(context.user.userId);
+    sendJson(response, 200, {
+      updated: Number(result?.updated ?? 0),
+      unreadTotal: Number(result?.unreadTotal ?? 0)
+    });
+    return true;
+  }
+
+  if (url.pathname === "/api/messages") {
+    allowOnly(request, response, ["GET"]);
+    const context = await authService.authenticateRequest(request);
+    authService.requireRole(context, ["user"]);
+    sendJson(response, 200, await messageListPayload(authService.store, context.user.userId, url.searchParams));
     return true;
   }
 
@@ -262,6 +296,22 @@ export async function handleRequestRoutes({ request, response, url, authService 
       viewerId: context.user.userId,
       viewerRole: context.user.role
     }));
+    return true;
+  }
+
+  const notificationReadMatch = url.pathname.match(NOTIFICATION_READ_RE);
+  if (notificationReadMatch) {
+    allowOnly(request, response, ["POST"]);
+    const context = await authService.authenticateRequest(request);
+    authService.requireRole(context, ["user"]);
+    if (typeof authService.store.markNotificationRead !== "function") {
+      throw new HttpError(500, "NOTIFICATION_STORE_UNAVAILABLE", "Notification read state is not available.");
+    }
+    const notification = await authService.store.markNotificationRead(context.user.userId, parsePositiveInt(notificationReadMatch[1], "NOTIFICATION_NOT_FOUND"));
+    if (!notification) {
+      throw new HttpError(404, "NOTIFICATION_NOT_FOUND", "Notification was not found.");
+    }
+    sendJson(response, 200, { notification: notificationDto(notification) });
     return true;
   }
 
@@ -674,6 +724,54 @@ async function walletFreezesPayload(store, userId, searchParams) {
   };
 }
 
+async function notificationListPayload(store, userId, searchParams) {
+  if (typeof store.listNotificationsForUserId !== "function") {
+    throw new HttpError(500, "NOTIFICATION_STORE_UNAVAILABLE", "Notification listing is not available.");
+  }
+  const query = normalizeNotificationQuery(searchParams);
+  const result = await store.listNotificationsForUserId(userId, query);
+  const rawNotifications = Array.isArray(result)
+    ? result
+    : Array.isArray(result?.notifications) ? result.notifications : [];
+  const notifications = rawNotifications.map(notificationDto);
+  const total = Number(result?.total ?? notifications.length);
+  const unreadTotal = Number(result?.unreadTotal ?? notifications.filter((item) => !item.isRead).length);
+  return {
+    notifications,
+    pagination: paginationDto(query.page, query.pageSize, total),
+    filters: {
+      type: query.type,
+      read: query.read,
+      page: query.page,
+      pageSize: query.pageSize
+    },
+    unreadTotal,
+    summaries: notificationSummaries(notifications, unreadTotal, total)
+  };
+}
+
+async function messageListPayload(store, userId, searchParams) {
+  if (typeof store.listMessagesForUserId !== "function") {
+    throw new HttpError(500, "MESSAGE_STORE_UNAVAILABLE", "Message listing is not available.");
+  }
+  const query = normalizeMessageQuery(searchParams);
+  const result = await store.listMessagesForUserId(userId, query);
+  const rawConversations = Array.isArray(result)
+    ? result
+    : Array.isArray(result?.conversations) ? result.conversations : [];
+  const conversations = rawConversations.map(conversationDto);
+  const total = Number(result?.total ?? conversations.length);
+  return {
+    conversations,
+    pagination: paginationDto(query.page, query.pageSize, total),
+    filters: {
+      page: query.page,
+      pageSize: query.pageSize
+    },
+    unreadTotal: Number(result?.unreadTotal ?? conversations.reduce((sum, item) => sum + Number(item.unreadCount ?? 0), 0))
+  };
+}
+
 async function orderReviewsPayload(store, order, options = {}) {
   const reviews = await reviewsForOrder(store, order.orderId);
   return {
@@ -1076,6 +1174,38 @@ function walletFreezeDto(item) {
   };
 }
 
+function notificationDto(item) {
+  const businessType = item.businessType ?? item.type ?? null;
+  const businessId = item.businessId ?? null;
+  return {
+    notificationId: item.notificationId,
+    userId: item.userId,
+    type: item.type,
+    title: item.title,
+    content: item.content,
+    businessType,
+    businessId,
+    href: item.href ?? businessHref(businessType, businessId),
+    isRead: Boolean(item.isRead ?? item.readAt),
+    readAt: item.readAt ?? null,
+    createdAt: item.createdAt
+  };
+}
+
+function conversationDto(item) {
+  return {
+    conversationId: item.conversationId,
+    type: item.type ?? "direct",
+    title: item.title ?? "邻帮消息",
+    participant: item.participant ? publicPublisherDto(item.participant) : null,
+    orderId: item.orderId ?? null,
+    preview: item.preview ?? "",
+    unreadCount: Number(item.unreadCount ?? 0),
+    href: item.href ?? (item.orderId ? businessHref("order", item.orderId) : "/notifications"),
+    updatedAt: item.updatedAt ?? item.createdAt ?? null
+  };
+}
+
 function reviewDto(item) {
   return {
     reviewId: item.reviewId,
@@ -1182,6 +1312,31 @@ function normalizeWalletFreezeQuery(searchParams) {
   return {
     status,
     reasonType,
+    page: parsePositiveInt(searchParams.get("page") ?? "1", "INVALID_PAGE", 1, 1000),
+    pageSize: parsePositiveInt(searchParams.get("pageSize") ?? searchParams.get("limit") ?? "20", "INVALID_PAGE_SIZE", 1, 50)
+  };
+}
+
+function normalizeNotificationQuery(searchParams) {
+  const rawType = optionalLower(searchParams.get("type") ?? searchParams.get("category") ?? searchParams.get("filter")) ?? "all";
+  const type = rawType === "coin" ? "wallet" : rawType;
+  if (!NOTIFICATION_TYPES.has(type)) {
+    throw new HttpError(400, "INVALID_NOTIFICATION_TYPE", "Unsupported notification type filter.");
+  }
+  const read = optionalLower(searchParams.get("read") ?? searchParams.get("status")) ?? "all";
+  if (!NOTIFICATION_READ_FILTERS.has(read)) {
+    throw new HttpError(400, "INVALID_NOTIFICATION_READ", "Unsupported notification read filter.");
+  }
+  return {
+    type,
+    read,
+    page: parsePositiveInt(searchParams.get("page") ?? "1", "INVALID_PAGE", 1, 1000),
+    pageSize: parsePositiveInt(searchParams.get("pageSize") ?? searchParams.get("limit") ?? "20", "INVALID_PAGE_SIZE", 1, 50)
+  };
+}
+
+function normalizeMessageQuery(searchParams) {
+  return {
     page: parsePositiveInt(searchParams.get("page") ?? "1", "INVALID_PAGE", 1, 1000),
     pageSize: parsePositiveInt(searchParams.get("pageSize") ?? searchParams.get("limit") ?? "20", "INVALID_PAGE_SIZE", 1, 50)
   };
@@ -1450,15 +1605,48 @@ function businessTypeForTransaction(item) {
   return "system";
 }
 
+function notificationSummaries(notifications, unreadTotal, total) {
+  const summaries = {
+    all: Number(total ?? notifications.length),
+    unread: Number(unreadTotal ?? 0),
+    system: 0,
+    order: 0,
+    wallet: 0,
+    review: 0,
+    dispute: 0,
+    ai: 0,
+    social: 0
+  };
+  for (const item of notifications) {
+    const key = item.type === "coin" ? "wallet" : item.type;
+    if (Object.hasOwn(summaries, key)) {
+      summaries[key] += 1;
+    }
+  }
+  return summaries;
+}
+
 function businessHref(type, id) {
+  if (type === "wallet") {
+    return "/wallet";
+  }
+  if (type === "ai") {
+    return "/ai/assistant";
+  }
+  if (type === "system" || type === "social") {
+    return "/notifications";
+  }
   if (!id) {
     return null;
   }
   if (type === "dispute") {
     return `/disputes/${encodeURIComponent(id)}`;
   }
-  if (type === "order") {
+  if (type === "order" || type === "review") {
     return `/orders/${encodeURIComponent(id)}`;
+  }
+  if (type === "post" || type === "request") {
+    return `/posts/${encodeURIComponent(id)}`;
   }
   return null;
 }

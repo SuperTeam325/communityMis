@@ -95,6 +95,20 @@ export function createApiClient(options = {}) {
       transactions: (token, params = {}) => request(withQuery("/api/wallet/me/transactions", params), { token }),
       freezes: (token, params = {}) => request(withQuery("/api/wallet/me/freezes", params), { token })
     },
+    notifications: {
+      list: (token, params = {}) => request(withQuery("/api/notifications", params), { token }),
+      read: (token, notificationId) => request(`/api/notifications/${encodeURIComponent(notificationId)}/read`, {
+        method: "POST",
+        token
+      }),
+      readAll: (token) => request("/api/notifications/read-all", {
+        method: "POST",
+        token
+      })
+    },
+    messages: {
+      list: (token, params = {}) => request(withQuery("/api/messages", params), { token })
+    },
     auth: {
       register: (payload) => request("/api/auth/register", {
         method: "POST",

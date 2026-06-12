@@ -52,6 +52,8 @@ const ORDER_STATUS_CLASS = new Map([
 const ORDER_PAGE_SIZE = 20;
 const WALLET_PAGE_SIZE = 8;
 const FREEZE_PAGE_SIZE = 20;
+const NOTIFICATION_PAGE_SIZE = 20;
+const MESSAGE_PAGE_SIZE = 20;
 const WALLET_TRANSACTION_TEXT = new Map([
   ["income", "收入"],
   ["expense", "支出"],
@@ -69,6 +71,17 @@ const FREEZE_STATUS_CLASS = new Map([
   ["active", "status-active"],
   ["dispute", "status-dispute"],
   ["released", "status-released"]
+]);
+const NOTIFICATION_TYPES = new Set(["all", "order", "dispute", "coin", "wallet", "ai", "social", "system", "review"]);
+const NOTIFICATION_TYPE_LABEL = new Map([
+  ["order", "订单更新"],
+  ["review", "评价"],
+  ["dispute", "纠纷"],
+  ["wallet", "时间币"],
+  ["coin", "时间币"],
+  ["ai", "AI 反馈"],
+  ["social", "互动"],
+  ["system", "系统公告"]
 ]);
 
 window.NeighborApp = {
@@ -356,6 +369,14 @@ async function hydrateCurrentRoute(session) {
     }
     if (route.id === "wallet-freeze") {
       await hydrateWalletFreezeRoute(session);
+      return;
+    }
+    if (route.id === "messages") {
+      await hydrateMessagesRoute(session);
+      return;
+    }
+    if (route.id === "notifications") {
+      await hydrateNotificationsRoute(session);
     }
   } catch (error) {
     showGlobalMessage(authErrorMessage(error), "error");
@@ -2225,6 +2246,504 @@ function freezeTimelineHtml(timeline) {
   `).join("");
 }
 
+async function hydrateMessagesRoute(session) {
+  const userSession = session ?? auth.readSession("user");
+  if (!userSession?.token) {
+    return;
+  }
+  renderMessageListState("loading", "正在加载私信会话。");
+  renderMessageNotificationState("loading", "正在加载通知。");
+  try {
+    const [messagePayload, notificationPayload] = await Promise.all([
+      api.messages.list(userSession.token, { pageSize: MESSAGE_PAGE_SIZE }),
+      api.notifications.list(userSession.token, { pageSize: 10 })
+    ]);
+    renderMessageConversations(messagePayload);
+    renderMessageNotifications(notificationPayload, userSession);
+  } catch (error) {
+    const message = notificationErrorMessage(error);
+    renderMessageListState("error", message, {
+      actionText: "重试",
+      onAction: () => hydrateMessagesRoute(userSession)
+    });
+    renderMessageNotificationState("error", message, {
+      actionText: "重试",
+      onAction: () => hydrateMessagesRoute(userSession)
+    });
+  }
+}
+
+async function hydrateNotificationsRoute(session) {
+  const userSession = session ?? auth.readSession("user");
+  if (!userSession?.token) {
+    return;
+  }
+  installNotificationControls(userSession);
+  await loadNotifications(readNotificationQuery(), userSession);
+}
+
+function installNotificationControls(userSession) {
+  if (document.body.dataset.notificationsBound === "true") {
+    return;
+  }
+  document.body.dataset.notificationsBound = "true";
+
+  document.querySelectorAll("#filter-row .chip[data-filter]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      updateNotificationQuery({ type: button.dataset.filter || "all", page: 1 }, userSession);
+    }, true);
+  });
+
+  const markAll = document.getElementById("mark-all-read");
+  markAll?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const restore = setLoading(markAll, "处理中...");
+    try {
+      await api.notifications.readAll(userSession.token);
+      await loadNotifications(readNotificationQuery(), userSession);
+    } catch (error) {
+      showInlineMessage(markAll, notificationErrorMessage(error), "error");
+    } finally {
+      restore();
+    }
+  }, true);
+}
+
+async function loadNotifications(state, userSession) {
+  applyNotificationControls(state);
+  renderNotificationState("loading", "正在加载通知。");
+  try {
+    const payload = await api.notifications.list(userSession.token, notificationApiParams(state));
+    renderNotificationSummary(payload);
+    renderNotifications(payload, state, userSession);
+  } catch (error) {
+    renderNotificationState("error", notificationErrorMessage(error), {
+      actionText: "重试",
+      onAction: () => loadNotifications(readNotificationQuery(), userSession)
+    });
+  }
+}
+
+function readNotificationQuery() {
+  const params = new URLSearchParams(window.location.search);
+  const rawType = params.get("type") || params.get("filter") || "all";
+  const type = NOTIFICATION_TYPES.has(rawType) ? rawType : "all";
+  return {
+    type: type === "wallet" ? "coin" : type,
+    page: positiveInteger(params.get("page"), 1),
+    pageSize: positiveInteger(params.get("pageSize"), NOTIFICATION_PAGE_SIZE)
+  };
+}
+
+function updateNotificationQuery(patch, userSession) {
+  const next = {
+    ...readNotificationQuery(),
+    ...patch
+  };
+  const params = new URLSearchParams();
+  if (next.type && next.type !== "all") {
+    params.set("type", next.type);
+  }
+  if (next.page > 1) {
+    params.set("page", String(next.page));
+  }
+  if (next.pageSize !== NOTIFICATION_PAGE_SIZE) {
+    params.set("pageSize", String(next.pageSize));
+  }
+  const target = `${window.location.pathname}${params.toString() ? `?${params}` : ""}`;
+  window.history.pushState({}, "", target);
+  loadNotifications(readNotificationQuery(), userSession);
+}
+
+function notificationApiParams(state) {
+  return {
+    type: state.type === "coin" ? "wallet" : state.type,
+    page: state.page,
+    pageSize: state.pageSize
+  };
+}
+
+function applyNotificationControls(state) {
+  document.querySelectorAll("#filter-row .chip[data-filter]").forEach((button) => {
+    button.classList.toggle("active", (button.dataset.filter || "all") === state.type);
+  });
+}
+
+function renderNotifications(payload, state, userSession) {
+  const list = document.getElementById("notif-list");
+  const empty = document.getElementById("empty-state");
+  if (!list) {
+    return;
+  }
+  const notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
+  if (notifications.length === 0) {
+    list.innerHTML = "";
+    if (empty) {
+      empty.innerHTML = `<p>${escapeHtml(notificationEmptyText(state.type))}</p>`;
+      empty.classList.add("show");
+    }
+  } else {
+    empty?.classList.remove("show");
+    list.innerHTML = notifications.map(notificationCardHtml).join("");
+    list.querySelectorAll(".notif-card[data-notification-id]").forEach((card) => {
+      bindNotificationCard(card, userSession);
+    });
+  }
+  renderNotificationPager(payload.pagination, state, userSession);
+  updateNotificationUnreadDisplay(payload.unreadTotal);
+}
+
+function renderNotificationSummary(payload) {
+  const summaries = payload?.summaries ?? {};
+  const strongs = document.querySelectorAll(".summary-card strong");
+  if (strongs[0]) {
+    strongs[0].textContent = String(Number(payload?.unreadTotal ?? summaries.unread ?? 0));
+  }
+  if (strongs[1]) {
+    strongs[1].textContent = String(Number(summaries.order ?? 0) + Number(summaries.review ?? 0));
+  }
+  if (strongs[2]) {
+    strongs[2].textContent = String(Number(summaries.dispute ?? 0));
+  }
+  if (strongs[3]) {
+    strongs[3].textContent = String(Number(summaries.social ?? 0) + Number(summaries.system ?? 0) + Number(summaries.ai ?? 0));
+  }
+}
+
+function renderNotificationState(kind, message, options = {}) {
+  const list = document.getElementById("notif-list");
+  const empty = document.getElementById("empty-state");
+  const pager = document.getElementById("notification-pagination");
+  if (!list) {
+    return;
+  }
+  empty?.classList.remove("show");
+  const title = kind === "loading" ? "加载中" : kind === "error" ? "加载失败" : "暂无通知";
+  list.innerHTML = `
+    <article class="notif-card read" data-state="${escapeHtml(kind)}">
+      <div class="notif-icon" style="background:var(--border-light);color:var(--muted);">${notificationIconHtml("system")}</div>
+      <div class="notif-main">
+        <h2 class="notif-title">${escapeHtml(title)}</h2>
+        <p class="notif-desc">${escapeHtml(message)}</p>
+      </div>
+      ${options.actionText ? `<div class="notif-actions"><button class="small-action" type="button" data-runtime-action>${escapeHtml(options.actionText)}</button></div>` : ""}
+    </article>
+  `;
+  list.querySelector("[data-runtime-action]")?.addEventListener("click", options.onAction);
+  if (pager) {
+    pager.innerHTML = "";
+  }
+}
+
+function notificationCardHtml(item) {
+  const type = notificationViewType(item.type);
+  const href = item.href || notificationFallbackHref(type, item.businessId);
+  const label = NOTIFICATION_TYPE_LABEL.get(type) ?? NOTIFICATION_TYPE_LABEL.get(item.type) ?? "通知";
+  const isRead = Boolean(item.isRead);
+  return `
+    <article class="notif-card ${isRead ? "read" : "unread"}" data-notification-id="${escapeHtml(item.notificationId)}" data-type="${escapeHtml(type)}" ${href ? `data-href="${escapeHtml(href)}" role="link" tabindex="0"` : ""}>
+      <div class="notif-icon" style="${escapeHtml(notificationIconStyle(type))}">${notificationIconHtml(type)}</div>
+      <div class="notif-main">
+        <h2 class="notif-title">${escapeHtml(item.title || "邻帮通知")}</h2>
+        <p class="notif-desc">${escapeHtml(item.content || "")}</p>
+        <div class="notif-meta"><span class="badge ${escapeHtml(notificationBadgeClass(type))}">${escapeHtml(label)}</span><span class="time">${escapeHtml(formatDateTime(item.createdAt))}</span></div>
+      </div>
+      <div class="notif-actions">
+        ${href ? `<a class="small-action" href="${escapeHtml(href)}" data-notification-action>${escapeHtml(notificationActionText(type))}</a>` : ""}
+        ${isRead ? "" : `<button class="small-action read-one" type="button">已读</button>`}
+      </div>
+    </article>
+  `;
+}
+
+function bindNotificationCard(card, userSession) {
+  const notificationId = card.dataset.notificationId;
+  card.querySelector(".read-one")?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    await markNotificationRead(notificationId, userSession, card);
+  });
+  card.querySelector("[data-notification-action]")?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    await markNotificationRead(notificationId, userSession, card);
+    navigateTo(event.currentTarget.getAttribute("href"));
+  });
+  card.addEventListener("click", async (event) => {
+    if (event.target.closest("a, button")) {
+      return;
+    }
+    const href = card.dataset.href;
+    await markNotificationRead(notificationId, userSession, card);
+    if (href) {
+      navigateTo(href);
+    }
+  });
+}
+
+async function markNotificationRead(notificationId, userSession, card = null) {
+  if (!notificationId || !userSession?.token) {
+    return null;
+  }
+  try {
+    const payload = await api.notifications.read(userSession.token, notificationId);
+    if (card) {
+      markNotificationCardRead(card);
+    }
+    return payload.notification;
+  } catch (error) {
+    if (card) {
+      showInlineMessage(card, notificationErrorMessage(error), "error");
+    }
+    return null;
+  }
+}
+
+function markNotificationCardRead(card) {
+  if (!card.classList.contains("unread")) {
+    return;
+  }
+  card.classList.remove("unread");
+  card.classList.add("read");
+  card.querySelector(".read-one")?.remove();
+  updateNotificationUnreadDisplay();
+}
+
+function updateNotificationUnreadDisplay(value = null) {
+  const unreadCount = document.getElementById("unread-count");
+  if (!unreadCount) {
+    return;
+  }
+  const count = value === null
+    ? document.querySelectorAll(".notif-card.unread[data-notification-id]").length
+    : Number(value ?? 0);
+  unreadCount.textContent = String(Math.max(0, count));
+}
+
+function renderNotificationPager(pagination, state, userSession) {
+  let pager = document.getElementById("notification-pagination");
+  const list = document.getElementById("notif-list");
+  if (!list) {
+    return;
+  }
+  if (!pager) {
+    pager = document.createElement("div");
+    pager.id = "notification-pagination";
+    pager.className = "pagination";
+    list.insertAdjacentElement("afterend", pager);
+  }
+  if (!pagination || pagination.totalPages <= 1) {
+    pager.innerHTML = "";
+    return;
+  }
+  pager.innerHTML = `
+    <button type="button" data-page="prev"${pagination.hasPrev ? "" : " disabled"}>${chevronLeftIcon()}</button>
+    <span class="page-ellipsis">${escapeHtml(pagination.page)} / ${escapeHtml(pagination.totalPages)}</span>
+    <button type="button" data-page="next"${pagination.hasNext ? "" : " disabled"}>${chevronRightIcon()}</button>
+  `;
+  pager.querySelector("[data-page='prev']")?.addEventListener("click", () => {
+    updateNotificationQuery({ page: Math.max(1, state.page - 1) }, userSession);
+  });
+  pager.querySelector("[data-page='next']")?.addEventListener("click", () => {
+    updateNotificationQuery({ page: state.page + 1 }, userSession);
+  });
+}
+
+function renderMessageConversations(payload) {
+  const list = document.querySelector("#tab-chat .msg-list");
+  if (!list) {
+    return;
+  }
+  const conversations = (Array.isArray(payload.conversations) ? payload.conversations : [])
+    .filter((item) => item.type !== "system");
+  if (conversations.length === 0) {
+    renderMessageListState("empty", "暂无私信会话。");
+    return;
+  }
+  list.innerHTML = conversations.map(conversationItemHtml).join("");
+}
+
+function renderMessageNotifications(payload, userSession) {
+  const list = document.querySelector("#tab-system .msg-list");
+  if (!list) {
+    return;
+  }
+  const notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
+  if (notifications.length === 0) {
+    renderMessageNotificationState("empty", "暂无通知。");
+    return;
+  }
+  list.innerHTML = `
+    ${notifications.map((item) => messageNotificationHtml(item, userSession)).join("")}
+    <div class="divider"></div>
+    <p style="text-align:center;font-size:12px;color:var(--muted);padding:var(--space-lg);"><a href="/notifications" style="color:var(--accent);font-weight:700;">查看完整通知中心</a></p>
+  `;
+  list.querySelectorAll(".notif-item[data-notification-id]").forEach((item) => {
+    item.addEventListener("click", async (event) => {
+      event.preventDefault();
+      await markNotificationRead(item.dataset.notificationId, userSession);
+      navigateTo(item.getAttribute("href") || "/notifications");
+    });
+  });
+}
+
+function renderMessageListState(kind, message, options = {}) {
+  const list = document.querySelector("#tab-chat .msg-list");
+  if (!list) {
+    return;
+  }
+  list.innerHTML = messageStateHtml(kind, message, options.actionText);
+  list.querySelector("[data-runtime-action]")?.addEventListener("click", options.onAction);
+}
+
+function renderMessageNotificationState(kind, message, options = {}) {
+  const list = document.querySelector("#tab-system .msg-list");
+  if (!list) {
+    return;
+  }
+  list.innerHTML = messageStateHtml(kind, message, options.actionText);
+  list.querySelector("[data-runtime-action]")?.addEventListener("click", options.onAction);
+}
+
+function messageStateHtml(kind, message, actionText = "") {
+  const title = kind === "loading" ? "加载中" : kind === "error" ? "加载失败" : "暂无内容";
+  return `
+    <div class="notif-empty" data-state="${escapeHtml(kind)}">
+      ${messageIcon()}
+      <p><strong>${escapeHtml(title)}</strong></p>
+      <p>${escapeHtml(message)}</p>
+      ${actionText ? `<button class="small-action" type="button" data-runtime-action>${escapeHtml(actionText)}</button>` : ""}
+    </div>
+  `;
+}
+
+function conversationItemHtml(item) {
+  const participant = item.participant ?? {};
+  const name = participant.displayName || participant.username || item.title || "邻帮用户";
+  const href = item.href || (item.orderId ? `/orders/${encodeURIComponent(item.orderId)}` : "/notifications");
+  const unread = Number(item.unreadCount ?? 0);
+  return `
+    <a class="conv-item ${unread > 0 ? "unread" : ""}" href="${escapeHtml(href)}" style="text-decoration:none;color:inherit;">
+      <div class="conv-avatar">
+        <div class="avatar" style="background:${escapeHtml(avatarColor(participant.userId ?? item.orderId ?? 1))};display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:700;">${escapeHtml(firstCharacter(name))}</div>
+      </div>
+      <div class="conv-body">
+        <div class="conv-top">
+          <span class="conv-name">${escapeHtml(name)}</span>
+          <span class="conv-time">${escapeHtml(formatDateTime(item.updatedAt))}</span>
+        </div>
+        <p class="conv-preview">${escapeHtml(item.preview || "暂无最新消息")}</p>
+      </div>
+      ${unread > 0 ? `<div class="conv-right"><span class="unread-badge">${escapeHtml(unread)}</span></div>` : ""}
+    </a>
+  `;
+}
+
+function messageNotificationHtml(item) {
+  const type = notificationViewType(item.type);
+  const href = item.href || notificationFallbackHref(type, item.businessId) || "/notifications";
+  return `
+    <a class="notif-item" href="${escapeHtml(href)}" data-notification-id="${escapeHtml(item.notificationId)}" style="text-decoration:none;color:inherit;">
+      <div class="notif-icon" style="${escapeHtml(notificationIconStyle(type))}">${notificationIconHtml(type, "18")}</div>
+      <div class="notif-body">
+        <p class="notif-title"><strong>${escapeHtml(item.title || "邻帮通知")}</strong>${item.content ? ` ${escapeHtml(item.content)}` : ""}</p>
+        <p class="notif-time">${escapeHtml(formatDateTime(item.createdAt))}</p>
+      </div>
+    </a>
+  `;
+}
+
+function notificationViewType(type) {
+  return type === "wallet" ? "coin" : (type || "system");
+}
+
+function notificationFallbackHref(type, businessId) {
+  if (type === "coin" || type === "wallet") {
+    return "/wallet";
+  }
+  if (type === "ai") {
+    return "/ai/assistant";
+  }
+  if (type === "dispute" && businessId) {
+    return `/disputes/${encodeURIComponent(businessId)}`;
+  }
+  if ((type === "order" || type === "review") && businessId) {
+    return `/orders/${encodeURIComponent(businessId)}`;
+  }
+  return "/notifications";
+}
+
+function notificationEmptyText(type) {
+  return type === "all" ? "暂无通知" : `暂无${NOTIFICATION_TYPE_LABEL.get(type) ?? "该分类"}通知`;
+}
+
+function notificationActionText(type) {
+  if (type === "dispute") {
+    return "查看纠纷";
+  }
+  if (type === "coin" || type === "wallet") {
+    return "查看钱包";
+  }
+  if (type === "ai") {
+    return "打开 AI";
+  }
+  if (type === "social") {
+    return "查看动态";
+  }
+  if (type === "system") {
+    return "查看详情";
+  }
+  return "查看订单";
+}
+
+function notificationBadgeClass(type) {
+  if (type === "dispute") {
+    return "badge--danger";
+  }
+  if (type === "coin" || type === "wallet") {
+    return "badge--reward";
+  }
+  if (type === "order" || type === "review") {
+    return "badge--success";
+  }
+  return "badge--accent";
+}
+
+function notificationIconStyle(type) {
+  if (type === "dispute") {
+    return "background:var(--danger-light);color:var(--danger);";
+  }
+  if (type === "coin" || type === "wallet") {
+    return "background:color-mix(in oklch, var(--reward-gold) 18%, transparent);color:var(--reward-gold);";
+  }
+  if (type === "ai") {
+    return "background:var(--secondary-light);color:var(--secondary);";
+  }
+  if (type === "order" || type === "review") {
+    return "background:var(--success-light);color:var(--success);";
+  }
+  return "background:var(--accent-subtle);color:var(--accent);";
+}
+
+function notificationIconHtml(type, size = "21") {
+  if (type === "dispute") {
+    return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
+  }
+  if (type === "coin" || type === "wallet") {
+    return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`;
+  }
+  if (type === "ai") {
+    return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82"/><path d="M4.6 9a1.65 1.65 0 0 0-.33-1.82"/></svg>`;
+  }
+  if (type === "review" || type === "social") {
+    return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/></svg>`;
+  }
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg>`;
+}
+
 function hydrateAiResultsRoute() {
   const params = new URLSearchParams(window.location.search);
   const prompt = params.get("prompt") || params.get("keyword") || "帮我筛选合适的邻里需求";
@@ -2733,6 +3252,23 @@ function walletErrorMessage(error) {
     return "无法连接钱包服务，请确认后端服务已启动。";
   }
   return error?.message || "钱包数据加载失败，请稍后重试。";
+}
+
+function notificationErrorMessage(error) {
+  const code = error?.payload?.error?.code;
+  if (code === "NOTIFICATION_NOT_FOUND") {
+    return "这条通知不存在，或已经无法查看。";
+  }
+  if (code === "INVALID_NOTIFICATION_TYPE" || code === "INVALID_NOTIFICATION_READ" || code?.startsWith("INVALID_")) {
+    return "通知筛选条件格式不正确，请清空筛选后重试。";
+  }
+  if (code === "FORBIDDEN") {
+    return "当前账号没有访问通知的权限。";
+  }
+  if (error?.status === 0 || error instanceof TypeError) {
+    return "无法连接通知服务，请确认后端服务已启动。";
+  }
+  return error?.message || "通知数据加载失败，请稍后重试。";
 }
 
 function reviewErrorMessage(error) {

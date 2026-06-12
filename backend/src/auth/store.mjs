@@ -17,6 +17,7 @@ export function createMemoryAuthStore(options = {}) {
   const transactionLogs = new Map();
   const walletFreezes = new Map();
   const notifications = new Map();
+  const messages = new Map();
   const reviews = [];
   let nextUserId = options.nextUserId ?? 10000;
   let nextWalletId = options.nextWalletId ?? 20000;
@@ -25,6 +26,7 @@ export function createMemoryAuthStore(options = {}) {
   let nextTransactionLogId = options.nextTransactionLogId ?? 45000;
   let nextWalletFreezeId = options.nextWalletFreezeId ?? 47000;
   let nextNotificationId = options.nextNotificationId ?? 50000;
+  let nextMessageId = options.nextMessageId ?? 55000;
   let nextReviewId = options.nextReviewId ?? 60000;
 
   for (const seedUser of options.seedUsers ?? defaultSeedUsers()) {
@@ -46,6 +48,9 @@ export function createMemoryAuthStore(options = {}) {
     insertSeedWalletFreeze(seedFreeze);
   }
   syncFrozenBalancesFromFreezeRecords();
+  for (const seedMessage of options.seedMessages ?? (options.seedRequests === undefined ? defaultSeedMessages() : [])) {
+    insertSeedMessage(seedMessage);
+  }
   for (const seedNotification of options.seedNotifications ?? (options.seedRequests === undefined ? defaultSeedNotifications() : [])) {
     insertSeedNotification(seedNotification);
   }
@@ -76,6 +81,9 @@ export function createMemoryAuthStore(options = {}) {
     listWalletFreezes,
     createWalletFreeze,
     listNotificationsForUserId,
+    markNotificationRead,
+    markAllNotificationsRead,
+    listMessagesForUserId,
     createReview,
     listReviewsForOrderId,
     listReviewsForTargetId,
@@ -340,6 +348,7 @@ export function createMemoryAuthStore(options = {}) {
     }
 
     const now = new Date().toISOString();
+    const confirmationChanged = actorRole === "payer" ? !order.payerConfirmed : !order.providerConfirmed;
     const nextPayerConfirmed = actorRole === "payer" ? true : order.payerConfirmed;
     const nextProviderConfirmed = actorRole === "provider" ? true : order.providerConfirmed;
     const shouldSettle = nextPayerConfirmed && nextProviderConfirmed;
@@ -378,6 +387,17 @@ export function createMemoryAuthStore(options = {}) {
         order.status = "accepted";
       }
       order.updatedAt = now;
+
+      if (confirmationChanged) {
+        createOrderConfirmationNotifications({
+          order,
+          request,
+          actorId,
+          actorRole,
+          settled: shouldSettle,
+          now
+        });
+      }
     } catch (error) {
       serviceOrders.set(order.orderId, previousOrder);
       serviceRequests.set(request.requestId, previousRequest);
@@ -390,6 +410,7 @@ export function createMemoryAuthStore(options = {}) {
       for (const logId of createdLogIds) {
         transactionLogs.delete(logId);
       }
+      rollbackNotificationsAfter(now);
       nextTransactionLogId = previousNextTransactionLogId;
       throw error;
     }
@@ -528,15 +549,83 @@ export function createMemoryAuthStore(options = {}) {
       remark: freeze.reason,
       createdAt: now
     });
+    createNotification({
+      userId,
+      type: "dispute",
+      title: freeze.reasonType === "dispute" ? "纠纷触发时间币冻结" : "订单时间币已冻结",
+      content: `${freeze.reason}，冻结 ${freeze.amount.toFixed(2)} 时间币。`,
+      businessType: freeze.disputeId ? "dispute" : "order",
+      businessId: freeze.disputeId ?? freeze.orderId,
+      createdAt: now
+    });
     return clone(enrichWalletFreeze(freeze));
   }
 
-  function listNotificationsForUserId(userId) {
+  function listNotificationsForUserId(userId, query = null) {
     const id = Number(userId);
-    return Array.from(notifications.values())
+    const hasQuery = query !== null && query !== undefined;
+    query ??= {};
+    const type = normalizeNotificationFilter(query.type, "all");
+    const read = normalizeNotificationFilter(query.read, "all");
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(50, positiveInteger(query.pageSize, 20));
+    const filtered = Array.from(notifications.values())
       .filter((notification) => notification.userId === id)
-      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
-      .map(clone);
+      .filter((notification) => type === "all" || notification.type === type)
+      .filter((notification) => read === "all" || (read === "unread" ? !notification.readAt : Boolean(notification.readAt)))
+      .sort(compareNotifications);
+    if (!hasQuery) {
+      return filtered.map(enrichNotification).map(clone);
+    }
+    const offset = (page - 1) * pageSize;
+    return {
+      notifications: filtered.slice(offset, offset + pageSize).map(enrichNotification).map(clone),
+      total: filtered.length,
+      unreadTotal: Array.from(notifications.values())
+        .filter((notification) => notification.userId === id && !notification.readAt)
+        .length
+    };
+  }
+
+  function markNotificationRead(userId, notificationId) {
+    const notification = notifications.get(Number(notificationId));
+    if (!notification || notification.userId !== Number(userId)) {
+      return null;
+    }
+    if (!notification.readAt) {
+      notification.readAt = new Date().toISOString();
+    }
+    return clone(enrichNotification(notification));
+  }
+
+  function markAllNotificationsRead(userId) {
+    const id = Number(userId);
+    const now = new Date().toISOString();
+    let updated = 0;
+    for (const notification of notifications.values()) {
+      if (notification.userId === id && !notification.readAt) {
+        notification.readAt = now;
+        updated += 1;
+      }
+    }
+    return {
+      updated,
+      unreadTotal: 0
+    };
+  }
+
+  function listMessagesForUserId(userId, query = {}) {
+    const id = Number(userId);
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(50, positiveInteger(query.pageSize, 20));
+    const conversations = Array.from(conversationMapForUser(id).values())
+      .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
+    const offset = (page - 1) * pageSize;
+    return {
+      conversations: conversations.slice(offset, offset + pageSize).map(clone),
+      total: conversations.length,
+      unreadTotal: conversations.reduce((sum, item) => sum + item.unreadCount, 0)
+    };
   }
 
   function createReview(input) {
@@ -599,6 +688,15 @@ export function createMemoryAuthStore(options = {}) {
     });
     nextReviewId += 1;
     reviews.push(review);
+    createNotification({
+      userId: targetId,
+      type: "review",
+      title: "你收到一条新评价",
+      content: `${reviewer.displayName ?? reviewer.username} 评价了订单「${request.title}」。`,
+      businessType: "order",
+      businessId: orderId,
+      createdAt: review.createdAt
+    });
     return enrichReview(review);
   }
 
@@ -732,6 +830,15 @@ export function createMemoryAuthStore(options = {}) {
     return transaction;
   }
 
+  function insertSeedMessage(seedMessage) {
+    const message = normalizeMessage({
+      ...seedMessage,
+      messageId: seedMessage.messageId ?? nextMessageId
+    });
+    messages.set(message.messageId, message);
+    nextMessageId = Math.max(nextMessageId, message.messageId + 1);
+  }
+
   function insertSeedNotification(seedNotification) {
     const notification = normalizeNotification({
       ...seedNotification,
@@ -739,6 +846,125 @@ export function createMemoryAuthStore(options = {}) {
     });
     notifications.set(notification.notificationId, notification);
     nextNotificationId = Math.max(nextNotificationId, notification.notificationId + 1);
+  }
+
+  function createNotification(input) {
+    const notification = normalizeNotification({
+      ...input,
+      notificationId: nextNotificationId
+    });
+    notifications.set(notification.notificationId, notification);
+    nextNotificationId += 1;
+    return notification;
+  }
+
+  function createOrderConfirmationNotifications(input) {
+    const actor = users.get(input.actorId);
+    const actorName = actor?.displayName ?? actor?.username ?? "对方";
+    const otherUserId = input.actorRole === "payer" ? input.order.providerId : input.request.publisherId;
+    createNotification({
+      userId: otherUserId,
+      type: "order",
+      title: input.settled ? "订单已完成结算" : "订单确认状态已更新",
+      content: input.settled
+        ? `订单「${input.request.title}」已双方确认并完成结算。`
+        : `${actorName} 已确认订单「${input.request.title}」，等待另一方确认。`,
+      businessType: "order",
+      businessId: input.order.orderId,
+      createdAt: input.now
+    });
+
+    if (input.settled) {
+      createNotification({
+        userId: input.request.publisherId,
+        type: "wallet",
+        title: "时间币已结算",
+        content: `订单「${input.request.title}」已完成，支出 ${roundMoney(input.order.coinAmount).toFixed(2)} 时间币。`,
+        businessType: "wallet",
+        businessId: input.order.orderId,
+        createdAt: input.now
+      });
+      createNotification({
+        userId: input.order.providerId,
+        type: "wallet",
+        title: "时间币已入账",
+        content: `订单「${input.request.title}」已完成，收入 ${roundMoney(input.order.coinAmount).toFixed(2)} 时间币。`,
+        businessType: "wallet",
+        businessId: input.order.orderId,
+        createdAt: input.now
+      });
+    }
+  }
+
+  function rollbackNotificationsAfter(createdAt) {
+    for (const notification of Array.from(notifications.values())) {
+      if (notification.createdAt === createdAt) {
+        notifications.delete(notification.notificationId);
+      }
+    }
+  }
+
+  function enrichNotification(notification) {
+    return {
+      ...notification,
+      isRead: Boolean(notification.readAt),
+      href: notificationHref(notification.businessType, notification.businessId)
+    };
+  }
+
+  function conversationMapForUser(userId) {
+    const map = new Map();
+    for (const message of messages.values()) {
+      if (message.senderId !== userId && message.receiverId !== userId) {
+        continue;
+      }
+      const otherUserId = message.senderId === userId ? message.receiverId : message.senderId;
+      const key = `${message.orderId ?? "general"}:${otherUserId}`;
+      const existing = map.get(key);
+      const otherUser = users.get(otherUserId);
+      const isIncomingUnread = message.receiverId === userId && !message.isRead;
+      if (!existing) {
+        map.set(key, {
+          conversationId: key,
+          type: message.orderId ? "order" : "direct",
+          title: otherUser?.displayName ?? otherUser?.username ?? "邻帮用户",
+          participant: publicReviewer(otherUser),
+          orderId: message.orderId,
+          preview: message.content,
+          unreadCount: isIncomingUnread ? 1 : 0,
+          updatedAt: message.createdAt,
+          href: message.orderId ? `/orders/${encodeURIComponent(message.orderId)}` : null
+        });
+        continue;
+      }
+      if (new Date(message.createdAt).getTime() >= new Date(existing.updatedAt).getTime()) {
+        existing.preview = message.content;
+        existing.updatedAt = message.createdAt;
+      }
+      if (isIncomingUnread) {
+        existing.unreadCount += 1;
+      }
+    }
+
+    const userNotifications = Array.from(notifications.values())
+      .filter((notification) => notification.userId === userId)
+      .sort(compareNotifications);
+    if (userNotifications.length > 0) {
+      const latest = userNotifications[0];
+      map.set("system:notifications", {
+        conversationId: "system:notifications",
+        type: "system",
+        title: "系统通知",
+        participant: null,
+        orderId: null,
+        preview: latest.title,
+        unreadCount: userNotifications.filter((notification) => !notification.readAt).length,
+        updatedAt: latest.createdAt,
+        href: "/notifications"
+      });
+    }
+
+    return map;
   }
 
   function withCategory(request) {
@@ -1069,6 +1295,38 @@ export function defaultSeedNotifications() {
   ];
 }
 
+export function defaultSeedMessages() {
+  return [
+    {
+      messageId: 6001,
+      senderId: 1001,
+      receiverId: 1002,
+      orderId: 3001,
+      content: "你好，书柜包装在客厅，工具需要自带。",
+      isRead: true,
+      createdAt: "2026-06-03T15:25:00.000Z"
+    },
+    {
+      messageId: 6002,
+      senderId: 1002,
+      receiverId: 1001,
+      orderId: 3001,
+      content: "收到，我 17:30 到。",
+      isRead: false,
+      createdAt: "2026-06-03T15:27:00.000Z"
+    },
+    {
+      messageId: 6003,
+      senderId: 1003,
+      receiverId: 1001,
+      orderId: 3003,
+      content: "我已提交服务记录，等待你确认。",
+      isRead: true,
+      createdAt: "2026-05-28T10:20:00.000Z"
+    }
+  ];
+}
+
 export function defaultSeedTransactionLogs() {
   return [
     {
@@ -1290,6 +1548,7 @@ function normalizeTimelineItem(item) {
 }
 
 function normalizeNotification(input) {
+  const businessId = input.businessId ?? input.business_id;
   return {
     notificationId: Number(input.notificationId),
     userId: Number(input.userId),
@@ -1297,9 +1556,22 @@ function normalizeNotification(input) {
     title: String(input.title ?? "").trim(),
     content: String(input.content ?? "").trim(),
     businessType: normalizeOptionalString(input.businessType ?? input.business_type),
-    businessId: input.businessId === undefined || input.businessId === null ? null : Number(input.businessId),
+    businessId: businessId === undefined || businessId === null ? null : Number(businessId),
     readAt: input.readAt ?? input.read_at ?? null,
     createdAt: input.createdAt ?? new Date().toISOString()
+  };
+}
+
+function normalizeMessage(input) {
+  const orderId = input.orderId ?? input.order_id;
+  return {
+    messageId: Number(input.messageId ?? input.message_id),
+    senderId: Number(input.senderId ?? input.sender_id),
+    receiverId: Number(input.receiverId ?? input.receiver_id),
+    orderId: orderId === undefined || orderId === null ? null : Number(orderId),
+    content: String(input.content ?? "").trim(),
+    isRead: Boolean(input.isRead ?? input.is_read ?? false),
+    createdAt: input.createdAt ?? input.created_at ?? new Date().toISOString()
   };
 }
 
@@ -1442,6 +1714,41 @@ function positiveInteger(raw, fallback) {
 function normalizeWalletFilter(value, fallback) {
   const text = String(value ?? "").trim().toLowerCase();
   return text || fallback;
+}
+
+function normalizeNotificationFilter(value, fallback) {
+  const text = String(value ?? "").trim().toLowerCase();
+  return text || fallback;
+}
+
+function compareNotifications(left, right) {
+  return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+    || right.notificationId - left.notificationId;
+}
+
+function notificationHref(type, id) {
+  if (!id) {
+    if (type === "wallet") {
+      return "/wallet";
+    }
+    if (type === "ai") {
+      return "/ai/assistant";
+    }
+    return null;
+  }
+  if (type === "order" || type === "review") {
+    return `/orders/${encodeURIComponent(id)}`;
+  }
+  if (type === "dispute") {
+    return `/disputes/${encodeURIComponent(id)}`;
+  }
+  if (type === "wallet") {
+    return "/wallet";
+  }
+  if (type === "ai") {
+    return "/ai/assistant";
+  }
+  return null;
 }
 
 function isUnreleasedFreeze(freeze) {

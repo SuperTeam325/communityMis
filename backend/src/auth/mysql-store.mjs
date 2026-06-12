@@ -39,6 +39,10 @@ export function createMysqlAuthStore(options = {}) {
     listWalletTransactions,
     listWalletFreezes,
     createWalletFreeze,
+    listNotificationsForUserId,
+    markNotificationRead,
+    markAllNotificationsRead,
+    listMessagesForUserId,
     createReview,
     listReviewsForOrderId,
     listReviewsForTargetId,
@@ -642,6 +646,70 @@ SET
 WHERE \`request_id\` = @request_id
   AND @settled = 1
 LIMIT 1;
+INSERT INTO \`notification\` (
+  \`user_id\`,
+  \`type\`,
+  \`title\`,
+  \`content\`,
+  \`business_type\`,
+  \`business_id\`,
+  \`created_at\`
+)
+SELECT
+  IF(@actor_role = 'payer', @provider_id, @payer_id),
+  'order',
+  '订单确认状态已更新',
+  CONCAT(actor.\`username\`, ' 已确认订单：', sr.\`title\`, '。'),
+  'order',
+  @order_id,
+  @settled_at
+FROM \`service_request\` sr
+JOIN \`user\` actor ON actor.\`user_id\` = @actor_id
+WHERE sr.\`request_id\` = @request_id
+  AND @order_updated = 1
+  AND @settled = 0;
+INSERT INTO \`notification\` (
+  \`user_id\`,
+  \`type\`,
+  \`title\`,
+  \`content\`,
+  \`business_type\`,
+  \`business_id\`,
+  \`created_at\`
+)
+SELECT
+  @payer_id,
+  'wallet',
+  '时间币已结算',
+  CONCAT('订单「', sr.\`title\`, '」已完成，支出 ', CAST(@coin_amount AS CHAR), ' 时间币。'),
+  'wallet',
+  @order_id,
+  @settled_at
+FROM \`service_request\` sr
+WHERE sr.\`request_id\` = @request_id
+  AND @order_updated = 1
+  AND @settled = 1;
+INSERT INTO \`notification\` (
+  \`user_id\`,
+  \`type\`,
+  \`title\`,
+  \`content\`,
+  \`business_type\`,
+  \`business_id\`,
+  \`created_at\`
+)
+SELECT
+  @provider_id,
+  'wallet',
+  '时间币已入账',
+  CONCAT('订单「', sr.\`title\`, '」已完成，收入 ', CAST(@coin_amount AS CHAR), ' 时间币。'),
+  'wallet',
+  @order_id,
+  @settled_at
+FROM \`service_request\` sr
+WHERE sr.\`request_id\` = @request_id
+  AND @order_updated = 1
+  AND @settled = 1;
 SET @rollback_required = IF(
   @order_found <> 1
     OR @authorized <> 1
@@ -900,6 +968,25 @@ FROM \`wallet\` w
 WHERE w.\`user_id\` = @freeze_user_id
   AND @wallet_found = 1;
 SET @created_log_id = IF(@wallet_found = 1, LAST_INSERT_ID(), NULL);
+INSERT INTO \`notification\` (
+  \`user_id\`,
+  \`type\`,
+  \`title\`,
+  \`content\`,
+  \`business_type\`,
+  \`business_id\`
+)
+SELECT
+  @freeze_user_id,
+  'dispute',
+  '订单时间币已冻结',
+  CONCAT(${sqlString(reason)}, '，冻结 ', CAST(@freeze_amount AS CHAR), ' 时间币。'),
+  IF(d.\`dispute_id\` IS NULL, 'order', 'dispute'),
+  IF(d.\`dispute_id\` IS NULL, @freeze_order_id, d.\`dispute_id\`)
+FROM \`transaction_log\` tl
+LEFT JOIN \`dispute\` d ON d.\`order_id\` = tl.\`order_id\`
+WHERE tl.\`log_id\` = @created_log_id
+  AND @wallet_found = 1;
 SET @transaction_sql = IF(@wallet_found = 1, 'COMMIT', 'ROLLBACK');
 PREPARE transaction_statement FROM @transaction_sql;
 EXECUTE transaction_statement;
@@ -912,6 +999,182 @@ SELECT JSON_OBJECT('walletFound', @wallet_found, 'logId', @created_log_id);
     }
     const freezePayload = await listWalletFreezes({ userId, page: 1, pageSize: 1 });
     return freezePayload.freezes.find((freeze) => freeze.freezeId === Number(result.logId)) ?? freezePayload.freezes[0] ?? null;
+  }
+
+  async function listNotificationsForUserId(userId, query = {}) {
+    const id = Number(userId);
+    const type = String(query.type ?? "all").trim().toLowerCase();
+    const read = String(query.read ?? "all").trim().toLowerCase();
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(50, positiveInteger(query.pageSize, 20));
+    const offset = (page - 1) * pageSize;
+    const conditions = [`n.\`user_id\` = ${id}`];
+    if (type !== "all") {
+      conditions.push(`n.\`type\` = ${sqlString(type)}`);
+    }
+    if (read === "read") {
+      conditions.push("n.`read_at` IS NOT NULL");
+    } else if (read === "unread") {
+      conditions.push("n.`read_at` IS NULL");
+    }
+    const whereSql = `WHERE ${conditions.join(" AND ")}`;
+    const sql = `
+SELECT JSON_OBJECT(
+  'items', COALESCE(JSON_ARRAYAGG(${notificationJsonObjectSql("q")}), JSON_ARRAY()),
+  'total', (SELECT COUNT(*) FROM \`notification\` n ${whereSql}),
+  'unreadTotal', (SELECT COUNT(*) FROM \`notification\` n WHERE n.\`user_id\` = ${id} AND n.\`read_at\` IS NULL)
+)
+FROM (
+  SELECT
+    n.\`notification_id\`,
+    n.\`user_id\`,
+    n.\`type\`,
+    n.\`title\`,
+    n.\`content\`,
+    n.\`business_type\`,
+    n.\`business_id\`,
+    n.\`read_at\`,
+    n.\`created_at\`
+  FROM \`notification\` n
+  ${whereSql}
+  ORDER BY n.\`created_at\` DESC, n.\`notification_id\` DESC
+  LIMIT ${pageSize} OFFSET ${offset}
+) q;
+`;
+    const result = await mysqlJson(sql, { optional: true });
+    return {
+      notifications: Array.isArray(result?.items) ? result.items.map(normalizeNotification) : [],
+      total: Number(result?.total ?? 0),
+      unreadTotal: Number(result?.unreadTotal ?? 0)
+    };
+  }
+
+  async function markNotificationRead(userId, notificationId) {
+    const id = Number(userId);
+    const notificationIdNumber = Number(notificationId);
+    const sql = `
+UPDATE \`notification\`
+SET \`read_at\` = COALESCE(\`read_at\`, CURRENT_TIMESTAMP)
+WHERE \`notification_id\` = ${notificationIdNumber}
+  AND \`user_id\` = ${id}
+LIMIT 1;
+SELECT ${notificationJsonObjectSql("n")}
+FROM \`notification\` n
+WHERE n.\`notification_id\` = ${notificationIdNumber}
+  AND n.\`user_id\` = ${id}
+LIMIT 1;
+`;
+    return normalizeNotification(await mysqlJson(sql, { optional: true }));
+  }
+
+  async function markAllNotificationsRead(userId) {
+    const id = Number(userId);
+    const sql = `
+UPDATE \`notification\`
+SET \`read_at\` = COALESCE(\`read_at\`, CURRENT_TIMESTAMP)
+WHERE \`user_id\` = ${id}
+  AND \`read_at\` IS NULL;
+SELECT JSON_OBJECT('updated', ROW_COUNT(), 'unreadTotal', 0);
+`;
+    const result = await mysqlJson(sql, { optional: true });
+    return {
+      updated: Number(result?.updated ?? 0),
+      unreadTotal: 0
+    };
+  }
+
+  async function listMessagesForUserId(userId, query = {}) {
+    const id = Number(userId);
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(50, positiveInteger(query.pageSize, 20));
+    const offset = (page - 1) * pageSize;
+    const sql = `
+SELECT JSON_OBJECT(
+  'items', COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
+    'conversationId', q.\`conversation_id\`,
+    'type', q.\`type\`,
+    'title', q.\`title\`,
+    'participant', IF(q.\`other_user_id\` IS NULL, NULL, JSON_OBJECT(
+      'userId', q.\`other_user_id\`,
+      'username', q.\`other_username\`,
+      'displayName', q.\`other_display_name\`
+    )),
+    'orderId', q.\`order_id\`,
+    'preview', q.\`preview\`,
+    'unreadCount', q.\`unread_count\`,
+    'updatedAt', q.\`updated_at\`,
+    'href', q.\`href\`
+  )), JSON_ARRAY()),
+  'total', (SELECT COUNT(*) FROM (
+    SELECT CONCAT(COALESCE(m.\`order_id\`, 0), ':', IF(m.\`sender_id\` = ${id}, m.\`receiver_id\`, m.\`sender_id\`)) AS \`conversation_id\`
+    FROM \`message\` m
+    WHERE m.\`sender_id\` = ${id} OR m.\`receiver_id\` = ${id}
+    GROUP BY \`conversation_id\`
+  ) c) + IF(EXISTS(SELECT 1 FROM \`notification\` n WHERE n.\`user_id\` = ${id}), 1, 0),
+  'unreadTotal', (
+    SELECT COUNT(*) FROM \`message\` m
+    WHERE m.\`receiver_id\` = ${id} AND m.\`is_read\` = 0
+  ) + (
+    SELECT COUNT(*) FROM \`notification\` n
+    WHERE n.\`user_id\` = ${id} AND n.\`read_at\` IS NULL
+  )
+)
+FROM (
+  SELECT *
+  FROM (
+    SELECT
+      CONCAT(COALESCE(m.\`order_id\`, 0), ':', IF(m.\`sender_id\` = ${id}, m.\`receiver_id\`, m.\`sender_id\`)) AS \`conversation_id\`,
+      IF(m.\`order_id\` IS NULL, 'direct', 'order') AS \`type\`,
+      IF(other_user.\`username\` IS NULL, '邻帮用户', other_user.\`username\`) AS \`title\`,
+      other_user.\`user_id\` AS \`other_user_id\`,
+      other_user.\`username\` AS \`other_username\`,
+      other_user.\`username\` AS \`other_display_name\`,
+      m.\`order_id\`,
+      (
+        SELECT m2.\`content\`
+        FROM \`message\` m2
+        WHERE (m2.\`sender_id\` = ${id} OR m2.\`receiver_id\` = ${id})
+          AND CONCAT(COALESCE(m2.\`order_id\`, 0), ':', IF(m2.\`sender_id\` = ${id}, m2.\`receiver_id\`, m2.\`sender_id\`)) =
+            CONCAT(COALESCE(m.\`order_id\`, 0), ':', IF(m.\`sender_id\` = ${id}, m.\`receiver_id\`, m.\`sender_id\`))
+        ORDER BY m2.\`created_at\` DESC, m2.\`message_id\` DESC
+        LIMIT 1
+      ) AS \`preview\`,
+      SUM(IF(m.\`receiver_id\` = ${id} AND m.\`is_read\` = 0, 1, 0)) AS \`unread_count\`,
+      DATE_FORMAT(MAX(m.\`created_at\`), '%Y-%m-%dT%H:%i:%s.000Z') AS \`updated_at\`,
+      IF(m.\`order_id\` IS NULL, NULL, CONCAT('/orders/', m.\`order_id\`)) AS \`href\`
+    FROM \`message\` m
+    LEFT JOIN \`user\` other_user ON other_user.\`user_id\` = IF(m.\`sender_id\` = ${id}, m.\`receiver_id\`, m.\`sender_id\`)
+    WHERE m.\`sender_id\` = ${id} OR m.\`receiver_id\` = ${id}
+    GROUP BY \`conversation_id\`, \`type\`, \`title\`, \`other_user_id\`, \`other_username\`, \`other_display_name\`, m.\`order_id\`
+    UNION ALL
+    SELECT
+      'system:notifications',
+      'system',
+      '系统通知',
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      latest.\`title\`,
+      (SELECT COUNT(*) FROM \`notification\` n WHERE n.\`user_id\` = ${id} AND n.\`read_at\` IS NULL),
+      DATE_FORMAT(latest.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
+      '/notifications'
+    FROM \`notification\` latest
+    WHERE latest.\`user_id\` = ${id}
+    ORDER BY latest.\`created_at\` DESC, latest.\`notification_id\` DESC
+    LIMIT 1
+  ) unioned
+  ORDER BY \`updated_at\` DESC
+  LIMIT ${pageSize} OFFSET ${offset}
+) q;
+`;
+    const result = await mysqlJson(sql, { optional: true });
+    return {
+      conversations: Array.isArray(result?.items) ? result.items.map(normalizeConversation) : [],
+      total: Number(result?.total ?? 0),
+      unreadTotal: Number(result?.unreadTotal ?? 0)
+    };
   }
 
   async function createReview(input) {
@@ -989,6 +1252,25 @@ WHERE @order_found = 1
   AND @authorized = 1
   AND @target_valid = 1;
 SET @created_review_id = IF(ROW_COUNT() = 1, LAST_INSERT_ID(), NULL);
+INSERT INTO \`notification\` (
+  \`user_id\`,
+  \`type\`,
+  \`title\`,
+  \`content\`,
+  \`business_type\`,
+  \`business_id\`
+)
+SELECT
+  @target_id,
+  'review',
+  '你收到一条新评价',
+  CONCAT(reviewer.\`username\`, ' 评价了订单「', sr.\`title\`, '」。'),
+  'order',
+  @order_id
+FROM \`service_request\` sr
+JOIN \`user\` reviewer ON reviewer.\`user_id\` = @reviewer_id
+WHERE sr.\`request_id\` = @request_id
+  AND @created_review_id IS NOT NULL;
 COMMIT;
 SELECT JSON_OBJECT(
   'orderFound', @order_found,
@@ -1281,6 +1563,20 @@ function walletFreezeJsonObjectSql(alias) {
   )`;
 }
 
+function notificationJsonObjectSql(alias) {
+  return `JSON_OBJECT(
+    'notificationId', ${alias}.\`notification_id\`,
+    'userId', ${alias}.\`user_id\`,
+    'type', ${alias}.\`type\`,
+    'title', ${alias}.\`title\`,
+    'content', ${alias}.\`content\`,
+    'businessType', ${alias}.\`business_type\`,
+    'businessId', ${alias}.\`business_id\`,
+    'readAt', IF(${alias}.\`read_at\` IS NULL, NULL, DATE_FORMAT(${alias}.\`read_at\`, '%Y-%m-%dT%H:%i:%s.000Z')),
+    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+  )`;
+}
+
 function freezeReasonTypeSql() {
   return "IF(d.`dispute_id` IS NOT NULL, 'dispute', 'order')";
 }
@@ -1413,6 +1709,43 @@ function normalizeWalletFreeze(input) {
   return {
     ...freeze,
     timeline: freeze.timeline.length > 0 ? freeze.timeline : freezeTimeline(freeze)
+  };
+}
+
+function normalizeNotification(input) {
+  if (!input) {
+    return null;
+  }
+  const businessId = input.businessId ?? input.business_id;
+  const notification = {
+    notificationId: Number(input.notificationId),
+    userId: Number(input.userId),
+    type: String(input.type ?? "system"),
+    title: String(input.title ?? ""),
+    content: String(input.content ?? ""),
+    businessType: normalizeOptionalString(input.businessType) ?? normalizeOptionalString(input.business_type),
+    businessId: businessId === undefined || businessId === null ? null : Number(businessId),
+    readAt: input.readAt ?? input.read_at ?? null,
+    createdAt: input.createdAt ?? input.created_at ?? null
+  };
+  return {
+    ...notification,
+    isRead: Boolean(notification.readAt),
+    href: notificationHref(notification.businessType ?? notification.type, notification.businessId)
+  };
+}
+
+function normalizeConversation(input) {
+  return {
+    conversationId: String(input.conversationId ?? ""),
+    type: String(input.type ?? "direct"),
+    title: String(input.title ?? "邻帮用户"),
+    participant: input.participant ?? null,
+    orderId: input.orderId === undefined || input.orderId === null ? null : Number(input.orderId),
+    preview: normalizeOptionalString(input.preview) ?? "",
+    unreadCount: Number(input.unreadCount ?? 0),
+    updatedAt: input.updatedAt ?? null,
+    href: normalizeOptionalString(input.href)
   };
 }
 
@@ -1603,6 +1936,31 @@ function addTagCount(tagMap, rawTag, field) {
 function positiveInteger(raw, fallback) {
   const value = Number(raw);
   return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function notificationHref(type, id) {
+  if (!id) {
+    if (type === "wallet") {
+      return "/wallet";
+    }
+    if (type === "ai") {
+      return "/ai/assistant";
+    }
+    return null;
+  }
+  if (type === "order" || type === "review") {
+    return `/orders/${encodeURIComponent(id)}`;
+  }
+  if (type === "dispute") {
+    return `/disputes/${encodeURIComponent(id)}`;
+  }
+  if (type === "wallet") {
+    return "/wallet";
+  }
+  if (type === "ai") {
+    return "/ai/assistant";
+  }
+  return null;
 }
 
 function freezeTimeline(freeze) {
