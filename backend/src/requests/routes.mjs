@@ -8,6 +8,9 @@ const ORDER_CONFIRM_RE = /^\/api\/orders\/([^/]+)\/confirm$/;
 const ORDER_DISPUTES_RE = /^\/api\/orders\/([^/]+)\/disputes$/;
 const DISPUTE_DETAIL_RE = /^\/api\/disputes\/([^/]+)$/;
 const DISPUTE_EVIDENCE_RE = /^\/api\/disputes\/([^/]+)\/evidence$/;
+const DISPUTE_JURY_RESULT_RE = /^\/api\/disputes\/([^/]+)\/jury-result$/;
+const JURY_DISPUTE_DETAIL_RE = /^\/api\/jury\/disputes\/([^/]+)$/;
+const JURY_DISPUTE_VOTES_RE = /^\/api\/jury\/disputes\/([^/]+)\/votes$/;
 const ORDER_REVIEWS_RE = /^\/api\/orders\/([^/]+)\/reviews$/;
 const NOTIFICATION_READ_RE = /^\/api\/notifications\/([^/]+)\/read$/;
 const PUBLIC_REQUEST_STATUSES = new Set(["open", "accepted", "completed"]);
@@ -25,6 +28,7 @@ const WALLET_FREEZE_STATUSES = new Set(["all", "active", "dispute", "released"])
 const WALLET_FREEZE_REASONS = new Set(["all", "order", "dispute"]);
 const NOTIFICATION_TYPES = new Set(["all", "system", "order", "wallet", "review", "dispute", "ai", "social"]);
 const NOTIFICATION_READ_FILTERS = new Set(["all", "read", "unread"]);
+const JURY_VOTES = new Set(["publisher", "provider", "mediate"]);
 const REQUEST_BODY_MAX_BYTES = 64 * 1024;
 const LOCAL_SENSITIVE_RULES = [
   { word: "私下交易", level: "block", reason: "平台交易需通过邻帮完成，不能引导私下交易。" },
@@ -183,6 +187,65 @@ export async function handleRequestRoutes({ request, response, url, authService 
     return true;
   }
 
+  const juryDisputeMatch = url.pathname.match(JURY_DISPUTE_DETAIL_RE);
+  if (juryDisputeMatch) {
+    allowOnly(request, response, ["GET"]);
+    const context = await authService.authenticateRequest(request);
+    authService.requireRole(context, ["user"]);
+    const visible = await findVisibleJuryDispute(authService.store, juryDisputeMatch[1], context.user);
+    const juryResult = await juryResultForDispute(authService.store, visible.dispute.disputeId, {
+      viewerId: context.user.userId
+    });
+    sendJson(response, 200, {
+      dispute: {
+        ...disputeDto(visible.dispute, { viewerId: context.user.userId, viewerRole: context.user.role }),
+        juryResult
+      },
+      juryResult
+    });
+    return true;
+  }
+
+  const juryVoteMatch = url.pathname.match(JURY_DISPUTE_VOTES_RE);
+  if (juryVoteMatch) {
+    allowOnly(request, response, ["POST"]);
+    const context = await authService.authenticateRequest(request);
+    authService.requireRole(context, ["user"]);
+    const visible = await findVisibleJuryDispute(authService.store, juryVoteMatch[1], context.user);
+    if (["resolved", "cancelled"].includes(visible.dispute.status)) {
+      throw new HttpError(409, "JURY_VOTING_CLOSED", "This dispute is no longer accepting jury votes.");
+    }
+    if (typeof authService.store.createJuryVote !== "function") {
+      throw new HttpError(500, "JURY_STORE_UNAVAILABLE", "Jury voting is not available.");
+    }
+
+    const body = await readJsonBody(request, { maxBytes: REQUEST_BODY_MAX_BYTES });
+    const input = normalizeJuryVoteInput(body);
+    let vote;
+    try {
+      vote = await authService.store.createJuryVote({
+        ...input,
+        disputeId: visible.dispute.disputeId,
+        jurorId: context.user.userId
+      });
+    } catch (error) {
+      throw juryVoteError(error);
+    }
+    const juryResult = await juryResultForDispute(authService.store, visible.dispute.disputeId, {
+      viewerId: context.user.userId
+    });
+    const updated = await authService.store.findDisputeById(visible.dispute.disputeId);
+    sendJson(response, 201, {
+      vote: juryVoteDto(vote, { viewerId: context.user.userId }),
+      juryResult,
+      dispute: {
+        ...disputeDto(updated ?? visible.dispute, { viewerId: context.user.userId, viewerRole: context.user.role }),
+        juryResult
+      }
+    });
+    return true;
+  }
+
   const acceptMatch = url.pathname.match(REQUEST_ACCEPT_RE);
   if (acceptMatch) {
     allowOnly(request, response, ["POST"]);
@@ -258,6 +321,21 @@ export async function handleRequestRoutes({ request, response, url, authService 
     sendJson(response, 200, await disputeDetailPayload(authService.store, disputeDetailMatch[1], {
       viewerId: context.user.userId,
       viewerRole: context.user.role
+    }));
+    return true;
+  }
+
+  const disputeJuryResultMatch = url.pathname.match(DISPUTE_JURY_RESULT_RE);
+  if (disputeJuryResultMatch) {
+    allowOnly(request, response, ["GET"]);
+    const context = await authService.authenticateRequest(request);
+    authService.requireRole(context, ["user", "admin", "super_admin"]);
+    const visible = await findVisibleDisputeForViewer(authService.store, disputeJuryResultMatch[1], {
+      viewerId: context.user.userId,
+      viewerRole: context.user.role
+    });
+    sendJson(response, 200, await juryResultPayload(authService.store, visible.dispute.disputeId, {
+      viewerId: context.user.userId
     }));
     return true;
   }
@@ -528,6 +606,37 @@ function normalizeRequestTags(rawTags) {
   }
 
   return tags;
+}
+
+function normalizeJuryVoteInput(input) {
+  const rawVote = optionalInputText(input?.vote ?? input?.choice, 30, "INVALID_JURY_VOTE");
+  const vote = normalizeJuryVote(rawVote);
+  if (!JURY_VOTES.has(vote)) {
+    throw new HttpError(400, "INVALID_JURY_VOTE", "Jury vote must support publisher, provider, or mediate.");
+  }
+  return {
+    vote,
+    reason: requiredText(input?.reason, 5, 500, "INVALID_JURY_REASON", "Jury vote reason is required.")
+  };
+}
+
+function normalizeJuryVote(value) {
+  const text = String(value ?? "").trim().toLowerCase();
+  const map = new Map([
+    ["demand", "publisher"],
+    ["publisher", "publisher"],
+    ["payer", "publisher"],
+    ["support_publisher", "publisher"],
+    ["需求方", "publisher"],
+    ["service", "provider"],
+    ["provider", "provider"],
+    ["support_provider", "provider"],
+    ["服务方", "provider"],
+    ["mediate", "mediate"],
+    ["mediation", "mediate"],
+    ["调解", "mediate"]
+  ]);
+  return map.get(text) ?? text;
 }
 
 function normalizeReviewInput(input, order, reviewerId) {
@@ -1001,11 +1110,17 @@ async function disputeMyListPayload(store, userId, searchParams) {
 
 async function disputeDetailPayload(store, rawDisputeId, options = {}) {
   const visible = await findVisibleDisputeForViewer(store, rawDisputeId, options);
+  const juryResult = await juryResultForDispute(store, visible.dispute.disputeId, {
+    viewerId: options.viewerId
+  });
   return {
-    dispute: disputeDto(visible.dispute, {
-      viewerId: options.viewerId,
-      viewerRole: options.viewerRole
-    })
+    dispute: {
+      ...disputeDto(visible.dispute, {
+        viewerId: options.viewerId,
+        viewerRole: options.viewerRole
+      }),
+      juryResult
+    }
   };
 }
 
@@ -1025,6 +1140,38 @@ async function findVisibleDisputeForViewer(store, rawDisputeId, options = {}) {
     }
   }
   return { dispute };
+}
+
+async function findVisibleJuryDispute(store, rawDisputeId, user) {
+  const disputeId = parseDisputeId(rawDisputeId);
+  if (!isJuryUser(user)) {
+    throw new HttpError(403, "JURY_FORBIDDEN", "Only jury users can access jury voting.");
+  }
+  if (typeof store.findDisputeById !== "function") {
+    throw new HttpError(500, "DISPUTE_STORE_UNAVAILABLE", "Dispute lookup is not available.");
+  }
+  const dispute = await store.findDisputeById(disputeId);
+  if (!dispute) {
+    throw new HttpError(404, "DISPUTE_NOT_FOUND", "Dispute was not found.");
+  }
+  if (isDisputeParty(dispute, user.userId)) {
+    throw new HttpError(403, "JURY_FORBIDDEN", "Dispute participants cannot vote as jurors.");
+  }
+  return { dispute };
+}
+
+async function juryResultPayload(store, disputeId, options = {}) {
+  return {
+    juryResult: await juryResultForDispute(store, disputeId, options)
+  };
+}
+
+async function juryResultForDispute(store, disputeId, options = {}) {
+  if (typeof store.listJuryVotesForDisputeId !== "function") {
+    return juryResultDto([], { disputeId, viewerId: options.viewerId });
+  }
+  const votes = await store.listJuryVotesForDisputeId(disputeId);
+  return juryResultDto(votes, { disputeId, viewerId: options.viewerId });
 }
 
 async function orderReviewsPayload(store, order, options = {}) {
@@ -1365,6 +1512,7 @@ function publicPublisherDto(user) {
     bio: user.bio ?? null,
     skillTags: user.skillTags ?? [],
     serviceCategories: user.serviceCategories ?? [],
+    isJury: Boolean(user.isJury),
     createdAt: user.createdAt
   };
 }
@@ -1548,6 +1696,48 @@ function evidenceDto(item) {
   };
 }
 
+function juryResultDto(votes, options = {}) {
+  const normalizedVotes = Array.isArray(votes) ? votes.map((item) => juryVoteDto(item, options)) : [];
+  const counts = {
+    publisher: 0,
+    provider: 0,
+    mediate: 0
+  };
+  for (const vote of normalizedVotes) {
+    if (Object.hasOwn(counts, vote.vote)) {
+      counts[vote.vote] += 1;
+    }
+  }
+  const total = normalizedVotes.length;
+  return {
+    disputeId: options.disputeId === undefined || options.disputeId === null ? null : Number(options.disputeId),
+    total,
+    counts,
+    percentages: {
+      publisher: percent(counts.publisher, total),
+      provider: percent(counts.provider, total),
+      mediate: percent(counts.mediate, total)
+    },
+    leadingVote: leadingJuryVote(counts),
+    myVote: normalizedVotes.find((vote) => Number(vote.jurorId) === Number(options.viewerId)) ?? null,
+    votes: normalizedVotes
+  };
+}
+
+function juryVoteDto(item, options = {}) {
+  return {
+    voteId: item.voteId,
+    disputeId: item.disputeId,
+    jurorId: item.jurorId,
+    vote: item.vote,
+    label: juryVoteLabel(item.vote),
+    reason: item.reason ?? null,
+    isMine: Number(item.jurorId) === Number(options.viewerId),
+    juror: item.juror ? publicPublisherDto(item.juror) : null,
+    createdAt: item.createdAt
+  };
+}
+
 function attachmentDto(item) {
   return {
     name: item.name,
@@ -1555,6 +1745,29 @@ function attachmentDto(item) {
     size: Number(item.size ?? 0),
     url: item.url ?? null
   };
+}
+
+function percent(count, total) {
+  return total > 0 ? Math.round((Number(count ?? 0) / total) * 100) : 0;
+}
+
+function leadingJuryVote(counts) {
+  const entries = Object.entries(counts);
+  const top = entries.sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0];
+  if (!top || top[1] <= 0) {
+    return null;
+  }
+  const tied = entries.filter(([, value]) => value === top[1]);
+  return tied.length > 1 ? "tie" : top[0];
+}
+
+function juryVoteLabel(vote) {
+  const map = new Map([
+    ["publisher", "支持需求方"],
+    ["provider", "支持服务方"],
+    ["mediate", "建议调解"]
+  ]);
+  return map.get(vote) ?? "未知投票";
 }
 
 function progressDto(progress) {
@@ -1914,6 +2127,24 @@ function canViewDispute(dispute, viewerId, viewerRole) {
   return [Number(dispute.initiatorId), Number(dispute.respondentId)].includes(id);
 }
 
+function isDisputeParty(dispute, viewerId) {
+  const id = Number(viewerId);
+  return [Number(dispute.initiatorId), Number(dispute.respondentId)].includes(id);
+}
+
+function isJuryUser(user) {
+  return Boolean(
+    user
+      && user.role === "user"
+      && user.status === ACTIVE_STATUS
+      && (
+        user.isJury
+          || user.jury
+          || (Array.isArray(user.skillTags) && user.skillTags.some((tag) => ["jury", "陪审", "陪审员"].includes(String(tag).trim().toLowerCase())))
+      )
+  );
+}
+
 function disputeMyRole(dispute, viewerId) {
   const id = Number(viewerId);
   if (Number(dispute.initiatorId) === id) {
@@ -2123,6 +2354,22 @@ function disputeError(error) {
   }
   if (error?.code === "WALLET_NOT_FOUND") {
     return new HttpError(409, "WALLET_NOT_FOUND", "Payer wallet was not found for dispute freeze.");
+  }
+  return error;
+}
+
+function juryVoteError(error) {
+  if (error?.code === "DISPUTE_NOT_FOUND") {
+    return new HttpError(404, "DISPUTE_NOT_FOUND", "Dispute was not found.");
+  }
+  if (error?.code === "JURY_FORBIDDEN") {
+    return new HttpError(403, "JURY_FORBIDDEN", "Only assigned jury users can access this dispute.");
+  }
+  if (error?.code === "JURY_ALREADY_VOTED" || error?.code === "DUPLICATE_ENTRY") {
+    return new HttpError(409, "JURY_ALREADY_VOTED", "This juror already voted on the dispute.");
+  }
+  if (error?.code === "JURY_VOTING_CLOSED") {
+    return new HttpError(409, "JURY_VOTING_CLOSED", "This dispute is no longer accepting jury votes.");
   }
   return error;
 }

@@ -351,6 +351,10 @@ async function hydrateCurrentRoute(session) {
       await hydrateDisputeDetailRoute(session);
       return;
     }
+    if (route.id === "jury-voting") {
+      await hydrateJuryVotingRoute(session);
+      return;
+    }
     if (route.id === "ai-results") {
       hydrateAiResultsRoute();
       return;
@@ -1698,6 +1702,260 @@ function renderDisputeCreateSuccess(dispute) {
   `;
 }
 
+async function hydrateJuryVotingRoute(session) {
+  const userSession = session ?? auth.readSession("user");
+  const disputeId = juryVotingDisputeId();
+  if (!userSession?.token) {
+    return;
+  }
+  if (!disputeId) {
+    renderJuryVotingState("error", "请从纠纷详情或通知入口进入指定纠纷投票页。");
+    return;
+  }
+  renderJuryVotingState("loading", "正在读取陪审材料。");
+  try {
+    const payload = await api.jury.dispute(userSession.token, disputeId);
+    applyJuryVotingPage(payload.dispute, payload.juryResult, userSession);
+  } catch (error) {
+    renderJuryVotingState("error", juryErrorMessage(error));
+  }
+}
+
+function renderJuryVotingState(kind, message) {
+  const page = document.querySelector(".jury-page");
+  if (!page) {
+    return;
+  }
+  page.innerHTML = `
+    <a class="jury-back" href="/orders">← 返回</a>
+    <div class="task-runtime-state" data-state="${escapeHtml(kind)}">
+      <strong>${escapeHtml(kind === "loading" ? "加载中" : "无法投票")}</strong>
+      <p>${escapeHtml(message)}</p>
+      ${kind === "error" ? '<a class="btn btn--outline" href="/orders">返回我的订单</a>' : ""}
+    </div>
+  `;
+}
+
+function applyJuryVotingPage(dispute, juryResult, userSession) {
+  const page = document.querySelector(".jury-page");
+  if (!page) {
+    return;
+  }
+  const request = dispute.request ?? {};
+  const order = dispute.order ?? {};
+  const publisher = dispute.publisher ?? {};
+  const provider = dispute.provider ?? {};
+  page.innerHTML = `
+    <a class="jury-back" href="/disputes/${encodeURIComponent(dispute.disputeId)}">← 返回纠纷详情</a>
+
+    <div class="jury-header">
+      <div class="jury-badge-row">
+        <span class="jtag dispute">${escapeHtml(disputeTypeLabel(dispute.type))}</span>
+        <span class="jtag order">#DSP-${escapeHtml(dispute.disputeId)}</span>
+        <span class="jtag urgent">${escapeHtml(dispute.status === "resolved" ? "已结束" : "投票中")}</span>
+      </div>
+      <h1>${escapeHtml(request.title || "邻里互助订单")} - ${escapeHtml(dispute.reason || "订单纠纷")}</h1>
+      <div class="jh-meta">
+        关联订单 <strong>#ORD-${escapeHtml(dispute.orderId)}</strong> · 争议金额 <strong>${escapeHtml(formatAmount(dispute.coinAmount ?? order.coinAmount))} ⏂</strong> · 发起时间 <strong>${escapeHtml(formatDateTime(dispute.createdAt))}</strong><br>
+        当前阶段：<strong style="color:var(--warning)">${escapeHtml(disputeStatusTitle(dispute.status))}</strong> · 已投票 ${escapeHtml(juryResult?.total ?? 0)} 人
+      </div>
+    </div>
+
+    <div class="evidence-grid">
+      ${juryEvidencePanel("需求方主张", "demand", publisher, dispute, Number(dispute.initiator?.userId) === Number(publisher.userId))}
+      ${juryEvidencePanel("服务方主张", "service", provider, dispute, Number(dispute.initiator?.userId) === Number(provider.userId))}
+    </div>
+
+    <div class="ai-box">
+      <h3>AI 辅助分析</h3>
+      <div class="ai-items">
+        <div class="ai-item"><span class="ai-label">争议焦点</span><span>${escapeHtml(dispute.reason || "订单履约结果与双方约定是否一致。")}</span></div>
+        <div class="ai-item"><span class="ai-label">证据概况</span><span>当前已记录 ${escapeHtml(dispute.evidence?.length ?? 0)} 条证据，请结合双方主张独立判断。</span></div>
+        <div class="ai-item"><span class="ai-label">处理边界</span><span>陪审投票只提供社区参考意见，最终裁决仍由管理员完成。</span></div>
+      </div>
+      <div class="ai-note">AI 分析仅供参考，请独立做出判断</div>
+    </div>
+
+    ${juryTallySection(juryResult)}
+    ${juryVoteFormSection(dispute, juryResult)}
+  `;
+  installJuryVoteHandlers(dispute, userSession);
+}
+
+function juryEvidencePanel(title, dotClass, user, dispute, isInitiator) {
+  const evidence = (dispute.evidence ?? []).filter((item) => Number(item.uploaderId) === Number(user.userId));
+  return `
+    <div class="evidence-panel">
+      <div class="ep-role"><span class="dot ${escapeHtml(dotClass)}"></span>${escapeHtml(title)}</div>
+      <div class="ep-user">${escapeHtml(displayName(user))}</div>
+      <div class="ep-credit">${escapeHtml(joinedText(user.createdAt) || "邻帮认证用户")}</div>
+      <div class="ep-claim">${escapeHtml(isInitiator ? dispute.description : evidence[0]?.content || "等待对方补充回应与证据。")}</div>
+      <div class="ep-files">
+        ${evidence.length === 0 ? '<div class="ep-file">暂无证据</div>' : evidence.flatMap((item) => juryEvidenceFiles(item)).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function juryEvidenceFiles(item) {
+  const attachments = Array.isArray(item.attachments) && item.attachments.length > 0 ? item.attachments : [{ name: item.content || "文字说明", size: 0 }];
+  return attachments.map((attachment) => `<div class="ep-file">附件 ${escapeHtml(attachment.name)}${attachment.size ? ` (${escapeHtml(formatFileSize(attachment.size))})` : ""}</div>`);
+}
+
+function juryTallySection(juryResult) {
+  const counts = juryResult?.counts ?? {};
+  const total = Number(juryResult?.total ?? 0);
+  const rows = Array.isArray(juryResult?.votes) && juryResult.votes.length > 0
+    ? juryResult.votes.map(juryVoteRow).join("")
+    : '<tr><td colspan="5" style="color:var(--muted);">暂无陪审投票记录</td></tr>';
+  return `
+    <div class="tally-section">
+      <h3>当前投票统计</h3>
+      <div class="tally-bars" id="tallyBars">
+        ${juryTallyCard("建议调解", "mediate", counts.mediate ?? 0, total)}
+        ${juryTallyCard("需求方胜诉", "demand", counts.publisher ?? 0, total)}
+        ${juryTallyCard("服务方胜诉", "service", counts.provider ?? 0, total)}
+      </div>
+
+      <div class="tally-table">
+        <table>
+          <thead><tr><th>陪审员</th><th>标记</th><th>投票</th><th>理由摘要</th><th>时间</th></tr></thead>
+          <tbody id="juryTable">${rows}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function juryTallyCard(label, key, count, total) {
+  const percentValue = total > 0 ? Math.round((Number(count) / total) * 100) : 0;
+  return `
+    <div class="tally-bar-card">
+      <div class="tb-label">${escapeHtml(label)}</div>
+      <div class="tb-count" id="count${escapeHtml(capitalize(key))}">${escapeHtml(count)}</div>
+      <div class="tb-bar"><div class="tb-fill ${escapeHtml(key)}" style="width:${escapeHtml(percentValue)}%" id="bar${escapeHtml(capitalize(key))}"></div></div>
+    </div>
+  `;
+}
+
+function juryVoteRow(vote) {
+  return `
+    <tr>
+      <td><strong>${escapeHtml(displayName(vote.juror))}</strong>${vote.isMine ? ' <span style="font-size:11px;color:var(--muted)">(我)</span>' : ""}</td>
+      <td>${escapeHtml(vote.juror?.isJury ? "陪审员" : "社区用户")}</td>
+      <td><span class="vote-badge ${escapeHtml(juryVoteClass(vote.vote))}">${escapeHtml(juryVoteLabel(vote.vote))}</span></td>
+      <td>${escapeHtml(vote.reason || "未填写理由")}</td>
+      <td style="font-size:12px;color:var(--muted)">${escapeHtml(formatDateTime(vote.createdAt))}</td>
+    </tr>
+  `;
+}
+
+function juryVoteFormSection(dispute, juryResult) {
+  if (juryResult?.myVote) {
+    return `
+      <div class="vote-form vote-submitted" id="voteSubmitted">
+        <div class="vs-title">你已提交投票</div>
+        <div class="vs-desc">投票方向：${escapeHtml(juryVoteLabel(juryResult.myVote.vote))}<br>${escapeHtml(juryResult.myVote.reason || "")}</div>
+        <a class="btn btn--outline" href="/disputes/${encodeURIComponent(dispute.disputeId)}">查看纠纷详情</a>
+      </div>
+    `;
+  }
+  return `
+    <div class="vote-form" id="voteForm">
+      <h3>我的投票</h3>
+      <div class="vf-subtitle">作为本纠纷的陪审员之一，请根据证据和平台规则作出独立判断。投票后不可修改。</div>
+
+      <div class="vote-options" id="voteOptions">
+        <button class="vote-opt" data-vote="publisher" type="button">
+          <div class="vo-label">需求方胜诉</div>
+          <div class="vo-desc">支持退还全部或部分时间币</div>
+        </button>
+        <button class="vote-opt" data-vote="provider" type="button">
+          <div class="vo-label">服务方胜诉</div>
+          <div class="vo-desc">驳回申诉，维持原约定</div>
+        </button>
+        <button class="vote-opt" data-vote="mediate" type="button">
+          <div class="vo-label">调解处理</div>
+          <div class="vo-desc">建议双方各退一步，部分退款</div>
+        </button>
+      </div>
+
+      <textarea class="vote-textarea" id="voteReason" placeholder="请说明你的投票理由（至少5字）..." maxlength="500"></textarea>
+      <div class="vote-char-count"><span id="charCount">0</span>/500</div>
+
+      <div class="vote-actions">
+        <button class="btn btn--primary" id="submit-jury-vote" type="button">提交投票</button>
+        <button class="btn btn--secondary" id="reset-jury-vote" type="button">清除重选</button>
+      </div>
+    </div>
+  `;
+}
+
+function installJuryVoteHandlers(dispute, userSession) {
+  const form = document.getElementById("voteForm");
+  if (!form) {
+    return;
+  }
+  const state = { vote: null };
+  const options = Array.from(form.querySelectorAll(".vote-opt[data-vote]"));
+  const textarea = document.getElementById("voteReason");
+  const count = document.getElementById("charCount");
+  const submit = document.getElementById("submit-jury-vote");
+  const reset = document.getElementById("reset-jury-vote");
+
+  for (const option of options) {
+    option.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      state.vote = option.dataset.vote;
+      options.forEach((item) => item.classList.toggle("selected", item === option));
+    }, true);
+  }
+  textarea?.addEventListener("input", (event) => {
+    event.stopImmediatePropagation();
+    if (count) {
+      count.textContent = String(textarea.value.length);
+    }
+  }, true);
+  reset?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    state.vote = null;
+    options.forEach((item) => item.classList.remove("selected"));
+    if (textarea) {
+      textarea.value = "";
+    }
+    if (count) {
+      count.textContent = "0";
+    }
+  }, true);
+  submit?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (!state.vote) {
+      showInlineMessage(submit, "请选择一个投票方向。", "error");
+      return;
+    }
+    const reason = textarea?.value.trim() ?? "";
+    if (reason.length < 5) {
+      showInlineMessage(submit, "投票理由至少需要 5 个字。", "error");
+      return;
+    }
+    const restore = setLoading(submit, "提交中...");
+    try {
+      const result = await api.jury.vote(userSession.token, dispute.disputeId, {
+        vote: state.vote,
+        reason
+      });
+      applyJuryVotingPage(result.dispute, result.juryResult, userSession);
+      showGlobalMessage("投票已提交。", "success");
+    } catch (error) {
+      restore();
+      showInlineMessage(submit, juryErrorMessage(error), "error");
+    }
+  }, true);
+}
+
 async function hydrateDisputeDetailRoute(session) {
   const userSession = session ?? auth.readSession("user");
   const disputeId = routeDisputeId();
@@ -1780,6 +2038,8 @@ function applyDisputeDetail(dispute, userSession) {
       <button class="btn btn--primary btn--lg" id="submit-evidence-btn" style="margin-top:var(--space-lg);">提交证据</button>
     </div>
 
+    ${disputeJuryResultPanel(dispute)}
+
     <div class="ai-summary-card">
       <div class="ai-header">
         <span style="font-weight:600;font-size:15px;">纠纷处理摘要</span>
@@ -1795,6 +2055,59 @@ function applyDisputeDetail(dispute, userSession) {
     </div>
   `;
   installEvidenceSubmit(dispute, userSession);
+}
+
+function disputeJuryResultPanel(dispute) {
+  const result = dispute.juryResult ?? { total: 0, counts: {}, votes: [] };
+  const counts = result.counts ?? {};
+  const votes = Array.isArray(result.votes) ? result.votes : [];
+  return `
+    <div class="jury-panel">
+      <h3>社区陪审投票结果</h3>
+      <div class="jury-stats">
+        <div class="js-item">
+          <div class="js-val for">${escapeHtml(counts.provider ?? 0)}</div>
+          <div class="js-lbl">支持服务方</div>
+        </div>
+        <div class="js-item">
+          <div class="js-val against">${escapeHtml(counts.publisher ?? 0)}</div>
+          <div class="js-lbl">支持需求方</div>
+        </div>
+        <div class="js-item">
+          <div class="js-val abstain">${escapeHtml(counts.mediate ?? 0)}</div>
+          <div class="js-lbl">建议调解</div>
+        </div>
+      </div>
+      <div class="jury-list">
+        ${votes.length === 0 ? '<div class="jury-member"><div class="jm-info"><div class="jm-name">暂无投票</div><div class="jm-reason">陪审结果会在投票提交后更新。</div></div></div>' : votes.map(disputeJuryVoteItem).join("")}
+      </div>
+      <div style="margin-top:var(--space-lg);display:flex;gap:var(--space-sm);flex-wrap:wrap;">
+        <a class="btn btn--outline" href="/jury/voting?dispute=${encodeURIComponent(dispute.disputeId)}">进入陪审投票页</a>
+      </div>
+    </div>
+  `;
+}
+
+function disputeJuryVoteItem(vote) {
+  return `
+    <div class="jury-member">
+      <div class="avatar sm" style="background:${escapeHtml(avatarColor(vote.jurorId))};display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;">${escapeHtml(firstCharacter(displayName(vote.juror)))}</div>
+      <div class="jm-info">
+        <div class="jm-name">${escapeHtml(displayName(vote.juror))}${vote.isMine ? "（我）" : ""}</div>
+        <div class="jm-reason">${escapeHtml(vote.reason || "未填写理由")}</div>
+      </div>
+      <div class="jm-vote ${escapeHtml(disputeJuryVoteClass(vote.vote))}">${escapeHtml(juryVoteLabel(vote.vote))}</div>
+    </div>
+  `;
+}
+
+function disputeJuryVoteClass(vote) {
+  const map = new Map([
+    ["publisher", "oppose"],
+    ["provider", "support"],
+    ["mediate", "abstain"]
+  ]);
+  return map.get(vote) ?? "abstain";
 }
 
 function disputePartyPanel(role, user, dispute, isInitiator) {
@@ -3515,6 +3828,17 @@ function routeDisputeId() {
   return raw && /^\d+$/.test(raw) ? raw : null;
 }
 
+function juryVotingDisputeId() {
+  const match = window.location.pathname.match(/^\/jury\/disputes\/([^/]+)$/);
+  const pathRaw = match?.[1];
+  if (pathRaw && /^\d+$/.test(pathRaw)) {
+    return pathRaw;
+  }
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get("dispute") || params.get("disputeId") || params.get("id");
+  return raw && /^\d+$/.test(raw) ? raw : null;
+}
+
 function reviewOrderId() {
   const params = new URLSearchParams(window.location.search);
   const raw = params.get("order") || params.get("orderId") || params.get("order_id");
@@ -3664,6 +3988,29 @@ function disputeErrorMessage(error) {
   return error?.message || "纠纷操作失败，请稍后重试。";
 }
 
+function juryErrorMessage(error) {
+  const code = error?.payload?.error?.code;
+  if (code === "DISPUTE_NOT_FOUND") {
+    return "这笔纠纷不存在，或已经无法进入陪审。";
+  }
+  if (code === "JURY_FORBIDDEN" || code === "FORBIDDEN") {
+    return "只有带陪审标记的普通用户可以查看并提交陪审投票，纠纷双方不能参与本纠纷投票。";
+  }
+  if (code === "JURY_ALREADY_VOTED") {
+    return "你已经对这笔纠纷投过票，不能重复提交。";
+  }
+  if (code === "JURY_VOTING_CLOSED") {
+    return "这笔纠纷已结束，不能继续投票。";
+  }
+  if (code === "INVALID_JURY_VOTE" || code === "INVALID_JURY_REASON") {
+    return "请选择投票方向，并填写 5 到 500 字的投票理由。";
+  }
+  if (error?.status === 0 || error instanceof TypeError) {
+    return "无法连接陪审投票服务，请确认后端服务已启动。";
+  }
+  return error?.message || "陪审投票操作失败，请稍后重试。";
+}
+
 function publishErrorMessage(error, context = "") {
   const code = error?.payload?.error?.code;
   if (context === "catalog") {
@@ -3708,6 +4055,20 @@ function formatAmount(value) {
   return Number(value || 0).toFixed(2);
 }
 
+function formatFileSize(value) {
+  const size = Number(value || 0);
+  if (!Number.isFinite(size) || size <= 0) {
+    return "0 B";
+  }
+  if (size >= 1024 * 1024) {
+    return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  }
+  if (size >= 1024) {
+    return `${Math.round(size / 1024)} KB`;
+  }
+  return `${Math.round(size)} B`;
+}
+
 function formatHours(value) {
   const hours = Number(value);
   if (!Number.isFinite(hours) || hours <= 0) {
@@ -3732,6 +4093,16 @@ function formatDateTime(value) {
   }).format(date);
 }
 
+function disputeTypeLabel(type) {
+  const map = new Map([
+    ["quality_issue", "质量争议"],
+    ["not_completed", "未完成争议"],
+    ["communication", "沟通争议"],
+    ["other", "其他争议"]
+  ]);
+  return map.get(type) ?? "订单纠纷";
+}
+
 function disputeStatusTitle(status) {
   const map = new Map([
     ["pending", "纠纷处理中 - 证据收集中"],
@@ -3754,6 +4125,24 @@ function disputeStatusText(status) {
     ["cancelled", "纠纷已取消，订单将按后续规则继续处理。"]
   ]);
   return map.get(status) ?? "纠纷已记录，等待处理。";
+}
+
+function juryVoteLabel(vote) {
+  const map = new Map([
+    ["publisher", "支持需求方"],
+    ["provider", "支持服务方"],
+    ["mediate", "建议调解"]
+  ]);
+  return map.get(vote) ?? "未知投票";
+}
+
+function juryVoteClass(vote) {
+  const map = new Map([
+    ["publisher", "demand"],
+    ["provider", "service"],
+    ["mediate", "mediate"]
+  ]);
+  return map.get(vote) ?? "mediate";
 }
 
 function attachmentTypeFromName(name) {
@@ -3797,6 +4186,11 @@ function splitTags(value) {
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 20);
+}
+
+function capitalize(value) {
+  const text = String(value ?? "");
+  return text ? `${text.slice(0, 1).toUpperCase()}${text.slice(1)}` : "";
 }
 
 function routeUserId(session) {

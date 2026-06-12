@@ -117,7 +117,16 @@ export function createApiClient(options = {}) {
     disputes: {
       my: (token, params = {}) => request(withQuery("/api/disputes/my", params), { token }),
       detail: (token, disputeId) => request(`/api/disputes/${encodeURIComponent(disputeId)}`, { token }),
+      juryResult: (token, disputeId) => request(`/api/disputes/${encodeURIComponent(disputeId)}/jury-result`, { token }),
       evidence: (token, disputeId, payload) => request(`/api/disputes/${encodeURIComponent(disputeId)}/evidence`, {
+        method: "POST",
+        token,
+        body: payload
+      })
+    },
+    jury: {
+      dispute: (token, disputeId) => request(`/api/jury/disputes/${encodeURIComponent(disputeId)}`, { token }),
+      vote: (token, disputeId, payload) => request(`/api/jury/disputes/${encodeURIComponent(disputeId)}/votes`, {
         method: "POST",
         token,
         body: payload

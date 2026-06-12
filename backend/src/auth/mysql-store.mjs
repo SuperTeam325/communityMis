@@ -16,6 +16,7 @@ export function createMysqlAuthStore(options = {}) {
   const settings = new Map();
   const requestExtras = new Map();
   const reviewExtras = new Map();
+  const juryVoteExtras = new Map();
 
   return {
     createUserWithWallet,
@@ -52,6 +53,9 @@ export function createMysqlAuthStore(options = {}) {
     listDisputesForUserId,
     addDisputeEvidence,
     listDisputeEvidence,
+    createJuryVote,
+    listJuryVotesForDisputeId,
+    findJuryVote,
     createSession,
     findSession,
     revokeSession
@@ -59,7 +63,8 @@ export function createMysqlAuthStore(options = {}) {
 
   async function createUserWithWallet(input) {
     const username = input.username.trim();
-    const skillTagsJson = JSON.stringify(Array.isArray(input.skillTags) ? input.skillTags : []);
+    const skillTags = Array.isArray(input.skillTags) ? input.skillTags : [];
+    const skillTagsJson = JSON.stringify(input.isJury && !isJurySkillTags(skillTags) ? [...skillTags, "jury"] : skillTags);
     const initialBalance = Number(input.initialBalance ?? INITIAL_TIME_COIN_BALANCE).toFixed(2);
     const sql = `
 START TRANSACTION;
@@ -1586,6 +1591,151 @@ FROM (
     return Array.isArray(rows) ? rows.map(normalizeDisputeEvidence) : [];
   }
 
+  async function createJuryVote(input) {
+    const disputeId = Number(input.disputeId);
+    const jurorId = Number(input.jurorId);
+    const vote = normalizeJuryVoteValue(input.vote);
+    const reason = normalizeOptionalString(input.reason);
+    const sql = `
+START TRANSACTION;
+SET @dispute_id = ${disputeId};
+SET @juror_id = ${jurorId};
+SET @dispute_found = 0;
+SET @authorized = 0;
+SET @not_party = 0;
+SET @status_open = 0;
+SET @duplicate = 0;
+SELECT
+  @dispute_found := 1,
+  @not_party := IF(d.\`initiator_id\` <> @juror_id AND d.\`respondent_id\` <> @juror_id, 1, 0),
+  @status_open := IF(d.\`status\` NOT IN ('resolved', 'cancelled'), 1, 0)
+FROM \`dispute\` d
+WHERE d.\`dispute_id\` = @dispute_id
+FOR UPDATE;
+SELECT @authorized := COUNT(*)
+FROM \`user\` u
+WHERE u.\`user_id\` = @juror_id
+  AND u.\`role\` = 'user'
+  AND u.\`status\` = 1
+  AND (
+    LOWER(COALESCE(u.\`skill_tags\`, '')) LIKE '%"jury"%'
+    OR COALESCE(u.\`skill_tags\`, '') LIKE '%陪审%'
+  );
+SELECT @duplicate := COUNT(*)
+FROM \`jury_vote\` jv
+WHERE jv.\`dispute_id\` = @dispute_id
+  AND jv.\`juror_id\` = @juror_id
+FOR UPDATE;
+INSERT INTO \`jury_vote\` (
+  \`dispute_id\`,
+  \`juror_id\`,
+  \`vote\`,
+  \`reason\`
+)
+SELECT
+  @dispute_id,
+  @juror_id,
+  ${sqlString(vote)},
+  ${sqlNullableString(reason)}
+WHERE @dispute_found = 1
+  AND @authorized > 0
+  AND @not_party = 1
+  AND @status_open = 1
+  AND @duplicate = 0;
+SET @created_vote_id = IF(ROW_COUNT() = 1, LAST_INSERT_ID(), NULL);
+UPDATE \`dispute\`
+SET
+  \`status\` = IF(\`status\` = 'pending', 'jury_voting', \`status\`),
+  \`updated_at\` = CURRENT_TIMESTAMP
+WHERE \`dispute_id\` = @dispute_id
+  AND @created_vote_id IS NOT NULL
+LIMIT 1;
+SET @transaction_sql = IF(@created_vote_id IS NOT NULL, 'COMMIT', 'ROLLBACK');
+PREPARE transaction_statement FROM @transaction_sql;
+EXECUTE transaction_statement;
+DEALLOCATE PREPARE transaction_statement;
+SELECT JSON_OBJECT(
+  'disputeFound', @dispute_found,
+  'authorized', @authorized,
+  'notParty', @not_party,
+  'statusOpen', @status_open,
+  'duplicate', @duplicate,
+  'voteId', @created_vote_id
+);
+`;
+    let result;
+    try {
+      result = await mysqlJson(sql);
+    } catch (error) {
+      if (error.code === "DUPLICATE_ENTRY") {
+        throw storeError("JURY_ALREADY_VOTED", "This juror already voted on the dispute.");
+      }
+      throw error;
+    }
+    if (Number(result?.disputeFound ?? 0) !== 1) {
+      throw storeError("DISPUTE_NOT_FOUND", "Dispute was not found.");
+    }
+    if (Number(result?.authorized ?? 0) < 1 || Number(result?.notParty ?? 0) !== 1) {
+      throw storeError("JURY_FORBIDDEN", "Only jury users can vote on disputes they are not part of.");
+    }
+    if (Number(result?.statusOpen ?? 0) !== 1) {
+      throw storeError("JURY_VOTING_CLOSED", "Closed disputes do not accept jury votes.");
+    }
+    if (Number(result?.duplicate ?? 0) > 0 || !result?.voteId) {
+      throw storeError("JURY_ALREADY_VOTED", "This juror already voted on the dispute.");
+    }
+    if (reason) {
+      juryVoteExtras.set(Number(result.voteId), { reason });
+    }
+    const votes = await listJuryVotesForDisputeId(disputeId);
+    return votes.find((item) => item.voteId === Number(result.voteId)) ?? null;
+  }
+
+  async function listJuryVotesForDisputeId(disputeId) {
+    const sql = `
+SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
+  'voteId', q.\`vote_id\`,
+  'disputeId', q.\`dispute_id\`,
+  'jurorId', q.\`juror_id\`,
+  'vote', q.\`vote\`,
+  'reason', q.\`reason\`,
+  'createdAt', q.\`created_at\`,
+  'juror', JSON_OBJECT(
+    'userId', q.\`juror_id\`,
+    'username', q.\`juror_username\`,
+    'displayName', q.\`juror_username\`,
+    'skillTags', q.\`juror_skill_tags\`,
+    'role', 'user',
+    'status', 1,
+    'createdAt', q.\`juror_created_at\`
+  )
+)), JSON_ARRAY())
+FROM (
+  SELECT
+    jv.\`vote_id\`,
+    jv.\`dispute_id\`,
+    jv.\`juror_id\`,
+    jv.\`vote\`,
+    jv.\`reason\`,
+    DATE_FORMAT(jv.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    u.\`username\` AS \`juror_username\`,
+    u.\`skill_tags\` AS \`juror_skill_tags\`,
+    DATE_FORMAT(u.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`juror_created_at\`
+  FROM \`jury_vote\` jv
+  JOIN \`user\` u ON u.\`user_id\` = jv.\`juror_id\`
+  WHERE jv.\`dispute_id\` = ${Number(disputeId)}
+  ORDER BY jv.\`created_at\` ASC, jv.\`vote_id\` ASC
+) q;
+`;
+    const rows = await mysqlJson(sql, { optional: true });
+    return Array.isArray(rows) ? rows.map(normalizeJuryVote).map(withJuryVoteExtras) : [];
+  }
+
+  async function findJuryVote(disputeId, jurorId) {
+    const votes = await listJuryVotesForDisputeId(disputeId);
+    return votes.find((item) => item.jurorId === Number(jurorId)) ?? null;
+  }
+
   async function listDisputes(whereSql) {
     const sql = `
 SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
@@ -1760,6 +1910,11 @@ FROM (
   function withReviewExtras(review) {
     const extra = reviewExtras.get(review?.reviewId);
     return extra ? { ...review, tags: extra.tags ?? review.tags } : review;
+  }
+
+  function withJuryVoteExtras(vote) {
+    const extra = juryVoteExtras.get(vote?.voteId);
+    return extra ? { ...vote, reason: extra.reason ?? vote.reason } : vote;
   }
 
   function createSession(input) {
@@ -1970,7 +2125,8 @@ function normalizeUser(user) {
     displayName: user.displayName ?? user.username,
     bio: user.bio ?? null,
     skillTags: parseSkillTags(user.skillTags),
-    serviceCategories: parseSkillTags(user.serviceCategories)
+    serviceCategories: parseSkillTags(user.serviceCategories),
+    isJury: isJurySkillTags(parseSkillTags(user.skillTags))
   };
 }
 
@@ -2202,6 +2358,13 @@ function parseSkillTags(value) {
   }
 }
 
+function isJurySkillTags(tags) {
+  return Array.isArray(tags) && tags.some((tag) => {
+    const text = String(tag ?? "").trim().toLowerCase();
+    return ["jury", "陪审", "陪审员"].includes(text);
+  });
+}
+
 function normalizeProfileExtra(input, fallback = {}) {
   const output = {};
   if (hasOwn(input, "displayName")) {
@@ -2215,6 +2378,9 @@ function normalizeProfileExtra(input, fallback = {}) {
       ? input.serviceCategories.map((item) => String(item).trim()).filter(Boolean).slice(0, 20)
       : [];
   }
+  if (hasOwn(input, "isJury")) {
+    output.isJury = Boolean(input.isJury);
+  }
   return output;
 }
 
@@ -2227,7 +2393,8 @@ function mergeProfileExtras(user, extra = null) {
     ...(extra ?? {}),
     displayName: extra?.displayName ?? user.displayName ?? user.username,
     bio: extra?.bio ?? user.bio ?? null,
-    serviceCategories: extra?.serviceCategories ?? user.serviceCategories ?? deriveServiceCategories(user.skillTags)
+    serviceCategories: extra?.serviceCategories ?? user.serviceCategories ?? deriveServiceCategories(user.skillTags),
+    isJury: Boolean(extra?.isJury ?? user.isJury)
   };
 }
 
@@ -2245,6 +2412,18 @@ function normalizeReview(input) {
     createdAt: input.createdAt ?? new Date().toISOString(),
     reviewer: input.reviewer ?? null,
     target: input.target ?? null
+  };
+}
+
+function normalizeJuryVote(input) {
+  return {
+    voteId: Number(input.voteId ?? input.vote_id),
+    disputeId: Number(input.disputeId ?? input.dispute_id),
+    jurorId: Number(input.jurorId ?? input.juror_id),
+    vote: normalizeJuryVoteValue(input.vote),
+    reason: normalizeOptionalString(input.reason),
+    juror: input.juror ? normalizeUser(input.juror) : null,
+    createdAt: input.createdAt ?? input.created_at ?? null
   };
 }
 
@@ -2393,6 +2572,11 @@ function normalizeDisputeType(value) {
 function normalizeEvidenceType(value) {
   const text = String(value ?? "").trim().toLowerCase();
   return ["text", "image", "file", "chat"].includes(text) ? text : "text";
+}
+
+function normalizeJuryVoteValue(value) {
+  const text = String(value ?? "").trim().toLowerCase();
+  return ["publisher", "provider", "mediate"].includes(text) ? text : "mediate";
 }
 
 function disputeProgress(dispute, evidence) {

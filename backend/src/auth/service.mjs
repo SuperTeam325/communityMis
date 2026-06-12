@@ -141,6 +141,7 @@ export function publicUser(user) {
     bio: user.bio ?? null,
     skillTags: user.skillTags,
     serviceCategories: user.serviceCategories ?? [],
+    isJury: Boolean(user.isJury),
     role: user.role,
     status: user.status,
     createdAt: user.createdAt

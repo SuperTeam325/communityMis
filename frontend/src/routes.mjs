@@ -59,7 +59,9 @@ export const routes = [
     demoPath: "/disputes/demo",
     match: /^\/disputes\/[^/]+$/
   }),
-  route("jury-voting", "陪审投票", "screens/jury-voting.html", "/jury/voting", "user", "userShell"),
+  route("jury-voting", "陪审投票", "screens/jury-voting.html", "/jury/voting", "user", "userShell", {
+    match: /^\/jury\/disputes\/[^/]+$/
+  }),
   route("help", "帮助与规则", "screens/help.html", "/help", "user", "userShell"),
   route("ai-assistant", "AI 助手", "screens/ai-assistant.html", "/ai/assistant", "user", "userShell"),
   route("ai-results", "AI 筛选结果", "screens/ai-results.html", "/ai/results", "user", "userShell"),

@@ -160,6 +160,7 @@ function privateProfileDto(user) {
     bio: user.bio ?? null,
     skillTags: user.skillTags ?? [],
     serviceCategories: user.serviceCategories ?? [],
+    isJury: Boolean(user.isJury),
     role: user.role,
     status: user.status,
     createdAt: user.createdAt,
@@ -175,6 +176,7 @@ function publicProfileDto(user, credit = null) {
     bio: user.bio ?? null,
     skillTags: user.skillTags ?? [],
     serviceCategories: user.serviceCategories ?? [],
+    isJury: Boolean(user.isJury),
     createdAt: user.createdAt,
     credit: credit ? {
       averageRating: credit.averageRating,

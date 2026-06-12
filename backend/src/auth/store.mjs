@@ -21,6 +21,7 @@ export function createMemoryAuthStore(options = {}) {
   const reviews = [];
   const disputes = new Map();
   const disputeEvidence = new Map();
+  const juryVotes = new Map();
   let nextUserId = options.nextUserId ?? 10000;
   let nextWalletId = options.nextWalletId ?? 20000;
   let nextRequestId = options.nextRequestId ?? 30000;
@@ -32,6 +33,7 @@ export function createMemoryAuthStore(options = {}) {
   let nextReviewId = options.nextReviewId ?? 60000;
   let nextDisputeId = options.nextDisputeId ?? 65000;
   let nextDisputeEvidenceId = options.nextDisputeEvidenceId ?? 66000;
+  let nextJuryVoteId = options.nextJuryVoteId ?? 67000;
 
   for (const seedUser of options.seedUsers ?? defaultSeedUsers()) {
     insertSeedUser(seedUser);
@@ -66,6 +68,9 @@ export function createMemoryAuthStore(options = {}) {
   }
   for (const seedEvidence of options.seedDisputeEvidence ?? (options.seedRequests === undefined ? defaultSeedDisputeEvidence() : [])) {
     insertSeedDisputeEvidence(seedEvidence);
+  }
+  for (const seedVote of options.seedJuryVotes ?? (options.seedRequests === undefined ? defaultSeedJuryVotes() : [])) {
+    insertSeedJuryVote(seedVote);
   }
 
   return {
@@ -103,6 +108,9 @@ export function createMemoryAuthStore(options = {}) {
     listDisputesForUserId,
     addDisputeEvidence,
     listDisputeEvidence,
+    createJuryVote,
+    listJuryVotesForDisputeId,
+    findJuryVote,
     createSession,
     findSession,
     revokeSession
@@ -126,6 +134,7 @@ export function createMemoryAuthStore(options = {}) {
       bio: normalizeOptionalString(input.bio),
       skillTags: normalizeSkillTags(input.skillTags),
       serviceCategories: normalizeTextList(input.serviceCategories),
+      isJury: Boolean(input.isJury ?? input.jury ?? input.is_jury ?? false),
       role: input.role ?? "user",
       status: input.status ?? ACTIVE_STATUS,
       createdAt: now,
@@ -960,6 +969,80 @@ export function createMemoryAuthStore(options = {}) {
       .map(clone);
   }
 
+  function createJuryVote(input) {
+    const disputeId = Number(input.disputeId);
+    const jurorId = Number(input.jurorId);
+    const dispute = disputes.get(disputeId);
+    if (!dispute) {
+      throw storeError("DISPUTE_NOT_FOUND", "Dispute was not found.");
+    }
+    const juror = users.get(jurorId);
+    if (!isJuryUser(juror)) {
+      throw storeError("JURY_FORBIDDEN", "Only jury users can submit a vote.");
+    }
+    if (dispute.initiatorId === jurorId || dispute.respondentId === jurorId) {
+      throw storeError("JURY_FORBIDDEN", "Dispute participants cannot vote as jurors.");
+    }
+    if (["resolved", "cancelled"].includes(dispute.status)) {
+      throw storeError("JURY_VOTING_CLOSED", "Closed disputes do not accept jury votes.");
+    }
+    const existing = findJuryVote(disputeId, jurorId);
+    if (existing) {
+      throw storeError("JURY_ALREADY_VOTED", "This juror already voted on the dispute.");
+    }
+
+    const vote = normalizeJuryVote({
+      ...input,
+      voteId: nextJuryVoteId,
+      disputeId,
+      jurorId
+    });
+    nextJuryVoteId += 1;
+    juryVotes.set(vote.voteId, vote);
+    if (["pending", "evidence_collecting"].includes(dispute.status)) {
+      dispute.status = "jury_voting";
+    }
+    dispute.updatedAt = vote.createdAt;
+    createNotification({
+      userId: dispute.initiatorId,
+      type: "dispute",
+      title: "陪审投票已更新",
+      content: `纠纷 #DSP-${dispute.disputeId} 收到新的陪审投票。`,
+      businessType: "dispute",
+      businessId: dispute.disputeId,
+      createdAt: vote.createdAt
+    });
+    if (dispute.respondentId !== dispute.initiatorId) {
+      createNotification({
+        userId: dispute.respondentId,
+        type: "dispute",
+        title: "陪审投票已更新",
+        content: `纠纷 #DSP-${dispute.disputeId} 收到新的陪审投票。`,
+        businessType: "dispute",
+        businessId: dispute.disputeId,
+        createdAt: vote.createdAt
+      });
+    }
+    return clone(enrichJuryVote(vote));
+  }
+
+  function listJuryVotesForDisputeId(disputeId) {
+    const id = Number(disputeId);
+    return Array.from(juryVotes.values())
+      .filter((vote) => vote.disputeId === id)
+      .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime() || left.voteId - right.voteId)
+      .map(enrichJuryVote)
+      .map(clone);
+  }
+
+  function findJuryVote(disputeId, jurorId) {
+    const vote = Array.from(juryVotes.values()).find((item) => (
+      item.disputeId === Number(disputeId)
+        && item.jurorId === Number(jurorId)
+    ));
+    return vote ? clone(enrichJuryVote(vote)) : null;
+  }
+
   function enrichReview(review) {
     const output = clone(review);
     return {
@@ -1108,6 +1191,15 @@ export function createMemoryAuthStore(options = {}) {
     });
     disputeEvidence.set(evidence.evidenceId, evidence);
     nextDisputeEvidenceId = Math.max(nextDisputeEvidenceId, evidence.evidenceId + 1);
+  }
+
+  function insertSeedJuryVote(seedVote) {
+    const vote = normalizeJuryVote({
+      ...seedVote,
+      voteId: seedVote.voteId ?? nextJuryVoteId
+    });
+    juryVotes.set(vote.voteId, vote);
+    nextJuryVoteId = Math.max(nextJuryVoteId, vote.voteId + 1);
   }
 
   function createNotification(input) {
@@ -1297,6 +1389,13 @@ export function createMemoryAuthStore(options = {}) {
     };
   }
 
+  function enrichJuryVote(vote) {
+    return {
+      ...vote,
+      juror: publicReviewer(users.get(vote.jurorId))
+    };
+  }
+
   function insertDisputeEvidence(input) {
     const evidence = normalizeDisputeEvidence({
       ...input,
@@ -1361,6 +1460,7 @@ export function defaultSeedUsers() {
       bio: "周末可帮邻居做轻维修、搬运和宠物照看。",
       skillTags: ["维修", "搬运", "宠物照看"],
       serviceCategories: ["家政维修", "宠物照看"],
+      isJury: true,
       role: "user",
       status: ACTIVE_STATUS,
       initialBalance: 88
@@ -1741,6 +1841,19 @@ export function defaultSeedDisputeEvidence() {
   ];
 }
 
+export function defaultSeedJuryVotes() {
+  return [
+    {
+      voteId: 8201,
+      disputeId: 8001,
+      jurorId: 1002,
+      vote: "mediate",
+      reason: "双方证据都不完整，建议按比例退还。",
+      createdAt: "2026-05-28T11:30:00.000Z"
+    }
+  ];
+}
+
 export function defaultSeedReviews() {
   return [
     {
@@ -1943,6 +2056,17 @@ function normalizeReview(input) {
   };
 }
 
+function normalizeJuryVote(input) {
+  return {
+    voteId: Number(input.voteId ?? input.vote_id),
+    disputeId: Number(input.disputeId ?? input.dispute_id),
+    jurorId: Number(input.jurorId ?? input.juror_id),
+    vote: normalizeJuryVoteValue(input.vote),
+    reason: normalizeOptionalString(input.reason),
+    createdAt: input.createdAt ?? input.created_at ?? new Date().toISOString()
+  };
+}
+
 function normalizeDispute(input) {
   const now = new Date().toISOString();
   return {
@@ -2032,6 +2156,15 @@ function normalizeEvidenceList(value) {
 
 function isVisibleServiceRequest(request, publisher) {
   return request.visible !== false && request.status !== "cancelled" && publisher?.status === ACTIVE_STATUS;
+}
+
+function isJuryUser(user) {
+  return Boolean(
+    user
+      && user.status === ACTIVE_STATUS
+      && user.role === "user"
+      && user.isJury
+  );
 }
 
 function addTagCount(tagMap, rawTag, field) {
@@ -2178,6 +2311,11 @@ function normalizeDisputeType(value) {
     ["other", "other"]
   ]);
   return map.get(text) ?? "other";
+}
+
+function normalizeJuryVoteValue(value) {
+  const text = String(value ?? "").trim().toLowerCase();
+  return ["publisher", "provider", "mediate"].includes(text) ? text : "mediate";
 }
 
 function normalizeDisputeStatus(value) {
