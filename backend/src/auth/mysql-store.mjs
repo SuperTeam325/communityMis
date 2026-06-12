@@ -19,6 +19,7 @@ export function createMysqlAuthStore(options = {}) {
   const juryVoteExtras = new Map();
   const managedTags = new Map();
   const riskContents = new Map();
+  const aiFeedbackExtras = new Map();
   let systemSettings = normalizeSystemSettings(options.seedSystemSettings ?? options.systemSettings);
   let nextManagedTagId = 69000;
   let nextRiskContentId = 71000;
@@ -84,6 +85,14 @@ export function createMysqlAuthStore(options = {}) {
     adminStats,
     createAuditLog,
     listAuditLogs,
+    createAiConversation,
+    findAiConversationById,
+    listAiConversationsForUserId,
+    createAiMessage,
+    findAiMessageById,
+    listAiMessagesForConversationId,
+    createAiCallLog,
+    createAiFeedback,
     createSession,
     findSession,
     revokeSession
@@ -3228,6 +3237,229 @@ FROM (
     };
   }
 
+  async function createAiConversation(input) {
+    const sql = `
+INSERT INTO \`ai_conversation\` (
+  \`user_id\`,
+  \`role_type\`,
+  \`scene\`,
+  \`status\`
+)
+VALUES (
+  ${input.userId === undefined || input.userId === null ? "NULL" : Number(input.userId)},
+  ${sqlString(input.roleType ?? input.role_type ?? "user")},
+  ${sqlString(normalizeAiScene(input.scene))},
+  ${sqlString(input.status ?? "active")}
+);
+SET @created_conversation_id = LAST_INSERT_ID();
+SELECT ${aiConversationJsonObjectSql("c")}
+FROM \`ai_conversation\` c
+WHERE c.\`conversation_id\` = @created_conversation_id
+LIMIT 1;
+`;
+    return normalizeAiConversation(await mysqlJson(sql));
+  }
+
+  async function findAiConversationById(conversationId) {
+    const sql = `
+SELECT ${aiConversationJsonObjectSql("c")}
+FROM \`ai_conversation\` c
+WHERE c.\`conversation_id\` = ${Number(conversationId)}
+LIMIT 1;
+`;
+    return normalizeAiConversation(await mysqlJson(sql, { optional: true }));
+  }
+
+  async function listAiConversationsForUserId(userId, query = {}) {
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(50, positiveInteger(query.pageSize, 20));
+    const offset = (page - 1) * pageSize;
+    const id = Number(userId);
+    const sql = `
+SELECT JSON_OBJECT(
+  'items', COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
+    'conversationId', q.\`conversation_id\`,
+    'userId', q.\`user_id\`,
+    'roleType', q.\`role_type\`,
+    'scene', q.\`scene\`,
+    'status', q.\`status\`,
+    'createdAt', q.\`created_at\`,
+    'updatedAt', q.\`updated_at\`,
+    'preview', q.\`preview\`,
+    'messageCount', q.\`message_count\`
+  )), JSON_ARRAY()),
+  'total', (
+    SELECT COUNT(*)
+    FROM \`ai_conversation\` c
+    WHERE c.\`user_id\` = ${id}
+  )
+)
+FROM (
+  SELECT
+    c.\`conversation_id\`,
+    c.\`user_id\`,
+    c.\`role_type\`,
+    c.\`scene\`,
+    c.\`status\`,
+    DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`updated_at\`,
+    (
+      SELECT m.\`content\`
+      FROM \`ai_message\` m
+      WHERE m.\`conversation_id\` = c.\`conversation_id\`
+      ORDER BY m.\`created_at\` DESC, m.\`message_id\` DESC
+      LIMIT 1
+    ) AS \`preview\`,
+    (
+      SELECT COUNT(*)
+      FROM \`ai_message\` m
+      WHERE m.\`conversation_id\` = c.\`conversation_id\`
+    ) AS \`message_count\`
+  FROM \`ai_conversation\` c
+  WHERE c.\`user_id\` = ${id}
+  ORDER BY c.\`updated_at\` DESC, c.\`conversation_id\` DESC
+  LIMIT ${pageSize} OFFSET ${offset}
+) q;
+`;
+    const result = await mysqlJson(sql, { optional: true });
+    return {
+      conversations: Array.isArray(result?.items) ? result.items.map(normalizeAiConversation).map((item) => ({
+        ...item,
+        preview: normalizeOptionalString(result.items.find((raw) => Number(raw.conversationId) === Number(item.conversationId))?.preview) ?? "",
+        messageCount: Number(result.items.find((raw) => Number(raw.conversationId) === Number(item.conversationId))?.messageCount ?? 0)
+      })) : [],
+      total: Number(result?.total ?? 0),
+      page,
+      pageSize
+    };
+  }
+
+  async function createAiMessage(input) {
+    const sql = `
+INSERT INTO \`ai_message\` (
+  \`conversation_id\`,
+  \`sender_type\`,
+  \`content\`,
+  \`business_type\`,
+  \`business_id\`,
+  \`sensitive_hit\`
+)
+VALUES (
+  ${Number(input.conversationId ?? input.conversation_id)},
+  ${sqlString(normalizeAiSenderType(input.senderType ?? input.sender_type))},
+  ${sqlString(input.content ?? "")},
+  ${sqlNullableString(input.businessType ?? input.business_type)},
+  ${input.businessId === undefined || input.businessId === null ? "NULL" : Number(input.businessId ?? input.business_id)},
+  ${input.sensitiveHit || input.sensitive_hit ? 1 : 0}
+);
+SET @created_message_id = LAST_INSERT_ID();
+UPDATE \`ai_conversation\`
+SET \`updated_at\` = CURRENT_TIMESTAMP
+WHERE \`conversation_id\` = ${Number(input.conversationId ?? input.conversation_id)}
+LIMIT 1;
+SELECT ${aiMessageJsonObjectSql("m")}
+FROM \`ai_message\` m
+WHERE m.\`message_id\` = @created_message_id
+LIMIT 1;
+`;
+    return normalizeAiMessage(await mysqlJson(sql));
+  }
+
+  async function findAiMessageById(messageId) {
+    const sql = `
+SELECT ${aiMessageJsonObjectSql("m")}
+FROM \`ai_message\` m
+WHERE m.\`message_id\` = ${Number(messageId)}
+LIMIT 1;
+`;
+    return normalizeAiMessage(await mysqlJson(sql, { optional: true }));
+  }
+
+  async function listAiMessagesForConversationId(conversationId) {
+    const sql = `
+SELECT COALESCE(JSON_ARRAYAGG(${aiMessageJsonObjectSql("q")}), JSON_ARRAY())
+FROM (
+  SELECT *
+  FROM \`ai_message\`
+  WHERE \`conversation_id\` = ${Number(conversationId)}
+  ORDER BY \`created_at\` ASC, \`message_id\` ASC
+) q;
+`;
+    const rows = await mysqlJson(sql, { optional: true });
+    return Array.isArray(rows) ? rows.map(normalizeAiMessage).filter(Boolean) : [];
+  }
+
+  async function createAiCallLog(input) {
+    const sql = `
+INSERT INTO \`ai_call_log\` (
+  \`conversation_id\`,
+  \`user_id\`,
+  \`scene\`,
+  \`request_tokens\`,
+  \`response_tokens\`,
+  \`duration_ms\`,
+  \`status\`,
+  \`error_message\`
+)
+VALUES (
+  ${input.conversationId === undefined || input.conversationId === null ? "NULL" : Number(input.conversationId ?? input.conversation_id)},
+  ${input.userId === undefined || input.userId === null ? "NULL" : Number(input.userId ?? input.user_id)},
+  ${sqlString(normalizeAiScene(input.scene))},
+  ${Math.max(0, Number(input.requestTokens ?? input.request_tokens ?? 0))},
+  ${Math.max(0, Number(input.responseTokens ?? input.response_tokens ?? 0))},
+  ${Math.max(0, Number(input.durationMs ?? input.duration_ms ?? 0))},
+  ${sqlString(normalizeAiCallStatus(input.status))},
+  ${sqlNullableString(input.errorMessage ?? input.error_message)}
+);
+SET @created_call_id = LAST_INSERT_ID();
+SELECT ${aiCallLogJsonObjectSql("l")}
+FROM \`ai_call_log\` l
+WHERE l.\`call_id\` = @created_call_id
+LIMIT 1;
+`;
+    return normalizeAiCallLog(await mysqlJson(sql));
+  }
+
+  async function createAiFeedback(input) {
+    const messageId = Number(input.messageId ?? input.message_id);
+    const userId = Number(input.userId ?? input.user_id);
+    const rating = normalizeAiFeedbackRating(input.rating);
+    const comment = normalizeOptionalString(input.comment);
+    const extraKey = `${messageId}:${userId}`;
+    const sql = `
+INSERT INTO \`ai_feedback\` (
+  \`message_id\`,
+  \`user_id\`,
+  \`rating\`,
+  \`comment\`
+)
+VALUES (
+  ${messageId},
+  ${userId},
+  ${sqlString(rating)},
+  ${sqlNullableString(comment)}
+)
+ON DUPLICATE KEY UPDATE
+  \`rating\` = VALUES(\`rating\`),
+  \`comment\` = VALUES(\`comment\`);
+SELECT JSON_OBJECT(
+  'feedbackId', \`feedback_id\`,
+  'messageId', \`message_id\`,
+  'userId', \`user_id\`,
+  'rating', \`rating\`,
+  'comment', \`comment\`,
+  'createdAt', DATE_FORMAT(\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+)
+FROM \`ai_feedback\`
+WHERE \`message_id\` = ${messageId}
+  AND \`user_id\` = ${userId}
+LIMIT 1;
+`;
+    const feedback = normalizeAiFeedback(await mysqlJson(sql));
+    aiFeedbackExtras.set(extraKey, feedback);
+    return feedback;
+  }
+
   async function findAuditLogById(auditId) {
     if (!auditId) {
       return null;
@@ -3372,6 +3604,46 @@ function serviceOrderJsonObjectSql(alias) {
     'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
     'updatedAt', DATE_FORMAT(${alias}.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
     'completedAt', IF(${alias}.\`completed_at\` IS NULL, NULL, DATE_FORMAT(${alias}.\`completed_at\`, '%Y-%m-%dT%H:%i:%s.000Z'))
+  )`;
+}
+
+function aiConversationJsonObjectSql(alias) {
+  return `JSON_OBJECT(
+    'conversationId', ${alias}.\`conversation_id\`,
+    'userId', ${alias}.\`user_id\`,
+    'roleType', ${alias}.\`role_type\`,
+    'scene', ${alias}.\`scene\`,
+    'status', ${alias}.\`status\`,
+    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
+    'updatedAt', DATE_FORMAT(${alias}.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+  )`;
+}
+
+function aiMessageJsonObjectSql(alias) {
+  return `JSON_OBJECT(
+    'messageId', ${alias}.\`message_id\`,
+    'conversationId', ${alias}.\`conversation_id\`,
+    'senderType', ${alias}.\`sender_type\`,
+    'content', ${alias}.\`content\`,
+    'businessType', ${alias}.\`business_type\`,
+    'businessId', ${alias}.\`business_id\`,
+    'sensitiveHit', ${alias}.\`sensitive_hit\`,
+    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+  )`;
+}
+
+function aiCallLogJsonObjectSql(alias) {
+  return `JSON_OBJECT(
+    'callId', ${alias}.\`call_id\`,
+    'conversationId', ${alias}.\`conversation_id\`,
+    'userId', ${alias}.\`user_id\`,
+    'scene', ${alias}.\`scene\`,
+    'requestTokens', ${alias}.\`request_tokens\`,
+    'responseTokens', ${alias}.\`response_tokens\`,
+    'durationMs', ${alias}.\`duration_ms\`,
+    'status', ${alias}.\`status\`,
+    'errorMessage', ${alias}.\`error_message\`,
+    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
   )`;
 }
 
@@ -3828,6 +4100,71 @@ function normalizeAuditLog(input) {
     targetId: input.targetId === undefined || input.targetId === null ? null : Number(input.targetId),
     ipAddress: normalizeOptionalString(input.ipAddress ?? input.ip_address),
     detail: typeof detail === "string" ? parseJsonObject(detail) : detail,
+    createdAt: input.createdAt ?? input.created_at ?? null
+  };
+}
+
+function normalizeAiConversation(input) {
+  if (!input) {
+    return null;
+  }
+  return {
+    conversationId: Number(input.conversationId ?? input.conversation_id),
+    userId: input.userId === undefined || input.userId === null ? null : Number(input.userId ?? input.user_id),
+    roleType: String(input.roleType ?? input.role_type ?? "user"),
+    scene: normalizeAiScene(input.scene),
+    status: String(input.status ?? "active"),
+    preview: normalizeOptionalString(input.preview) ?? "",
+    messageCount: Number(input.messageCount ?? input.message_count ?? 0),
+    createdAt: input.createdAt ?? input.created_at ?? null,
+    updatedAt: input.updatedAt ?? input.updated_at ?? input.createdAt ?? input.created_at ?? null
+  };
+}
+
+function normalizeAiMessage(input) {
+  if (!input) {
+    return null;
+  }
+  return {
+    messageId: Number(input.messageId ?? input.message_id),
+    conversationId: Number(input.conversationId ?? input.conversation_id),
+    senderType: normalizeAiSenderType(input.senderType ?? input.sender_type),
+    content: String(input.content ?? ""),
+    businessType: normalizeOptionalString(input.businessType ?? input.business_type),
+    businessId: input.businessId === undefined || input.businessId === null ? null : Number(input.businessId ?? input.business_id),
+    sensitiveHit: Boolean(input.sensitiveHit ?? input.sensitive_hit ?? false),
+    createdAt: input.createdAt ?? input.created_at ?? null
+  };
+}
+
+function normalizeAiCallLog(input) {
+  if (!input) {
+    return null;
+  }
+  return {
+    callId: Number(input.callId ?? input.call_id),
+    conversationId: input.conversationId === undefined || input.conversationId === null ? null : Number(input.conversationId ?? input.conversation_id),
+    userId: input.userId === undefined || input.userId === null ? null : Number(input.userId ?? input.user_id),
+    scene: normalizeAiScene(input.scene),
+    requestTokens: Number(input.requestTokens ?? input.request_tokens ?? 0),
+    responseTokens: Number(input.responseTokens ?? input.response_tokens ?? 0),
+    durationMs: Number(input.durationMs ?? input.duration_ms ?? 0),
+    status: normalizeAiCallStatus(input.status),
+    errorMessage: normalizeOptionalString(input.errorMessage ?? input.error_message),
+    createdAt: input.createdAt ?? input.created_at ?? null
+  };
+}
+
+function normalizeAiFeedback(input) {
+  if (!input) {
+    return null;
+  }
+  return {
+    feedbackId: Number(input.feedbackId ?? input.feedback_id),
+    messageId: Number(input.messageId ?? input.message_id),
+    userId: Number(input.userId ?? input.user_id),
+    rating: normalizeAiFeedbackRating(input.rating),
+    comment: normalizeOptionalString(input.comment),
     createdAt: input.createdAt ?? input.created_at ?? null
   };
 }
@@ -4382,6 +4719,26 @@ function normalizeRiskResolution(value) {
     ["reviewing", "reviewing"]
   ]);
   return map.get(text) ?? "resolved";
+}
+
+function normalizeAiScene(value) {
+  const text = String(value ?? "chat").trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
+  return text ? text.slice(0, 50) : "chat";
+}
+
+function normalizeAiSenderType(value) {
+  const text = String(value ?? "ai").trim().toLowerCase();
+  return ["user", "ai", "system"].includes(text) ? text : "ai";
+}
+
+function normalizeAiCallStatus(value) {
+  const text = String(value ?? "success").trim().toLowerCase();
+  return ["success", "failed", "blocked"].includes(text) ? text : "success";
+}
+
+function normalizeAiFeedbackRating(value) {
+  const text = String(value ?? "useful").trim().toLowerCase();
+  return ["useful", "useless", "wrong", "unsafe"].includes(text) ? text : "useful";
 }
 
 function riskScoreFromHits(hits) {

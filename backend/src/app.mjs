@@ -4,6 +4,7 @@ import { createAuthService } from "./auth/service.mjs";
 import { handleAuthRoutes } from "./auth/routes.mjs";
 import { HttpError, sendError, sendJson } from "./http.mjs";
 import { handleAdminRoutes } from "./admin/routes.mjs";
+import { handleAiRoutes } from "./ai/routes.mjs";
 import { handleRequestRoutes } from "./requests/routes.mjs";
 import { healthPayload } from "./routes/health.mjs";
 import { handleUserRoutes } from "./users/routes.mjs";
@@ -45,6 +46,10 @@ export function createBackendServer(options = {}) {
       }
 
       if (await handleAdminRoutes({ request, response, url, authService })) {
+        return;
+      }
+
+      if (await handleAiRoutes({ request, response, url, authService, aiAdapter: options.aiAdapter })) {
         return;
       }
 

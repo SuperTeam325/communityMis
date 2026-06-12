@@ -398,8 +398,12 @@ async function hydrateCurrentRoute(session) {
       await hydrateJuryVotingRoute(session);
       return;
     }
+    if (route.id === "ai-assistant") {
+      await hydrateAiAssistantRoute(session);
+      return;
+    }
     if (route.id === "ai-results") {
-      hydrateAiResultsRoute();
+      await hydrateAiResultsRoute(session);
       return;
     }
     if (route.id === "profile") {
@@ -524,6 +528,8 @@ async function hydrateCreditRoute(session) {
 async function hydratePostRoute(session) {
   const userSession = session ?? auth.readSession("user");
   installPublishSubmitHandler(userSession);
+  installPublishAiDraftHandler(userSession);
+  applyDraftFromQuery();
 
   try {
     const [categoryPayload, tagPayload] = await Promise.all([
@@ -597,6 +603,119 @@ function ensurePublishTagGroup() {
     </div>
   `);
   return document.getElementById("task-tag-group");
+}
+
+function installPublishAiDraftHandler(userSession) {
+  const buttons = Array.from(document.querySelectorAll(".ai-assist-btn"));
+  if (buttons.length === 0 || document.body.dataset.aiDraftBound === "true") {
+    return;
+  }
+  document.body.dataset.aiDraftBound = "true";
+  for (const button of buttons) {
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      await generateDraftForPublish(button, userSession);
+    }, true);
+  }
+}
+
+async function generateDraftForPublish(button, userSession) {
+  if (!userSession?.token) {
+    navigateTo(`/login?redirect=${encodeURIComponent("/post")}`);
+    return;
+  }
+  const prompt = [
+    document.getElementById("task-title")?.value.trim(),
+    document.getElementById("task-description")?.value.trim()
+  ].filter(Boolean).join("。") || "帮我完善一条邻里互助需求";
+  const restore = setLoading(button, "生成中...");
+  try {
+    const result = await api.ai.requestDraft(userSession.token, {
+      prompt,
+      title: document.getElementById("task-title")?.value.trim() ?? "",
+      description: document.getElementById("task-description")?.value.trim() ?? "",
+      location: document.getElementById("task-location")?.value.trim() ?? ""
+    });
+    renderPublishDraftPanel(result.draft);
+    showInlineMessage(button, "AI 已生成草稿，请确认后再填入表单。", "success");
+  } catch (error) {
+    showInlineMessage(button, aiErrorMessage(error), "error");
+  } finally {
+    restore();
+  }
+}
+
+function renderPublishDraftPanel(draft) {
+  if (!draft) {
+    return;
+  }
+  let panel = document.getElementById("ai-draft-panel");
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "ai-draft-panel";
+    panel.className = "publish-success-panel";
+    document.querySelector("#task-description")?.closest(".form-group")?.insertAdjacentElement("afterend", panel);
+  }
+  panel.innerHTML = `
+    <div>
+      <strong>AI 草稿</strong>
+      <p><b>${escapeHtml(draft.title)}</b></p>
+      <p>${escapeHtml(draft.description)}</p>
+      <p>${(draft.tags ?? []).map((tag) => `<span class="tag-chip selected">${escapeHtml(tag)}</span>`).join(" ")}</p>
+      <p style="font-size:12px;color:var(--muted);">AI 不会自动发布，确认后仅填入表单。</p>
+    </div>
+    <div class="publish-success-actions">
+      <button class="btn btn--primary" type="button" id="apply-ai-draft">填入表单</button>
+      <button class="btn btn--outline" type="button" id="dismiss-ai-draft">暂不使用</button>
+    </div>
+  `;
+  panel.hidden = false;
+  document.getElementById("apply-ai-draft")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    fillPublishFormFromDraft(draft);
+    showGlobalMessage("草稿已填入表单，请检查后手动发布。", "success");
+  });
+  document.getElementById("dismiss-ai-draft")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    panel.hidden = true;
+  });
+}
+
+function fillPublishFormFromDraft(draft) {
+  setInputValue("task-title", draft.title);
+  setInputValue("task-description", draft.description);
+  setInputValue("task-location", draft.location);
+  setInputValue("task-hours", draft.estimatedHours);
+  setInputValue("task-coins", draft.coinAmount);
+
+  if (draft.categoryId !== null && draft.categoryId !== undefined) {
+    const categoryChip = document.querySelector(`#task-tags .tag-chip[data-category-id="${CSS.escape(String(draft.categoryId))}"]`);
+    if (categoryChip) {
+      categoryChip.closest(".tag-grid")?.querySelectorAll(".tag-chip").forEach((chip) => chip.classList.remove("selected"));
+      categoryChip.classList.add("selected");
+    }
+  }
+
+  const tagSet = new Set((draft.tags ?? []).map((tag) => String(tag).trim().toLowerCase()));
+  document.querySelectorAll("#task-skill-tags .tag-chip").forEach((chip) => {
+    const text = (chip.dataset.tag || chip.textContent).trim().toLowerCase();
+    chip.classList.toggle("selected", tagSet.has(text));
+  });
+}
+
+function applyDraftFromQuery() {
+  const params = new URLSearchParams(window.location.search);
+  const encoded = params.get("draft");
+  if (!encoded) {
+    return;
+  }
+  try {
+    const draft = JSON.parse(decodeURIComponent(encoded));
+    renderPublishDraftPanel(draft);
+  } catch {
+    showGlobalMessage("AI 草稿参数无法读取。", "error");
+  }
 }
 
 function bindSingleSelectGrid(grid) {
@@ -1559,12 +1678,13 @@ function applyOrderDetail(order, userSession) {
     <div class="ai-summary-card">
       <div class="ai-header">
         <span style="font-weight:600;font-size:15px;">订单摘要</span>
-        <span class="ai-badge">阶段 10</span>
+        <button class="btn btn--outline btn--sm" id="order-ai-summary-btn" type="button">生成 AI 摘要</button>
       </div>
-      <div class="ai-content">
+      <div class="ai-content" id="order-ai-summary-content">
         <p><strong>服务事项：</strong>${escapeHtml(request.description || request.descriptionSummary || "双方按需求详情完成服务。")}</p>
         <p style="margin-top:8px;"><strong>确认状态：</strong>${escapeHtml(orderConfirmText(order))}</p>
         <p style="margin-top:8px;"><strong>处理状态：</strong>${escapeHtml(order.status === "disputed" ? "订单已进入纠纷处理，关联时间币保持冻结。" : order.settlementReady ? "双方已确认，等待阶段 11 执行时间币结算。" : "需双方都确认完成后才进入结算。")}</p>
+        <p style="margin-top:8px;font-size:12px;color:var(--muted);">AI 摘要只读当前订单，不会确认完成、结算或退款。</p>
       </div>
     </div>
   `;
@@ -1575,6 +1695,29 @@ function applyOrderDetail(order, userSession) {
       showGlobalMessage("确认状态已更新。", "success");
     });
   });
+  document.getElementById("order-ai-summary-btn")?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    await loadOrderAiSummary(event.currentTarget, userSession, order.orderId);
+  });
+}
+
+async function loadOrderAiSummary(button, userSession, orderId) {
+  if (!userSession?.token || !orderId) {
+    return;
+  }
+  const content = document.getElementById("order-ai-summary-content");
+  const restore = setLoading(button, "生成中...");
+  try {
+    const result = await api.ai.orderSummary(userSession.token, orderId);
+    if (content) {
+      content.innerHTML = aiSummaryHtml(result.summary);
+    }
+    showGlobalMessage("AI 摘要已生成。", "success");
+  } catch (error) {
+    showInlineMessage(button, aiErrorMessage(error), "error");
+  } finally {
+    restore();
+  }
 }
 
 function orderPartyCard(role, user, confirmed = false) {
@@ -2130,18 +2273,41 @@ function applyDisputeDetail(dispute, userSession) {
     <div class="ai-summary-card">
       <div class="ai-header">
         <span style="font-weight:600;font-size:15px;">纠纷处理摘要</span>
-        <span class="ai-badge">阶段 15</span>
+        <button class="btn btn--outline btn--sm" id="dispute-ai-summary-btn" type="button">生成 AI 摘要</button>
       </div>
-      <div class="ai-content">
+      <div class="ai-content" id="dispute-ai-summary-content">
         <strong>双方主张</strong>
         <p>${escapeHtml(dispute.description || "双方主张已记录，等待补充证据。")}</p>
         <strong>时间币冻结</strong>
         <p>${escapeHtml(dispute.freeze ? `已冻结 ⏂${formatAmount(dispute.freeze.amount)}，${dispute.freeze.releaseCondition}` : "当前没有关联冻结记录。")}</p>
       </div>
-      <div class="ai-disclaimer">AI 摘要入口保留为后续阶段；当前展示的是已记录的纠纷材料。</div>
+      <div class="ai-disclaimer">AI 摘要只整理事实和辅助建议，不能裁决、退款或修改纠纷状态。</div>
     </div>
   `;
   installEvidenceSubmit(dispute, userSession);
+  document.getElementById("dispute-ai-summary-btn")?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    await loadDisputeAiSummary(event.currentTarget, userSession, dispute.disputeId);
+  });
+}
+
+async function loadDisputeAiSummary(button, userSession, disputeId) {
+  if (!userSession?.token || !disputeId) {
+    return;
+  }
+  const content = document.getElementById("dispute-ai-summary-content");
+  const restore = setLoading(button, "生成中...");
+  try {
+    const result = await api.ai.disputeSummary(userSession.token, disputeId);
+    if (content) {
+      content.innerHTML = aiSummaryHtml(result.summary);
+    }
+    showGlobalMessage("AI 摘要已生成。", "success");
+  } catch (error) {
+    showInlineMessage(button, aiErrorMessage(error), "error");
+  } finally {
+    restore();
+  }
 }
 
 function disputeJuryResultPanel(dispute) {
@@ -5473,25 +5639,321 @@ function notificationIconHtml(type, size = "21") {
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg>`;
 }
 
-function hydrateAiResultsRoute() {
+async function hydrateAiAssistantRoute(session) {
+  const userSession = session ?? auth.readSession("user");
+  if (!userSession?.token) {
+    return;
+  }
+  const chatArea = document.getElementById("chat-area");
+  const input = document.getElementById("ai-input");
+  const sendButton = document.getElementById("send-btn");
+  if (!chatArea || !input || !sendButton || document.body.dataset.aiAssistantBound === "true") {
+    return;
+  }
+  document.body.dataset.aiAssistantBound = "true";
+  const state = { conversationId: null, scene: "chat", busy: false };
+
+  document.querySelectorAll(".scene-chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      state.scene = chip.dataset.scene || "chat";
+    }, true);
+  });
+  sendButton.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    await sendAiAssistantMessage(userSession, state);
+  }, true);
+  input.addEventListener("keydown", async (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      await sendAiAssistantMessage(userSession, state);
+    }
+  }, true);
+  chatArea.addEventListener("click", async (event) => {
+    const button = event.target.closest(".sq-btn");
+    if (!button || !chatArea.contains(button)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    input.value = button.dataset.question ?? button.textContent.trim();
+    await sendAiAssistantMessage(userSession, state);
+  }, true);
+  document.querySelectorAll(".sq-btn").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      input.value = button.dataset.question ?? button.textContent.trim();
+      await sendAiAssistantMessage(userSession, state);
+    }, true);
+  });
+  await loadAiConversationHistory(userSession);
+}
+
+async function sendAiAssistantMessage(userSession, state) {
+  const input = document.getElementById("ai-input");
+  const chatArea = document.getElementById("chat-area");
+  const sendButton = document.getElementById("send-btn");
+  const query = input?.value.trim() ?? "";
+  if (!query || state.busy || !chatArea || !sendButton) {
+    return;
+  }
+  state.busy = true;
+  sendButton.disabled = true;
+  document.getElementById("welcome-section")?.remove();
+  chatArea.insertAdjacentHTML("beforeend", aiChatMessageHtml("user", query));
+  input.value = "";
+  input.style.height = "";
+  chatArea.insertAdjacentHTML("beforeend", `<div class="typing-indicator" id="ai-runtime-typing"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>`);
+  chatArea.scrollTop = chatArea.scrollHeight;
+  try {
+    const result = await api.ai.chat(userSession.token, {
+      message: query,
+      scene: state.scene,
+      conversationId: state.conversationId
+    });
+    state.conversationId = result.conversation?.conversationId ?? state.conversationId;
+    document.getElementById("ai-runtime-typing")?.remove();
+    chatArea.insertAdjacentHTML("beforeend", aiAssistantResponseHtml(result));
+    bindAiRuntimeActions(userSession);
+    chatArea.scrollTop = chatArea.scrollHeight;
+  } catch (error) {
+    document.getElementById("ai-runtime-typing")?.remove();
+    chatArea.insertAdjacentHTML("beforeend", aiChatMessageHtml("assistant", aiErrorMessage(error)));
+  } finally {
+    state.busy = false;
+    sendButton.disabled = false;
+  }
+}
+
+async function loadAiConversationHistory(userSession) {
+  try {
+    const payload = await api.ai.conversations(userSession.token, { pageSize: 8 });
+    const list = document.querySelector("#hist-panel .hist-list");
+    if (list) {
+      const conversations = payload.conversations ?? [];
+      list.innerHTML = conversations.length === 0
+        ? '<div class="hist-item"><div class="hist-title">暂无历史对话</div><div class="hist-time">开始一次新的 AI 对话</div></div>'
+        : conversations.map((item) => `
+          <div class="hist-item" data-conv="${escapeHtml(item.conversationId)}">
+            <div class="hist-title">${escapeHtml(item.preview || aiSceneLabel(item.scene))}</div>
+            <div class="hist-time">${escapeHtml(formatDateTime(item.updatedAt))}</div>
+          </div>
+        `).join("");
+    }
+  } catch {
+    // 历史记录失败不影响 AI 助手主流程。
+  }
+}
+
+function aiChatMessageHtml(role, content) {
+  const safeRole = role === "user" ? "user" : "assistant";
+  return `
+    <div class="ai-msg ${safeRole}">
+      <div class="msg-avatar">${safeRole === "user" ? firstCharacter("我") : "AI"}</div>
+      <div>
+        <div class="msg-bubble">${escapeHtml(content).replace(/\n/g, "<br>")}</div>
+      </div>
+    </div>
+  `;
+}
+
+function aiAssistantResponseHtml(result) {
+  const messageId = result.message?.messageId ?? "";
+  const content = result.answer ?? result.message?.content ?? "已生成回复。";
+  let extra = "";
+  if (result.type === "filter") {
+    extra = `<div class="apply-filter-card">
+      <div class="filter-tags">${aiCriteriaTags(result.criteria).map((tag) => `<span class="filter-tag">${escapeHtml(tag)}</span>`).join("")}</div>
+      <button class="apply-filter-btn" type="button" data-ai-open-results="${escapeHtml(result.criteria?.prompt ?? "")}">
+        查看匹配结果（${escapeHtml(result.resultCount ?? 0)} 个任务）
+      </button>
+    </div>`;
+  } else if (result.type === "draft") {
+    extra = `<div class="draft-card">
+      <div class="draft-title">${escapeHtml(result.draft?.title ?? "AI 草稿")}</div>
+      <div class="draft-body">${escapeHtml(result.draft?.description ?? "")}</div>
+      <div class="draft-tags">${(result.draft?.tags ?? []).map((tag) => `<span class="filter-tag">${escapeHtml(tag)}</span>`).join("")}</div>
+      <div class="draft-actions">
+        <button class="btn btn--primary btn--sm" type="button" data-ai-draft='${escapeAttribute(JSON.stringify(result.draft ?? {}))}'>确认并填入发布表单</button>
+      </div>
+    </div>`;
+  }
+  return `
+    <div class="ai-msg assistant" data-ai-message-id="${escapeHtml(messageId)}">
+      <div class="msg-avatar">AI</div>
+      <div>
+        <div class="msg-bubble"><p>${escapeHtml(content).replace(/\n/g, "<br>")}</p>${extra}</div>
+        <div class="msg-actions">
+          <button class="msg-btn" type="button" data-copy-ai>复制</button>
+          <button class="msg-btn" type="button" data-ai-feedback="useful">有用</button>
+          <button class="msg-btn" type="button" data-ai-feedback="useless">没用</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function bindAiRuntimeActions(userSession) {
+  document.querySelectorAll("[data-ai-open-results]").forEach((button) => {
+    if (button.dataset.bound === "true") {
+      return;
+    }
+    button.dataset.bound = "true";
+    button.addEventListener("click", () => {
+      const params = new URLSearchParams({ prompt: button.dataset.aiOpenResults || "" });
+      navigateTo(`/ai/results?${params}`);
+    });
+  });
+  document.querySelectorAll("[data-ai-draft]").forEach((button) => {
+    if (button.dataset.bound === "true") {
+      return;
+    }
+    button.dataset.bound = "true";
+    button.addEventListener("click", () => {
+      navigateTo(`/post?draft=${encodeURIComponent(button.dataset.aiDraft || "{}")}`);
+    });
+  });
+  document.querySelectorAll("[data-copy-ai]").forEach((button) => {
+    if (button.dataset.bound === "true") {
+      return;
+    }
+    button.dataset.bound = "true";
+    button.addEventListener("click", () => {
+      const text = button.closest(".ai-msg")?.querySelector(".msg-bubble")?.textContent.trim() ?? "";
+      navigator.clipboard?.writeText(text);
+      button.textContent = "已复制";
+    });
+  });
+  document.querySelectorAll("[data-ai-feedback]").forEach((button) => {
+    if (button.dataset.bound === "true") {
+      return;
+    }
+    button.dataset.bound = "true";
+    button.addEventListener("click", async () => {
+      const messageId = button.closest(".ai-msg")?.dataset.aiMessageId;
+      if (!messageId) {
+        return;
+      }
+      try {
+        await api.ai.feedback(userSession.token, messageId, { rating: button.dataset.aiFeedback });
+        button.textContent = "已反馈";
+        button.classList.add("feedback-active");
+      } catch (error) {
+        showGlobalMessage(aiErrorMessage(error), "error");
+      }
+    });
+  });
+}
+
+async function hydrateAiResultsRoute(session) {
+  const userSession = session ?? auth.readSession("user");
+  if (!userSession?.token) {
+    return;
+  }
   const params = new URLSearchParams(window.location.search);
   const prompt = params.get("prompt") || params.get("keyword") || "帮我筛选合适的邻里需求";
   setElementText(".prompt-text", `「${prompt}」`);
-  const tags = [];
-  if (params.get("keyword")) {
-    tags.push(`关键词: ${params.get("keyword")}`);
+  renderAiResultsState("loading", "正在根据真实需求数据筛选。");
+  try {
+    const result = await api.ai.requestFilter(userSession.token, { prompt });
+    renderAiResults(result);
+  } catch (error) {
+    renderAiResultsState("error", aiErrorMessage(error));
   }
-  const filter = TASK_FILTERS.get(params.get("filter"));
-  if (filter?.label && params.get("filter") !== "all") {
-    tags.push(`类别: ${filter.label}`);
-  }
-  if (params.get("minCredit")) {
-    tags.push(`信用 >= ${params.get("minCredit")}`);
-  }
+}
+
+function renderAiResults(result) {
   const parsed = document.querySelector(".parsed-tags");
-  if (parsed && tags.length > 0) {
-    parsed.innerHTML = tags.map((tag) => `<span class="filter-tag">${escapeHtml(tag)}</span>`).join("");
+  if (parsed) {
+    parsed.innerHTML = aiCriteriaTags(result.criteria).map((tag) => `<span class="filter-tag">${escapeHtml(tag)}</span>`).join("");
   }
+  const count = document.querySelector(".result-summary .count");
+  if (count) {
+    count.innerHTML = `共找到 <strong>${escapeHtml(result.resultCount ?? 0)}</strong> 个匹配结果`;
+  }
+  const list = document.querySelector(".result-list");
+  if (!list) {
+    return;
+  }
+  const items = result.recommendations ?? [];
+  if (items.length === 0) {
+    list.innerHTML = `
+      <div class="no-results">
+        <p>没有找到匹配需求。</p>
+        <a class="btn btn--outline" href="/tasks">返回任务大厅</a>
+      </div>
+    `;
+    return;
+  }
+  list.innerHTML = items.map(aiResultCardHtml).join("");
+}
+
+function renderAiResultsState(kind, message) {
+  const list = document.querySelector(".result-list");
+  if (list) {
+    list.innerHTML = `
+      <div class="no-results" data-state="${escapeHtml(kind)}">
+        <p>${escapeHtml(message)}</p>
+      </div>
+    `;
+  }
+}
+
+function aiResultCardHtml(item) {
+  const matchClass = Number(item.matchScore ?? 0) >= 80 ? "high-match" : "medium-match";
+  const badgeClass = Number(item.matchScore ?? 0) >= 80 ? "match-high" : "match-medium";
+  return `
+    <a class="task-result-card ${matchClass}" href="${escapeHtml(item.href ?? `/posts/${item.requestId}`)}" style="display:block;text-decoration:none;color:inherit;">
+      <div class="result-top">
+        <span class="badge badge--accent">${escapeHtml(item.category?.name ?? "需求")}</span>
+        <span class="match-badge ${badgeClass}">匹配度 ${escapeHtml(item.matchScore ?? 0)}%</span>
+      </div>
+      <div class="result-title">${escapeHtml(item.title)}</div>
+      <div class="result-meta">
+        <span>${escapeHtml(formatHours(item.estimatedHours))}</span>
+        <span>${escapeHtml(displayName(item.publisher))}</span>
+        <span class="result-credit">★ ${escapeHtml(formatRating(item.creditSummary?.averageRating ?? 0))}</span>
+      </div>
+      <div class="match-reasons">
+        ${(item.matchReasons ?? []).map((reason, index) => `<span class="match-reason ${index === 0 ? "match-key" : ""}">${escapeHtml(reason)}</span>`).join("")}
+      </div>
+    </a>
+  `;
+}
+
+function aiCriteriaTags(criteria = {}) {
+  return [
+    criteria.keyword ? `关键词: ${criteria.keyword}` : null,
+    criteria.category?.name ? `类别: ${criteria.category.name}` : null,
+    ...(criteria.tags ?? []).map((tag) => `标签: ${tag}`),
+    criteria.minCredit ? `信用 >= ${criteria.minCredit}` : null,
+    criteria.status === "open" ? "状态: 待接单" : criteria.status ? `状态: ${criteria.status}` : null
+  ].filter(Boolean);
+}
+
+function aiSummaryHtml(summary) {
+  const facts = summary?.facts ?? [];
+  const suggestions = summary?.suggestions ?? [];
+  return `
+    <strong>事实摘要</strong>
+    <ul style="margin:8px 0 12px;padding-left:18px;">${facts.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+    <strong>辅助建议</strong>
+    <ul style="margin:8px 0 12px;padding-left:18px;">${suggestions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+    <p style="font-size:12px;color:var(--muted);">${escapeHtml(summary?.safety ?? "AI 仅供参考。")}</p>
+  `;
+}
+
+function aiSceneLabel(scene) {
+  const map = new Map([
+    ["request_filter", "需求筛选"],
+    ["request_draft", "发布草稿"],
+    ["order_summary", "订单摘要"],
+    ["dispute_summary", "纠纷摘要"],
+    ["rules", "规则问答"]
+  ]);
+  return map.get(scene) ?? "AI 对话";
 }
 
 async function loadCurrentProfile(session) {
@@ -5849,8 +6311,9 @@ function setElementText(selector, value) {
 
 function setInputValue(id, value) {
   const element = document.getElementById(id);
-  if (element) {
-    element.value = value;
+  if (element && value !== undefined && value !== null) {
+    element.value = String(value);
+    element.dispatchEvent(new Event("input", { bubbles: true }));
   }
 }
 
@@ -6380,6 +6843,10 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value).replace(/`/g, "&#96;");
 }
 
 function interceptSubmit(handler) {

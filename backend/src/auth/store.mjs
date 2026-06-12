@@ -26,6 +26,10 @@ export function createMemoryAuthStore(options = {}) {
   const managedTags = new Map();
   const sensitiveWords = new Map();
   const riskContents = new Map();
+  const aiConversations = new Map();
+  const aiMessages = new Map();
+  const aiCallLogs = new Map();
+  const aiFeedback = new Map();
   let systemSettings = normalizeSystemSettings(options.seedSystemSettings ?? options.systemSettings);
   let nextUserId = options.nextUserId ?? 10000;
   let nextWalletId = options.nextWalletId ?? 20000;
@@ -43,6 +47,10 @@ export function createMemoryAuthStore(options = {}) {
   let nextTagId = options.nextTagId ?? 69000;
   let nextSensitiveWordId = options.nextSensitiveWordId ?? 70000;
   let nextRiskContentId = options.nextRiskContentId ?? 71000;
+  let nextAiConversationId = options.nextAiConversationId ?? 85000;
+  let nextAiMessageId = options.nextAiMessageId ?? 86000;
+  let nextAiCallId = options.nextAiCallId ?? 87000;
+  let nextAiFeedbackId = options.nextAiFeedbackId ?? 88000;
 
   for (const seedUser of options.seedUsers ?? defaultSeedUsers()) {
     insertSeedUser(seedUser);
@@ -92,6 +100,18 @@ export function createMemoryAuthStore(options = {}) {
   }
   for (const seedRiskContent of options.seedRiskContents ?? defaultSeedRiskContents()) {
     insertSeedRiskContent(seedRiskContent);
+  }
+  for (const seedConversation of options.seedAiConversations ?? []) {
+    insertSeedAiConversation(seedConversation);
+  }
+  for (const seedMessage of options.seedAiMessages ?? []) {
+    insertSeedAiMessage(seedMessage);
+  }
+  for (const seedCallLog of options.seedAiCallLogs ?? []) {
+    insertSeedAiCallLog(seedCallLog);
+  }
+  for (const seedFeedback of options.seedAiFeedback ?? []) {
+    insertSeedAiFeedback(seedFeedback);
   }
 
   return {
@@ -155,6 +175,14 @@ export function createMemoryAuthStore(options = {}) {
     adminStats,
     createAuditLog,
     listAuditLogs,
+    createAiConversation,
+    findAiConversationById,
+    listAiConversationsForUserId,
+    createAiMessage,
+    findAiMessageById,
+    listAiMessagesForConversationId,
+    createAiCallLog,
+    createAiFeedback,
     createSession,
     findSession,
     revokeSession
@@ -1710,6 +1738,99 @@ export function createMemoryAuthStore(options = {}) {
     };
   }
 
+  function createAiConversation(input) {
+    const conversation = normalizeAiConversation({
+      ...input,
+      conversationId: input.conversationId ?? nextAiConversationId
+    });
+    aiConversations.set(conversation.conversationId, conversation);
+    nextAiConversationId = Math.max(nextAiConversationId, conversation.conversationId + 1);
+    return clone(withAiConversationStats(conversation));
+  }
+
+  function findAiConversationById(conversationId) {
+    const conversation = aiConversations.get(Number(conversationId));
+    return conversation ? clone(withAiConversationStats(conversation)) : null;
+  }
+
+  function listAiConversationsForUserId(userId, query = {}) {
+    const id = Number(userId);
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(50, positiveInteger(query.pageSize, 20));
+    const filtered = Array.from(aiConversations.values())
+      .filter((item) => Number(item.userId) === id)
+      .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime() || right.conversationId - left.conversationId);
+    const offset = (page - 1) * pageSize;
+    return {
+      conversations: filtered.slice(offset, offset + pageSize).map(withAiConversationStats).map(clone),
+      total: filtered.length,
+      page,
+      pageSize
+    };
+  }
+
+  function createAiMessage(input) {
+    const conversation = aiConversations.get(Number(input.conversationId));
+    if (!conversation) {
+      throw storeError("AI_CONVERSATION_NOT_FOUND", "AI conversation was not found.");
+    }
+    const message = normalizeAiMessage({
+      ...input,
+      messageId: input.messageId ?? nextAiMessageId
+    });
+    aiMessages.set(message.messageId, message);
+    nextAiMessageId = Math.max(nextAiMessageId, message.messageId + 1);
+    conversation.updatedAt = message.createdAt;
+    return clone(message);
+  }
+
+  function findAiMessageById(messageId) {
+    const message = aiMessages.get(Number(messageId));
+    return message ? clone(message) : null;
+  }
+
+  function listAiMessagesForConversationId(conversationId) {
+    const id = Number(conversationId);
+    return Array.from(aiMessages.values())
+      .filter((item) => Number(item.conversationId) === id)
+      .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime() || left.messageId - right.messageId)
+      .map(clone);
+  }
+
+  function createAiCallLog(input) {
+    const callLog = normalizeAiCallLog({
+      ...input,
+      callId: input.callId ?? nextAiCallId
+    });
+    aiCallLogs.set(callLog.callId, callLog);
+    nextAiCallId = Math.max(nextAiCallId, callLog.callId + 1);
+    return clone(callLog);
+  }
+
+  function createAiFeedback(input) {
+    const message = aiMessages.get(Number(input.messageId));
+    if (!message || message.senderType !== "ai") {
+      throw storeError("AI_MESSAGE_NOT_FOUND", "AI message was not found.");
+    }
+    const existing = Array.from(aiFeedback.values()).find((item) => (
+      Number(item.messageId) === Number(input.messageId)
+      && Number(item.userId) === Number(input.userId)
+    ));
+    if (existing) {
+      existing.rating = normalizeAiFeedbackRating(input.rating);
+      existing.comment = normalizeOptionalString(input.comment);
+      existing.createdAt = input.createdAt ?? new Date().toISOString();
+      return clone(existing);
+    }
+    const feedback = normalizeAiFeedback({
+      ...input,
+      feedbackId: input.feedbackId ?? nextAiFeedbackId
+    });
+    aiFeedback.set(feedback.feedbackId, feedback);
+    nextAiFeedbackId = Math.max(nextAiFeedbackId, feedback.feedbackId + 1);
+    return clone(feedback);
+  }
+
   function createSession(input) {
     const now = new Date().toISOString();
     const session = {
@@ -1885,6 +2006,42 @@ export function createMemoryAuthStore(options = {}) {
     });
     auditLogs.set(auditLog.auditId, auditLog);
     nextAuditLogId = Math.max(nextAuditLogId, auditLog.auditId + 1);
+  }
+
+  function insertSeedAiConversation(seedConversation) {
+    const conversation = normalizeAiConversation({
+      ...seedConversation,
+      conversationId: seedConversation.conversationId ?? nextAiConversationId
+    });
+    aiConversations.set(conversation.conversationId, conversation);
+    nextAiConversationId = Math.max(nextAiConversationId, conversation.conversationId + 1);
+  }
+
+  function insertSeedAiMessage(seedMessage) {
+    const message = normalizeAiMessage({
+      ...seedMessage,
+      messageId: seedMessage.messageId ?? nextAiMessageId
+    });
+    aiMessages.set(message.messageId, message);
+    nextAiMessageId = Math.max(nextAiMessageId, message.messageId + 1);
+  }
+
+  function insertSeedAiCallLog(seedCallLog) {
+    const callLog = normalizeAiCallLog({
+      ...seedCallLog,
+      callId: seedCallLog.callId ?? nextAiCallId
+    });
+    aiCallLogs.set(callLog.callId, callLog);
+    nextAiCallId = Math.max(nextAiCallId, callLog.callId + 1);
+  }
+
+  function insertSeedAiFeedback(seedFeedback) {
+    const feedback = normalizeAiFeedback({
+      ...seedFeedback,
+      feedbackId: seedFeedback.feedbackId ?? nextAiFeedbackId
+    });
+    aiFeedback.set(feedback.feedbackId, feedback);
+    nextAiFeedbackId = Math.max(nextAiFeedbackId, feedback.feedbackId + 1);
   }
 
   function createNotification(input) {
@@ -2219,6 +2376,18 @@ export function createMemoryAuthStore(options = {}) {
     return {
       ...vote,
       juror: publicReviewer(users.get(vote.jurorId))
+    };
+  }
+
+  function withAiConversationStats(conversation) {
+    const items = Array.from(aiMessages.values())
+      .filter((message) => Number(message.conversationId) === Number(conversation.conversationId))
+      .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime() || left.messageId - right.messageId);
+    const last = items.at(-1);
+    return {
+      ...conversation,
+      preview: last?.content ? summarizeText(last.content) : "",
+      messageCount: items.length
     };
   }
 
@@ -3096,6 +3265,61 @@ function normalizeAuditLog(input) {
   };
 }
 
+function normalizeAiConversation(input) {
+  const now = new Date().toISOString();
+  return {
+    conversationId: Number(input.conversationId ?? input.conversation_id),
+    userId: input.userId === undefined || input.userId === null ? null : Number(input.userId ?? input.user_id),
+    roleType: normalizeAiRoleType(input.roleType ?? input.role_type),
+    scene: normalizeAiScene(input.scene),
+    status: normalizeAiConversationStatus(input.status),
+    createdAt: input.createdAt ?? input.created_at ?? now,
+    updatedAt: input.updatedAt ?? input.updated_at ?? input.createdAt ?? input.created_at ?? now
+  };
+}
+
+function normalizeAiMessage(input) {
+  const now = new Date().toISOString();
+  return {
+    messageId: Number(input.messageId ?? input.message_id),
+    conversationId: Number(input.conversationId ?? input.conversation_id),
+    senderType: normalizeAiSenderType(input.senderType ?? input.sender_type),
+    content: String(input.content ?? "").trim(),
+    businessType: normalizeOptionalString(input.businessType ?? input.business_type),
+    businessId: input.businessId === undefined || input.businessId === null ? null : Number(input.businessId ?? input.business_id),
+    sensitiveHit: Boolean(input.sensitiveHit ?? input.sensitive_hit ?? false),
+    createdAt: input.createdAt ?? input.created_at ?? now
+  };
+}
+
+function normalizeAiCallLog(input) {
+  const now = new Date().toISOString();
+  return {
+    callId: Number(input.callId ?? input.call_id),
+    conversationId: input.conversationId === undefined || input.conversationId === null ? null : Number(input.conversationId ?? input.conversation_id),
+    userId: input.userId === undefined || input.userId === null ? null : Number(input.userId ?? input.user_id),
+    scene: normalizeAiScene(input.scene),
+    requestTokens: Math.max(0, Number(input.requestTokens ?? input.request_tokens ?? 0)),
+    responseTokens: Math.max(0, Number(input.responseTokens ?? input.response_tokens ?? 0)),
+    durationMs: Math.max(0, Number(input.durationMs ?? input.duration_ms ?? 0)),
+    status: normalizeAiCallStatus(input.status),
+    errorMessage: normalizeOptionalString(input.errorMessage ?? input.error_message),
+    createdAt: input.createdAt ?? input.created_at ?? now
+  };
+}
+
+function normalizeAiFeedback(input) {
+  const now = new Date().toISOString();
+  return {
+    feedbackId: Number(input.feedbackId ?? input.feedback_id),
+    messageId: Number(input.messageId ?? input.message_id),
+    userId: Number(input.userId ?? input.user_id),
+    rating: normalizeAiFeedbackRating(input.rating),
+    comment: normalizeOptionalString(input.comment),
+    createdAt: input.createdAt ?? input.created_at ?? now
+  };
+}
+
 function normalizeDispute(input) {
   const now = new Date().toISOString();
   return {
@@ -3387,6 +3611,11 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function summarizeText(value) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return text.length > 80 ? `${text.slice(0, 80)}...` : text;
+}
+
 function roundMoney(value) {
   return Math.round(Number(value) * 100) / 100;
 }
@@ -3486,6 +3715,36 @@ function normalizeRiskResolution(value) {
     ["reviewing", "reviewing"]
   ]);
   return map.get(text) ?? "resolved";
+}
+
+function normalizeAiScene(value) {
+  const text = String(value ?? "chat").trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
+  return text ? text.slice(0, 50) : "chat";
+}
+
+function normalizeAiRoleType(value) {
+  const text = String(value ?? "user").trim().toLowerCase();
+  return ["guest", "user", "admin", "super_admin"].includes(text) ? text : "user";
+}
+
+function normalizeAiConversationStatus(value) {
+  const text = String(value ?? "active").trim().toLowerCase();
+  return ["active", "closed", "error", "review"].includes(text) ? text : "active";
+}
+
+function normalizeAiSenderType(value) {
+  const text = String(value ?? "ai").trim().toLowerCase();
+  return ["user", "ai", "system"].includes(text) ? text : "ai";
+}
+
+function normalizeAiCallStatus(value) {
+  const text = String(value ?? "success").trim().toLowerCase();
+  return ["success", "failed", "blocked"].includes(text) ? text : "success";
+}
+
+function normalizeAiFeedbackRating(value) {
+  const text = String(value ?? "useful").trim().toLowerCase();
+  return ["useful", "useless", "wrong", "unsafe"].includes(text) ? text : "useful";
 }
 
 function riskScoreFromHits(hits) {

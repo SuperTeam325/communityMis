@@ -114,6 +114,40 @@ export function createApiClient(options = {}) {
     messages: {
       list: (token, params = {}) => request(withQuery("/api/messages", params), { token })
     },
+    ai: {
+      chat: (token, payload) => request("/api/ai/chat", {
+        method: "POST",
+        token,
+        body: payload
+      }),
+      conversations: (token, params = {}) => request(withQuery("/api/ai/conversations", params), { token }),
+      conversation: (token, conversationId) => request(`/api/ai/conversations/${encodeURIComponent(conversationId)}`, { token }),
+      feedback: (token, messageId, payload) => request(`/api/ai/messages/${encodeURIComponent(messageId)}/feedback`, {
+        method: "POST",
+        token,
+        body: payload
+      }),
+      requestFilter: (token, payload) => request("/api/ai/request-filter", {
+        method: "POST",
+        token,
+        body: payload
+      }),
+      requestDraft: (token, payload) => request("/api/ai/request-draft", {
+        method: "POST",
+        token,
+        body: payload
+      }),
+      orderSummary: (token, orderId, payload = {}) => request(`/api/ai/orders/${encodeURIComponent(orderId)}/summary`, {
+        method: "POST",
+        token,
+        body: payload
+      }),
+      disputeSummary: (token, disputeId, payload = {}) => request(`/api/ai/disputes/${encodeURIComponent(disputeId)}/summary`, {
+        method: "POST",
+        token,
+        body: payload
+      })
+    },
     disputes: {
       my: (token, params = {}) => request(withQuery("/api/disputes/my", params), { token }),
       detail: (token, disputeId) => request(`/api/disputes/${encodeURIComponent(disputeId)}`, { token }),
