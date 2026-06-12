@@ -13,6 +13,9 @@ const ORDER_STATUS_FILTERS = new Set(["accepted", "payer_confirmed", "both_confi
 const ORDER_ROLE_FILTERS = new Set(["all", "posted", "accepted", "publisher", "provider"]);
 const SORTS = new Set(["latest", "oldest", "coin_desc", "coin_asc", "credit_desc", "credit_asc", "hours_desc", "hours_asc"]);
 const ORDER_SORTS = new Set(["latest", "oldest", "coin_desc", "coin_asc"]);
+const WALLET_TRANSACTION_TYPES = new Set(["all", "income", "expense", "freeze", "release", "refund"]);
+const WALLET_FREEZE_STATUSES = new Set(["all", "active", "dispute", "released"]);
+const WALLET_FREEZE_REASONS = new Set(["all", "order", "dispute"]);
 const REQUEST_BODY_MAX_BYTES = 64 * 1024;
 const LOCAL_SENSITIVE_RULES = [
   { word: "私下交易", level: "block", reason: "平台交易需通过邻帮完成，不能引导私下交易。" },
@@ -105,6 +108,30 @@ export async function handleRequestRoutes({ request, response, url, authService 
     sendJson(response, 200, {
       transactions: transactions.map(transactionDto)
     });
+    return true;
+  }
+
+  if (url.pathname === "/api/wallet/me") {
+    allowOnly(request, response, ["GET"]);
+    const context = await authService.authenticateRequest(request);
+    authService.requireRole(context, ["user"]);
+    sendJson(response, 200, await walletSummaryPayload(authService.store, context.user.userId));
+    return true;
+  }
+
+  if (url.pathname === "/api/wallet/me/transactions") {
+    allowOnly(request, response, ["GET"]);
+    const context = await authService.authenticateRequest(request);
+    authService.requireRole(context, ["user"]);
+    sendJson(response, 200, await walletTransactionsPayload(authService.store, context.user.userId, url.searchParams));
+    return true;
+  }
+
+  if (url.pathname === "/api/wallet/me/freezes") {
+    allowOnly(request, response, ["GET"]);
+    const context = await authService.authenticateRequest(request);
+    authService.requireRole(context, ["user"]);
+    sendJson(response, 200, await walletFreezesPayload(authService.store, context.user.userId, url.searchParams));
     return true;
   }
 
@@ -483,6 +510,69 @@ async function findVisibleOrderForViewer(store, rawOrderId, options = {}) {
   return orderDetailPayload(store, rawOrderId, options);
 }
 
+async function walletSummaryPayload(store, userId) {
+  if (typeof store.getWalletSummary !== "function") {
+    throw new HttpError(500, "WALLET_STORE_UNAVAILABLE", "Wallet summary is not available.");
+  }
+  const summary = await store.getWalletSummary(userId);
+  if (!summary?.wallet) {
+    throw new HttpError(404, "WALLET_NOT_FOUND", "Current user wallet was not found.");
+  }
+  return {
+    wallet: walletSummaryDto(summary)
+  };
+}
+
+async function walletTransactionsPayload(store, userId, searchParams) {
+  if (typeof store.listWalletTransactions !== "function") {
+    throw new HttpError(500, "WALLET_STORE_UNAVAILABLE", "Wallet transaction listing is not available.");
+  }
+  const query = normalizeWalletTransactionQuery(searchParams);
+  const result = await store.listWalletTransactions({
+    userId,
+    type: query.type,
+    page: query.page,
+    pageSize: query.pageSize
+  });
+  const transactions = Array.isArray(result?.transactions) ? result.transactions : [];
+  const total = Number(result?.total ?? transactions.length);
+  return {
+    transactions: transactions.map(walletTransactionDto),
+    pagination: paginationDto(query.page, query.pageSize, total),
+    filters: {
+      type: query.type,
+      page: query.page,
+      pageSize: query.pageSize
+    }
+  };
+}
+
+async function walletFreezesPayload(store, userId, searchParams) {
+  if (typeof store.listWalletFreezes !== "function") {
+    throw new HttpError(500, "WALLET_STORE_UNAVAILABLE", "Wallet freeze listing is not available.");
+  }
+  const query = normalizeWalletFreezeQuery(searchParams);
+  const result = await store.listWalletFreezes({
+    userId,
+    status: query.status,
+    reasonType: query.reasonType,
+    page: query.page,
+    pageSize: query.pageSize
+  });
+  const freezes = Array.isArray(result?.freezes) ? result.freezes : [];
+  const total = Number(result?.total ?? freezes.length);
+  return {
+    freezes: freezes.map(walletFreezeDto),
+    pagination: paginationDto(query.page, query.pageSize, total),
+    filters: {
+      status: query.status,
+      reasonType: query.reasonType,
+      page: query.page,
+      pageSize: query.pageSize
+    }
+  };
+}
+
 async function enrichOrder(store, order, categoryMap, options = {}) {
   if (!order || !ORDER_STATUSES.has(String(order.status ?? ""))) {
     return null;
@@ -778,6 +868,72 @@ function transactionDto(item) {
   };
 }
 
+function walletSummaryDto(summary) {
+  const wallet = summary.wallet;
+  return {
+    walletId: wallet.walletId,
+    userId: wallet.userId,
+    balance: wallet.balance,
+    frozenBalance: wallet.frozenBalance,
+    availableBalance: Math.max(0, roundMoney(Number(wallet.balance ?? 0) - Number(wallet.frozenBalance ?? 0))),
+    totalIncome: roundMoney(summary.totalIncome ?? 0),
+    totalExpense: roundMoney(summary.totalExpense ?? 0),
+    transactionCount: Number(summary.transactionCount ?? 0),
+    freezeCount: Number(summary.freezeCount ?? 0),
+    version: wallet.version,
+    updatedAt: wallet.updatedAt ?? null
+  };
+}
+
+function walletTransactionDto(item) {
+  return {
+    logId: item.logId,
+    userId: item.userId,
+    orderId: item.orderId,
+    requestId: item.requestId ?? null,
+    disputeId: item.disputeId ?? null,
+    type: item.type,
+    amount: item.amount,
+    balanceAfter: item.balanceAfter,
+    remark: item.remark ?? null,
+    relatedTitle: item.relatedTitle ?? null,
+    businessType: item.businessType ?? businessTypeForTransaction(item),
+    businessId: item.businessId ?? item.disputeId ?? item.orderId ?? null,
+    href: businessHref(item.businessType ?? businessTypeForTransaction(item), item.businessId ?? item.disputeId ?? item.orderId),
+    createdAt: item.createdAt
+  };
+}
+
+function walletFreezeDto(item) {
+  return {
+    freezeId: item.freezeId,
+    userId: item.userId,
+    orderId: item.orderId,
+    requestId: item.requestId ?? null,
+    disputeId: item.disputeId ?? null,
+    reasonType: item.reasonType,
+    status: item.status,
+    amount: item.amount,
+    reason: item.reason,
+    releaseCondition: item.releaseCondition,
+    relatedTitle: item.relatedTitle ?? null,
+    businessType: item.businessType ?? (item.disputeId ? "dispute" : "order"),
+    businessId: item.businessId ?? item.disputeId ?? item.orderId ?? null,
+    href: businessHref(item.businessType ?? (item.disputeId ? "dispute" : "order"), item.businessId ?? item.disputeId ?? item.orderId),
+    timeline: Array.isArray(item.timeline) ? item.timeline.map(timelineDto) : [],
+    createdAt: item.createdAt,
+    releasedAt: item.releasedAt ?? null
+  };
+}
+
+function timelineDto(item) {
+  return {
+    title: item.title ?? "冻结状态更新",
+    detail: item.detail ?? "",
+    createdAt: item.createdAt ?? null
+  };
+}
+
 function normalizeRequestQuery(searchParams) {
   const status = optionalLower(searchParams.get("status")) ?? "open";
   if (!STATUS_FILTERS.has(status)) {
@@ -832,6 +988,35 @@ function normalizeOrderQuery(searchParams) {
     page: parsePositiveInt(searchParams.get("page") ?? "1", "INVALID_PAGE", 1, 1000),
     pageSize: parsePositiveInt(searchParams.get("pageSize") ?? searchParams.get("limit") ?? "20", "INVALID_PAGE_SIZE", 1, 50),
     sort
+  };
+}
+
+function normalizeWalletTransactionQuery(searchParams) {
+  const type = optionalLower(searchParams.get("type") ?? searchParams.get("filter")) ?? "all";
+  if (!WALLET_TRANSACTION_TYPES.has(type)) {
+    throw new HttpError(400, "INVALID_WALLET_TRANSACTION_TYPE", "Unsupported wallet transaction type filter.");
+  }
+  return {
+    type,
+    page: parsePositiveInt(searchParams.get("page") ?? "1", "INVALID_PAGE", 1, 1000),
+    pageSize: parsePositiveInt(searchParams.get("pageSize") ?? searchParams.get("limit") ?? "8", "INVALID_PAGE_SIZE", 1, 50)
+  };
+}
+
+function normalizeWalletFreezeQuery(searchParams) {
+  const status = optionalLower(searchParams.get("status") ?? searchParams.get("filter")) ?? "all";
+  if (!WALLET_FREEZE_STATUSES.has(status)) {
+    throw new HttpError(400, "INVALID_WALLET_FREEZE_STATUS", "Unsupported wallet freeze status filter.");
+  }
+  const reasonType = optionalLower(searchParams.get("reasonType") ?? searchParams.get("reason")) ?? "all";
+  if (!WALLET_FREEZE_REASONS.has(reasonType)) {
+    throw new HttpError(400, "INVALID_WALLET_FREEZE_REASON", "Unsupported wallet freeze reason filter.");
+  }
+  return {
+    status,
+    reasonType,
+    page: parsePositiveInt(searchParams.get("page") ?? "1", "INVALID_PAGE", 1, 1000),
+    pageSize: parsePositiveInt(searchParams.get("pageSize") ?? searchParams.get("limit") ?? "20", "INVALID_PAGE_SIZE", 1, 50)
   };
 }
 
@@ -1082,6 +1267,33 @@ function creditLevel(averageRating, reviewCount) {
 
 function round1(value) {
   return Math.round(value * 10) / 10;
+}
+
+function roundMoney(value) {
+  return Math.round(Number(value) * 100) / 100;
+}
+
+function businessTypeForTransaction(item) {
+  if (item.disputeId) {
+    return "dispute";
+  }
+  if (item.orderId) {
+    return "order";
+  }
+  return "system";
+}
+
+function businessHref(type, id) {
+  if (!id) {
+    return null;
+  }
+  if (type === "dispute") {
+    return `/disputes/${encodeURIComponent(id)}`;
+  }
+  if (type === "order") {
+    return `/orders/${encodeURIComponent(id)}`;
+  }
+  return null;
 }
 
 async function safeStoreCall(store, method, fallback) {

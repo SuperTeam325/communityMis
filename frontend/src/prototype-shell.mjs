@@ -50,6 +50,26 @@ const ORDER_STATUS_CLASS = new Map([
   ["disputed", "status-disputed"]
 ]);
 const ORDER_PAGE_SIZE = 20;
+const WALLET_PAGE_SIZE = 8;
+const FREEZE_PAGE_SIZE = 20;
+const WALLET_TRANSACTION_TEXT = new Map([
+  ["income", "收入"],
+  ["expense", "支出"],
+  ["freeze", "冻结"],
+  ["release", "释放"],
+  ["refund", "退回"],
+  ["system_fee", "系统流水"]
+]);
+const FREEZE_STATUS_TEXT = new Map([
+  ["active", "进行中"],
+  ["dispute", "纠纷处理中"],
+  ["released", "已释放"]
+]);
+const FREEZE_STATUS_CLASS = new Map([
+  ["active", "status-active"],
+  ["dispute", "status-dispute"],
+  ["released", "status-released"]
+]);
 
 window.NeighborApp = {
   route,
@@ -324,6 +344,14 @@ async function hydrateCurrentRoute(session) {
     }
     if (route.id === "credit") {
       await hydrateCreditRoute(session);
+      return;
+    }
+    if (route.id === "wallet") {
+      await hydrateWalletRoute(session);
+      return;
+    }
+    if (route.id === "wallet-freeze") {
+      await hydrateWalletFreezeRoute(session);
     }
   } catch (error) {
     showGlobalMessage(authErrorMessage(error), "error");
@@ -1491,6 +1519,494 @@ function orderConfirmText(order) {
   return `${payer} · ${provider}`;
 }
 
+async function hydrateWalletRoute(session) {
+  const userSession = session ?? auth.readSession("user");
+  if (!userSession?.token) {
+    return;
+  }
+  installWalletControls(userSession);
+  await loadWallet(readWalletQuery(), userSession);
+}
+
+function installWalletControls(userSession) {
+  if (document.body.dataset.walletBound === "true") {
+    return;
+  }
+  document.body.dataset.walletBound = "true";
+
+  document.querySelectorAll("#tx-filters button[data-filter]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      updateWalletQuery({ type: button.dataset.filter || "all", page: 1 }, userSession);
+    }, true);
+  });
+
+  document.getElementById("btn-earn")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    navigateTo("/tasks");
+  }, true);
+
+  window.addEventListener("popstate", () => {
+    loadWallet(readWalletQuery(), userSession);
+  });
+}
+
+async function loadWallet(state, userSession) {
+  applyWalletControls(state);
+  renderWalletTransactionsState("loading", "正在加载钱包流水。");
+  try {
+    const [summaryPayload, txPayload] = await Promise.all([
+      api.wallet.me(userSession.token),
+      api.wallet.transactions(userSession.token, walletApiParams(state))
+    ]);
+    applyWalletSummary(summaryPayload.wallet);
+    renderWalletTransactions(txPayload, state, userSession);
+  } catch (error) {
+    renderWalletTransactionsState("error", walletErrorMessage(error), {
+      actionText: "重试",
+      onAction: () => loadWallet(readWalletQuery(), userSession)
+    });
+  }
+}
+
+function readWalletQuery() {
+  const params = new URLSearchParams(window.location.search);
+  const type = params.get("type") || params.get("filter") || "all";
+  return {
+    type: ["all", "income", "expense", "freeze", "release", "refund"].includes(type) ? type : "all",
+    page: positiveInteger(params.get("page"), 1),
+    pageSize: positiveInteger(params.get("pageSize"), WALLET_PAGE_SIZE)
+  };
+}
+
+function updateWalletQuery(patch, userSession) {
+  const next = {
+    ...readWalletQuery(),
+    ...patch
+  };
+  const params = new URLSearchParams();
+  if (next.type && next.type !== "all") {
+    params.set("type", next.type);
+  }
+  if (next.page > 1) {
+    params.set("page", String(next.page));
+  }
+  if (next.pageSize !== WALLET_PAGE_SIZE) {
+    params.set("pageSize", String(next.pageSize));
+  }
+  const target = `${window.location.pathname}${params.toString() ? `?${params}` : ""}`;
+  window.history.pushState({}, "", target);
+  loadWallet(readWalletQuery(), userSession);
+}
+
+function walletApiParams(state) {
+  return {
+    type: state.type,
+    page: state.page,
+    pageSize: state.pageSize
+  };
+}
+
+function applyWalletControls(state) {
+  document.querySelectorAll("#tx-filters button[data-filter]").forEach((button) => {
+    button.classList.toggle("active", (button.dataset.filter || "all") === state.type);
+  });
+}
+
+function applyWalletSummary(wallet) {
+  if (!wallet) {
+    return;
+  }
+  setElementText(".balance-amount", `⏂ ${formatAmount(wallet.balance)}`);
+  const serviceHours = Math.max(0, Number(wallet.balance ?? 0) * 0.2);
+  setElementText(".balance-sub", `约合 ${serviceHours.toFixed(1)} 小时服务时间 · 冻结 ⏂ ${formatAmount(wallet.frozenBalance)}`);
+  const stats = document.querySelectorAll(".quick-stat .qs-val");
+  if (stats[0]) {
+    stats[0].textContent = `+ ${formatAmount(wallet.totalIncome)}`;
+  }
+  if (stats[1]) {
+    stats[1].textContent = `- ${formatAmount(wallet.totalExpense)}`;
+  }
+  const labels = document.querySelectorAll(".quick-stat .qs-lbl");
+  if (labels[0]) {
+    labels[0].textContent = "累计收入";
+  }
+  if (labels[1]) {
+    labels[1].textContent = "累计支出";
+  }
+  const freezeButton = document.querySelector(".wallet-action-btn.freeze-link");
+  if (freezeButton) {
+    freezeButton.setAttribute("title", `当前冻结 ⏂ ${formatAmount(wallet.frozenBalance)}`);
+  }
+}
+
+function renderWalletTransactions(payload, state, userSession) {
+  const list = document.getElementById("tx-list");
+  if (!list) {
+    return;
+  }
+  const transactions = Array.isArray(payload.transactions) ? payload.transactions : [];
+  if (transactions.length === 0) {
+    list.innerHTML = walletEmptyHtml(state.type);
+  } else {
+    list.innerHTML = transactions.map(walletTransactionHtml).join("");
+    list.querySelectorAll(".tx-item[data-href]").forEach((item) => {
+      item.addEventListener("click", () => {
+        navigateTo(item.dataset.href);
+      });
+    });
+  }
+  renderWalletPager(payload.pagination, state, userSession);
+}
+
+function renderWalletTransactionsState(kind, message, options = {}) {
+  const list = document.getElementById("tx-list");
+  const pager = document.getElementById("tx-pagination");
+  if (!list) {
+    return;
+  }
+  const title = kind === "loading" ? "加载中" : kind === "error" ? "加载失败" : "空结果";
+  list.innerHTML = `
+    <div class="tx-empty" data-state="${escapeHtml(kind)}">
+      <p><strong>${escapeHtml(title)}</strong></p>
+      <p>${escapeHtml(message)}</p>
+      ${options.actionText ? `<button class="btn btn--outline btn--sm" type="button" data-runtime-action>${escapeHtml(options.actionText)}</button>` : ""}
+    </div>
+  `;
+  list.querySelector("[data-runtime-action]")?.addEventListener("click", options.onAction);
+  if (pager) {
+    pager.innerHTML = "";
+  }
+}
+
+function walletTransactionHtml(item) {
+  const tone = walletTransactionTone(item.type);
+  const sign = walletTransactionSign(item.type);
+  const orderText = item.orderId ? ` · 订单 ${item.orderId}` : item.disputeId ? ` · 纠纷 ${item.disputeId}` : "";
+  const title = item.relatedTitle || item.remark || WALLET_TRANSACTION_TEXT.get(item.type) || "时间币流水";
+  const amountClass = tone === "income" ? "income" : "expense";
+  return `
+    <div class="tx-item" ${item.href ? `data-href="${escapeHtml(item.href)}" role="link" tabindex="0"` : ""}>
+      <div class="tx-icon ${escapeHtml(amountClass)}">${walletTransactionIcon(tone)}</div>
+      <div class="tx-body">
+        <div class="tx-title">${escapeHtml(title)}</div>
+        <div class="tx-order-id">#LB-${escapeHtml(item.logId)}${escapeHtml(orderText)}</div>
+        <div class="tx-time">${escapeHtml(formatDateTime(item.createdAt))}${item.remark ? ` · ${escapeHtml(item.remark)}` : ""}</div>
+      </div>
+      <div class="tx-amount-cell">
+        <div class="tx-amount ${escapeHtml(amountClass)}">${escapeHtml(sign)} ${escapeHtml(formatAmount(item.amount))}</div>
+        <div class="tx-balance">${item.balanceAfter === null || item.balanceAfter === undefined ? "余额 --" : `余额 ⏂${escapeHtml(formatAmount(item.balanceAfter))}`}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderWalletPager(pagination, state, userSession) {
+  const pager = document.getElementById("tx-pagination");
+  if (!pager) {
+    return;
+  }
+  if (!pagination || pagination.totalPages <= 1) {
+    pager.innerHTML = "";
+    return;
+  }
+  pager.innerHTML = `
+    <button type="button" data-page="prev"${pagination.hasPrev ? "" : " disabled"}>${chevronLeftIcon()}</button>
+    <span class="page-ellipsis">${escapeHtml(pagination.page)} / ${escapeHtml(pagination.totalPages)}</span>
+    <button type="button" data-page="next"${pagination.hasNext ? "" : " disabled"}>${chevronRightIcon()}</button>
+  `;
+  pager.querySelector("[data-page='prev']")?.addEventListener("click", () => {
+    updateWalletQuery({ page: Math.max(1, state.page - 1) }, userSession);
+  });
+  pager.querySelector("[data-page='next']")?.addEventListener("click", () => {
+    updateWalletQuery({ page: state.page + 1 }, userSession);
+  });
+}
+
+function walletEmptyHtml(type) {
+  const text = type === "all" ? "暂无交易记录" : `暂无${WALLET_TRANSACTION_TEXT.get(type) ?? "该类型"}记录`;
+  return `<div class="tx-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg><p>${escapeHtml(text)}</p></div>`;
+}
+
+function walletTransactionTone(type) {
+  if (type === "income" || type === "release" || type === "refund") {
+    return "income";
+  }
+  return "expense";
+}
+
+function walletTransactionSign(type) {
+  if (type === "income" || type === "release" || type === "refund") {
+    return "+";
+  }
+  if (type === "expense" || type === "freeze" || type === "system_fee") {
+    return "-";
+  }
+  return "";
+}
+
+function walletTransactionIcon(tone) {
+  if (tone === "income") {
+    return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
+  }
+  return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>';
+}
+
+async function hydrateWalletFreezeRoute(session) {
+  const userSession = session ?? auth.readSession("user");
+  if (!userSession?.token) {
+    return;
+  }
+  installWalletFreezeControls(userSession);
+  await loadWalletFreezes(readWalletFreezeQuery(), userSession);
+}
+
+function installWalletFreezeControls(userSession) {
+  if (document.body.dataset.walletFreezeBound === "true") {
+    return;
+  }
+  document.body.dataset.walletFreezeBound = "true";
+
+  document.querySelectorAll("#freezeTabs button[data-filter]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      updateWalletFreezeQuery({ status: button.dataset.filter || "all", page: 1 }, userSession);
+    }, true);
+  });
+
+  window.addEventListener("popstate", () => {
+    loadWalletFreezes(readWalletFreezeQuery(), userSession);
+  });
+}
+
+async function loadWalletFreezes(state, userSession) {
+  applyWalletFreezeControls(state);
+  renderWalletFreezeState("loading", "正在加载冻结明细。");
+  try {
+    const [summaryPayload, freezePayload] = await Promise.all([
+      api.wallet.me(userSession.token),
+      api.wallet.freezes(userSession.token, walletFreezeApiParams(state))
+    ]);
+    applyFreezeSummary(summaryPayload.wallet, freezePayload);
+    renderWalletFreezes(freezePayload, state, userSession);
+  } catch (error) {
+    renderWalletFreezeState("error", walletErrorMessage(error), {
+      actionText: "重试",
+      onAction: () => loadWalletFreezes(readWalletFreezeQuery(), userSession)
+    });
+  }
+}
+
+function readWalletFreezeQuery() {
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get("status") || params.get("filter") || "all";
+  return {
+    status: ["all", "active", "dispute", "released"].includes(status) ? status : "all",
+    reasonType: params.get("reasonType") || "all",
+    page: positiveInteger(params.get("page"), 1),
+    pageSize: positiveInteger(params.get("pageSize"), FREEZE_PAGE_SIZE)
+  };
+}
+
+function updateWalletFreezeQuery(patch, userSession) {
+  const next = {
+    ...readWalletFreezeQuery(),
+    ...patch
+  };
+  const params = new URLSearchParams();
+  if (next.status && next.status !== "all") {
+    params.set("status", next.status);
+  }
+  if (next.reasonType && next.reasonType !== "all") {
+    params.set("reasonType", next.reasonType);
+  }
+  if (next.page > 1) {
+    params.set("page", String(next.page));
+  }
+  if (next.pageSize !== FREEZE_PAGE_SIZE) {
+    params.set("pageSize", String(next.pageSize));
+  }
+  const target = `${window.location.pathname}${params.toString() ? `?${params}` : ""}`;
+  window.history.pushState({}, "", target);
+  loadWalletFreezes(readWalletFreezeQuery(), userSession);
+}
+
+function walletFreezeApiParams(state) {
+  return {
+    status: state.status,
+    reasonType: state.reasonType,
+    page: state.page,
+    pageSize: state.pageSize
+  };
+}
+
+function applyWalletFreezeControls(state) {
+  document.querySelectorAll("#freezeTabs button[data-filter]").forEach((button) => {
+    button.classList.toggle("active", (button.dataset.filter || "all") === state.status);
+  });
+}
+
+function applyFreezeSummary(wallet, payload) {
+  if (!wallet) {
+    return;
+  }
+  const freezes = Array.isArray(payload.freezes) ? payload.freezes : [];
+  const disputeCount = freezes.filter((item) => item.status === "dispute").length;
+  setElementText(".freeze-balance .amount", `⏂ ${formatAmount(wallet.frozenBalance)}`);
+  setElementText(".freeze-balance .sub", wallet.freezeCount > 0 ? `来自 ${wallet.freezeCount} 笔冻结记录` : "当前没有冻结记录");
+  const nums = document.querySelectorAll(".freeze-summary .mini-num");
+  if (nums[0]) {
+    nums[0].textContent = `⏂ ${formatAmount(wallet.availableBalance ?? wallet.balance)}`;
+  }
+  if (nums[1]) {
+    nums[1].textContent = freezes.length > 0 ? "按条件释放" : "--";
+  }
+  if (nums[2]) {
+    nums[2].textContent = `${disputeCount} 笔`;
+  }
+}
+
+function renderWalletFreezes(payload, state, userSession) {
+  const list = document.getElementById("freezeList");
+  const empty = document.getElementById("emptyState");
+  if (!list) {
+    return;
+  }
+  const freezes = Array.isArray(payload.freezes) ? payload.freezes : [];
+  if (freezes.length === 0) {
+    list.innerHTML = "";
+    empty?.classList.add("show");
+    if (empty) {
+      empty.innerHTML = `<p>${escapeHtml(state.status === "all" ? "当前没有冻结记录。" : "当前筛选下没有冻结记录。")}</p>`;
+    }
+  } else {
+    empty?.classList.remove("show");
+    list.innerHTML = freezes.map(walletFreezeCardHtml).join("");
+    list.querySelectorAll(".detail-toggle").forEach((button) => {
+      button.addEventListener("click", () => {
+        const card = button.closest(".freeze-card");
+        card?.classList.toggle("expanded");
+        button.textContent = card?.classList.contains("expanded") ? "收起链路" : "展开链路";
+      });
+    });
+  }
+  renderWalletFreezePager(payload.pagination, state, userSession);
+}
+
+function renderWalletFreezeState(kind, message, options = {}) {
+  const list = document.getElementById("freezeList");
+  const empty = document.getElementById("emptyState");
+  if (!list) {
+    return;
+  }
+  empty?.classList.remove("show");
+  const title = kind === "loading" ? "加载中" : kind === "error" ? "加载失败" : "空结果";
+  list.innerHTML = `
+    <article class="freeze-card" data-state="${escapeHtml(kind)}">
+      <div class="freeze-card-top">
+        <div>
+          <h2>${escapeHtml(title)}</h2>
+          <div class="freeze-id">${escapeHtml(message)}</div>
+        </div>
+      </div>
+      ${options.actionText ? `<div class="card-actions"><button class="btn btn--secondary btn--sm" type="button" data-runtime-action>${escapeHtml(options.actionText)}</button></div>` : ""}
+    </article>
+  `;
+  list.querySelector("[data-runtime-action]")?.addEventListener("click", options.onAction);
+}
+
+function walletFreezeCardHtml(item) {
+  const statusClass = FREEZE_STATUS_CLASS.get(item.status) ?? "status-active";
+  const href = item.href || (item.orderId ? `/orders/${encodeURIComponent(item.orderId)}` : null);
+  const actionText = item.businessType === "dispute" ? "查看纠纷" : "查看订单";
+  return `
+    <article class="freeze-card" data-status="${escapeHtml(item.status)}">
+      <div class="freeze-card-top">
+        <div>
+          <h2>${escapeHtml(item.relatedTitle || "时间币冻结")}</h2>
+          <div class="freeze-id">${escapeHtml(freezeIdText(item))}</div>
+        </div>
+        <div class="freeze-amount">⏂ ${escapeHtml(formatAmount(item.amount))}</div>
+      </div>
+      <dl class="freeze-meta">
+        <div><dt>状态</dt><dd><span class="status-pill ${escapeHtml(statusClass)}">${escapeHtml(FREEZE_STATUS_TEXT.get(item.status) ?? item.status)}</span></dd></div>
+        <div><dt>冻结原因</dt><dd>${escapeHtml(item.reason)}</dd></div>
+        <div><dt>${item.status === "released" ? "释放结果" : "释放条件"}</dt><dd>${escapeHtml(item.releaseCondition)}</dd></div>
+      </dl>
+      <p class="reason-text">${escapeHtml(freezeReasonText(item))}</p>
+      <div class="card-actions">
+        ${href ? `<a class="btn btn--secondary btn--sm" href="${escapeHtml(href)}">${escapeHtml(actionText)}</a>` : ""}
+        <button class="btn btn--ghost btn--sm detail-toggle" type="button">展开链路</button>
+      </div>
+      <div class="detail-panel">
+        <ul class="timeline">${freezeTimelineHtml(item.timeline)}</ul>
+      </div>
+    </article>
+  `;
+}
+
+function renderWalletFreezePager(pagination, state, userSession) {
+  let pager = document.getElementById("freeze-pagination");
+  const list = document.getElementById("freezeList");
+  if (!list) {
+    return;
+  }
+  if (!pager) {
+    pager = document.createElement("div");
+    pager.id = "freeze-pagination";
+    pager.className = "pagination";
+    list.insertAdjacentElement("afterend", pager);
+  }
+  if (!pagination || pagination.totalPages <= 1) {
+    pager.innerHTML = "";
+    return;
+  }
+  pager.innerHTML = `
+    <button type="button" data-page="prev"${pagination.hasPrev ? "" : " disabled"}>${chevronLeftIcon()}</button>
+    <span class="page-ellipsis">${escapeHtml(pagination.page)} / ${escapeHtml(pagination.totalPages)}</span>
+    <button type="button" data-page="next"${pagination.hasNext ? "" : " disabled"}>${chevronRightIcon()}</button>
+  `;
+  pager.querySelector("[data-page='prev']")?.addEventListener("click", () => {
+    updateWalletFreezeQuery({ page: Math.max(1, state.page - 1) }, userSession);
+  });
+  pager.querySelector("[data-page='next']")?.addEventListener("click", () => {
+    updateWalletFreezeQuery({ page: state.page + 1 }, userSession);
+  });
+}
+
+function freezeIdText(item) {
+  const parts = [];
+  if (item.orderId) {
+    parts.push(`ORD-${item.orderId}`);
+  }
+  if (item.disputeId) {
+    parts.push(`DSP-${item.disputeId}`);
+  } else {
+    parts.push(`FRZ-${item.freezeId}`);
+  }
+  return parts.join(" · ");
+}
+
+function freezeReasonText(item) {
+  if (item.status === "dispute") {
+    return "该记录关联纠纷处理，相关时间币会保持冻结，直到管理员参考证据、陪审和平台规则完成处理。";
+  }
+  if (item.status === "released") {
+    return "该冻结已经释放，记录保留用于钱包、订单和纠纷核对。";
+  }
+  return "该订单关联的时间币暂时不可用，满足释放条件后会自动转入服务方或退回钱包。";
+}
+
+function freezeTimelineHtml(timeline) {
+  const items = Array.isArray(timeline) && timeline.length > 0 ? timeline : [{ title: "冻结记录创建", detail: "等待后续状态更新", createdAt: null }];
+  return items.map((item) => `
+    <li><span class="timeline-dot"></span><div>${escapeHtml(item.title)}<span>${escapeHtml([formatDateTime(item.createdAt), item.detail].filter((value) => value && value !== "待确认").join(" · ") || item.detail || "待确认")}</span></div></li>
+  `).join("");
+}
+
 function hydrateAiResultsRoute() {
   const params = new URLSearchParams(window.location.search);
   const prompt = params.get("prompt") || params.get("keyword") || "帮我筛选合适的邻里需求";
@@ -1537,6 +2053,7 @@ function applyProfileSummary(payload) {
   setElementText(".avatar.lg", firstCharacter(displayName(user)));
   setElementText(".credit-badge", credit.reviewCount > 0 ? `信誉 ${formatRating(credit.averageRating)}` : "暂无评价");
   setElementText(".wallet-balance", `⏂ ${formatAmount(wallet?.balance ?? 0)}`);
+  setElementText(".wallet-card .wallet-label", wallet?.frozenBalance > 0 ? `我的钱包 · 冻结 ⏂ ${formatAmount(wallet.frozenBalance)}` : "我的钱包");
 
   const stats = document.querySelectorAll(".stats-row .stat-item .num");
   if (stats[0]) {
@@ -1977,6 +2494,23 @@ function orderErrorMessage(error) {
   return error?.message || "订单数据加载失败，请稍后重试。";
 }
 
+function walletErrorMessage(error) {
+  const code = error?.payload?.error?.code;
+  if (code === "WALLET_NOT_FOUND") {
+    return "当前账号的钱包不存在，请重新登录或联系社区管理员。";
+  }
+  if (code === "INVALID_WALLET_TRANSACTION_TYPE" || code === "INVALID_WALLET_FREEZE_STATUS" || code === "INVALID_WALLET_FREEZE_REASON" || code?.startsWith("INVALID_")) {
+    return "钱包筛选条件格式不正确，请清空筛选后重试。";
+  }
+  if (code === "FORBIDDEN") {
+    return "当前账号没有访问钱包的权限。";
+  }
+  if (error?.status === 0 || error instanceof TypeError) {
+    return "无法连接钱包服务，请确认后端服务已启动。";
+  }
+  return error?.message || "钱包数据加载失败，请稍后重试。";
+}
+
 function publishErrorMessage(error, context = "") {
   const code = error?.payload?.error?.code;
   if (context === "catalog") {
@@ -2147,6 +2681,14 @@ function shareIcon() {
 
 function searchIcon() {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
+}
+
+function chevronLeftIcon() {
+  return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg>`;
+}
+
+function chevronRightIcon() {
+  return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>`;
 }
 
 function checkIcon(size = "20") {

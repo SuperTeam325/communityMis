@@ -34,6 +34,10 @@ export function createMysqlAuthStore(options = {}) {
     findServiceOrderById,
     confirmServiceOrder,
     listTransactionLogs,
+    getWalletSummary,
+    listWalletTransactions,
+    listWalletFreezes,
+    createWalletFreeze,
     listReviewsForTargetId,
     createSession,
     findSession,
@@ -713,6 +717,200 @@ FROM (
     return Array.isArray(rows) ? rows.map(normalizeTransactionLog) : [];
   }
 
+  async function getWalletSummary(userId) {
+    const id = Number(userId);
+    const wallet = await findWalletByUserId(id);
+    if (!wallet) {
+      return null;
+    }
+    const sql = `
+SELECT JSON_OBJECT(
+  'totalIncome', COALESCE(SUM(CASE WHEN tl.\`type\` = 'income' THEN tl.\`amount\` ELSE 0 END), 0),
+  'totalExpense', COALESCE(SUM(CASE WHEN tl.\`type\` = 'expense' THEN tl.\`amount\` ELSE 0 END), 0),
+  'transactionCount', COUNT(tl.\`log_id\`),
+  'freezeCount', COALESCE(SUM(CASE WHEN tl.\`type\` = 'freeze' THEN 1 ELSE 0 END), 0)
+)
+FROM \`transaction_log\` tl
+WHERE tl.\`user_id\` = ${id};
+`;
+    const summary = await mysqlJson(sql, { optional: true }) ?? {};
+    return {
+      wallet,
+      totalIncome: Number(summary.totalIncome ?? 0),
+      totalExpense: Number(summary.totalExpense ?? 0),
+      transactionCount: Number(summary.transactionCount ?? 0),
+      freezeCount: Number(summary.freezeCount ?? 0)
+    };
+  }
+
+  async function listWalletTransactions(query = {}) {
+    const userId = Number(query.userId);
+    const type = String(query.type ?? "all").trim().toLowerCase();
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(50, positiveInteger(query.pageSize, 20));
+    const offset = (page - 1) * pageSize;
+    const conditions = [`tl.\`user_id\` = ${userId}`];
+    if (type !== "all") {
+      conditions.push(`tl.\`type\` = ${sqlString(type)}`);
+    }
+    const whereSql = `WHERE ${conditions.join(" AND ")}`;
+    const sql = `
+SELECT JSON_OBJECT(
+  'items', COALESCE(JSON_ARRAYAGG(${walletTransactionJsonObjectSql("q")}), JSON_ARRAY()),
+  'total', (SELECT COUNT(*)
+    FROM \`transaction_log\` tl
+    ${whereSql}
+  )
+)
+FROM (
+  SELECT
+    tl.\`log_id\`,
+    tl.\`user_id\`,
+    tl.\`order_id\`,
+    tl.\`type\`,
+    CAST(tl.\`amount\` AS DOUBLE) AS \`amount\`,
+    CAST(tl.\`balance_after\` AS DOUBLE) AS \`balance_after\`,
+    tl.\`remark\`,
+    DATE_FORMAT(tl.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    so.\`request_id\`,
+    d.\`dispute_id\`,
+    sr.\`title\` AS \`related_title\`,
+    IF(d.\`dispute_id\` IS NOT NULL AND tl.\`type\` = 'freeze', 'dispute', IF(tl.\`order_id\` IS NOT NULL, 'order', 'system')) AS \`business_type\`,
+    IF(d.\`dispute_id\` IS NOT NULL AND tl.\`type\` = 'freeze', d.\`dispute_id\`, tl.\`order_id\`) AS \`business_id\`
+  FROM \`transaction_log\` tl
+  LEFT JOIN \`service_order\` so ON so.\`order_id\` = tl.\`order_id\`
+  LEFT JOIN \`service_request\` sr ON sr.\`request_id\` = so.\`request_id\`
+  LEFT JOIN \`dispute\` d ON d.\`order_id\` = tl.\`order_id\`
+  ${whereSql}
+  ORDER BY tl.\`created_at\` DESC, tl.\`log_id\` DESC
+  LIMIT ${pageSize} OFFSET ${offset}
+) q;
+`;
+    const result = await mysqlJson(sql, { optional: true });
+    return {
+      transactions: Array.isArray(result?.items) ? result.items.map(normalizeWalletTransaction) : [],
+      total: Number(result?.total ?? 0)
+    };
+  }
+
+  async function listWalletFreezes(query = {}) {
+    const userId = Number(query.userId);
+    const status = String(query.status ?? "all").trim().toLowerCase();
+    const reasonType = String(query.reasonType ?? "all").trim().toLowerCase();
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(50, positiveInteger(query.pageSize, 20));
+    const offset = (page - 1) * pageSize;
+    const conditions = [
+      `tl.\`user_id\` = ${userId}`,
+      "tl.`type` = 'freeze'"
+    ];
+    if (status !== "all") {
+      conditions.push(freezeStatusSql() + ` = ${sqlString(status)}`);
+    }
+    if (reasonType !== "all") {
+      conditions.push(freezeReasonTypeSql() + ` = ${sqlString(reasonType)}`);
+    }
+    const whereSql = `WHERE ${conditions.join(" AND ")}`;
+    const sql = `
+SELECT JSON_OBJECT(
+  'items', COALESCE(JSON_ARRAYAGG(${walletFreezeJsonObjectSql("q")}), JSON_ARRAY()),
+  'total', (SELECT COUNT(*)
+    FROM \`transaction_log\` tl
+    LEFT JOIN \`service_order\` so ON so.\`order_id\` = tl.\`order_id\`
+    LEFT JOIN \`service_request\` sr ON sr.\`request_id\` = so.\`request_id\`
+    LEFT JOIN \`dispute\` d ON d.\`order_id\` = tl.\`order_id\`
+    ${whereSql}
+  )
+)
+FROM (
+  SELECT
+    tl.\`log_id\` AS \`freeze_id\`,
+    tl.\`user_id\`,
+    tl.\`order_id\`,
+    so.\`request_id\`,
+    d.\`dispute_id\`,
+    ${freezeReasonTypeSql()} AS \`reason_type\`,
+    ${freezeStatusSql()} AS \`status\`,
+    CAST(tl.\`amount\` AS DOUBLE) AS \`amount\`,
+    COALESCE(tl.\`remark\`, IF(d.\`dispute_id\` IS NOT NULL, '纠纷处理中，相关时间币保持冻结', '订单时间币冻结')) AS \`reason\`,
+    IF(d.\`dispute_id\` IS NOT NULL, '管理员终审后按裁决释放或退回', '双方确认完成后释放给服务方') AS \`release_condition\`,
+    sr.\`title\` AS \`related_title\`,
+    IF(d.\`dispute_id\` IS NOT NULL, 'dispute', 'order') AS \`business_type\`,
+    IF(d.\`dispute_id\` IS NOT NULL, d.\`dispute_id\`, tl.\`order_id\`) AS \`business_id\`,
+    DATE_FORMAT(tl.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    IF(so.\`status\` = 'completed', DATE_FORMAT(so.\`completed_at\`, '%Y-%m-%dT%H:%i:%s.000Z'), NULL) AS \`released_at\`
+  FROM \`transaction_log\` tl
+  LEFT JOIN \`service_order\` so ON so.\`order_id\` = tl.\`order_id\`
+  LEFT JOIN \`service_request\` sr ON sr.\`request_id\` = so.\`request_id\`
+  LEFT JOIN \`dispute\` d ON d.\`order_id\` = tl.\`order_id\`
+  ${whereSql}
+  ORDER BY IF(${freezeStatusSql()} = 'released', 1, 0) ASC, tl.\`created_at\` DESC, tl.\`log_id\` DESC
+  LIMIT ${pageSize} OFFSET ${offset}
+) q;
+`;
+    const result = await mysqlJson(sql, { optional: true });
+    return {
+      freezes: Array.isArray(result?.items) ? result.items.map(normalizeWalletFreeze) : [],
+      total: Number(result?.total ?? 0)
+    };
+  }
+
+  async function createWalletFreeze(input) {
+    const userId = Number(input.userId);
+    const orderId = input.orderId === undefined || input.orderId === null ? null : Number(input.orderId);
+    const amount = Number(input.amount).toFixed(2);
+    const reason = normalizeOptionalString(input.reason) ?? "订单时间币冻结";
+    const sql = `
+START TRANSACTION;
+SET @freeze_user_id = ${userId};
+SET @freeze_order_id = ${orderId === null ? "NULL" : orderId};
+SET @freeze_amount = ${amount};
+SET @wallet_found = 0;
+SELECT @wallet_found := 1
+FROM \`wallet\` w
+WHERE w.\`user_id\` = @freeze_user_id
+FOR UPDATE;
+UPDATE \`wallet\`
+SET
+  \`frozen_balance\` = ROUND(\`frozen_balance\` + @freeze_amount, 2),
+  \`version\` = \`version\` + 1,
+  \`updated_at\` = CURRENT_TIMESTAMP
+WHERE \`user_id\` = @freeze_user_id
+  AND @wallet_found = 1
+LIMIT 1;
+INSERT INTO \`transaction_log\` (
+  \`user_id\`,
+  \`order_id\`,
+  \`type\`,
+  \`amount\`,
+  \`balance_after\`,
+  \`remark\`
+)
+SELECT
+  @freeze_user_id,
+  @freeze_order_id,
+  'freeze',
+  @freeze_amount,
+  w.\`balance\`,
+  ${sqlString(reason)}
+FROM \`wallet\` w
+WHERE w.\`user_id\` = @freeze_user_id
+  AND @wallet_found = 1;
+SET @created_log_id = IF(@wallet_found = 1, LAST_INSERT_ID(), NULL);
+SET @transaction_sql = IF(@wallet_found = 1, 'COMMIT', 'ROLLBACK');
+PREPARE transaction_statement FROM @transaction_sql;
+EXECUTE transaction_statement;
+DEALLOCATE PREPARE transaction_statement;
+SELECT JSON_OBJECT('walletFound', @wallet_found, 'logId', @created_log_id);
+`;
+    const result = await mysqlJson(sql);
+    if (Number(result?.walletFound ?? 0) !== 1) {
+      throw storeError("WALLET_NOT_FOUND", "Wallet was not found.");
+    }
+    const freezePayload = await listWalletFreezes({ userId, page: 1, pageSize: 1 });
+    return freezePayload.freezes.find((freeze) => freeze.freezeId === Number(result.logId)) ?? freezePayload.freezes[0] ?? null;
+  }
+
   async function listReviewsForTargetId(userId) {
     const sql = `
 SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
@@ -907,6 +1105,53 @@ function transactionLogJsonObjectSql(alias) {
   )`;
 }
 
+function walletTransactionJsonObjectSql(alias) {
+  return `JSON_OBJECT(
+    'logId', ${alias}.\`log_id\`,
+    'userId', ${alias}.\`user_id\`,
+    'orderId', ${alias}.\`order_id\`,
+    'requestId', ${alias}.\`request_id\`,
+    'disputeId', ${alias}.\`dispute_id\`,
+    'type', ${alias}.\`type\`,
+    'amount', ${alias}.\`amount\`,
+    'balanceAfter', ${alias}.\`balance_after\`,
+    'remark', ${alias}.\`remark\`,
+    'relatedTitle', ${alias}.\`related_title\`,
+    'businessType', ${alias}.\`business_type\`,
+    'businessId', ${alias}.\`business_id\`,
+    'createdAt', ${alias}.\`created_at\`
+  )`;
+}
+
+function walletFreezeJsonObjectSql(alias) {
+  return `JSON_OBJECT(
+    'freezeId', ${alias}.\`freeze_id\`,
+    'userId', ${alias}.\`user_id\`,
+    'orderId', ${alias}.\`order_id\`,
+    'requestId', ${alias}.\`request_id\`,
+    'disputeId', ${alias}.\`dispute_id\`,
+    'reasonType', ${alias}.\`reason_type\`,
+    'status', ${alias}.\`status\`,
+    'amount', ${alias}.\`amount\`,
+    'reason', ${alias}.\`reason\`,
+    'releaseCondition', ${alias}.\`release_condition\`,
+    'relatedTitle', ${alias}.\`related_title\`,
+    'businessType', ${alias}.\`business_type\`,
+    'businessId', ${alias}.\`business_id\`,
+    'timeline', JSON_ARRAY(),
+    'createdAt', ${alias}.\`created_at\`,
+    'releasedAt', ${alias}.\`released_at\`
+  )`;
+}
+
+function freezeReasonTypeSql() {
+  return "IF(d.`dispute_id` IS NOT NULL, 'dispute', 'order')";
+}
+
+function freezeStatusSql() {
+  return "CASE WHEN so.`status` = 'completed' THEN 'released' WHEN d.`dispute_id` IS NOT NULL THEN 'dispute' ELSE 'active' END";
+}
+
 function normalizeUser(user) {
   if (!user) {
     return null;
@@ -988,6 +1233,49 @@ function normalizeTransactionLog(input) {
     balanceAfter: input.balanceAfter === undefined || input.balanceAfter === null ? null : Number(input.balanceAfter),
     remark: normalizeOptionalString(input.remark),
     createdAt: input.createdAt ?? input.created_at ?? null
+  };
+}
+
+function normalizeWalletTransaction(input) {
+  return {
+    logId: Number(input.logId),
+    userId: input.userId === undefined || input.userId === null ? null : Number(input.userId),
+    orderId: input.orderId === undefined || input.orderId === null ? null : Number(input.orderId),
+    requestId: input.requestId === undefined || input.requestId === null ? null : Number(input.requestId),
+    disputeId: input.disputeId === undefined || input.disputeId === null ? null : Number(input.disputeId),
+    type: String(input.type ?? ""),
+    amount: Number(input.amount ?? 0),
+    balanceAfter: input.balanceAfter === undefined || input.balanceAfter === null ? null : Number(input.balanceAfter),
+    remark: normalizeOptionalString(input.remark),
+    relatedTitle: normalizeOptionalString(input.relatedTitle),
+    businessType: normalizeOptionalString(input.businessType) ?? "system",
+    businessId: input.businessId === undefined || input.businessId === null ? null : Number(input.businessId),
+    createdAt: input.createdAt ?? null
+  };
+}
+
+function normalizeWalletFreeze(input) {
+  const freeze = {
+    freezeId: Number(input.freezeId),
+    userId: input.userId === undefined || input.userId === null ? null : Number(input.userId),
+    orderId: input.orderId === undefined || input.orderId === null ? null : Number(input.orderId),
+    requestId: input.requestId === undefined || input.requestId === null ? null : Number(input.requestId),
+    disputeId: input.disputeId === undefined || input.disputeId === null ? null : Number(input.disputeId),
+    reasonType: normalizeOptionalString(input.reasonType) ?? "order",
+    status: normalizeOptionalString(input.status) ?? "active",
+    amount: Number(input.amount ?? 0),
+    reason: normalizeOptionalString(input.reason) ?? "订单时间币冻结",
+    releaseCondition: normalizeOptionalString(input.releaseCondition) ?? "双方确认或平台处理后释放",
+    relatedTitle: normalizeOptionalString(input.relatedTitle),
+    businessType: normalizeOptionalString(input.businessType) ?? "order",
+    businessId: input.businessId === undefined || input.businessId === null ? null : Number(input.businessId),
+    timeline: Array.isArray(input.timeline) ? input.timeline : [],
+    createdAt: input.createdAt ?? null,
+    releasedAt: input.releasedAt ?? null
+  };
+  return {
+    ...freeze,
+    timeline: freeze.timeline.length > 0 ? freeze.timeline : freezeTimeline(freeze)
   };
 }
 
@@ -1148,6 +1436,25 @@ function addTagCount(tagMap, rawTag, field) {
   };
   entry[field] += 1;
   tagMap.set(key, entry);
+}
+
+function positiveInteger(raw, fallback) {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function freezeTimeline(freeze) {
+  const title = freeze.relatedTitle ?? "关联订单";
+  if (freeze.status === "released") {
+    return [
+      { title: "冻结生效", detail: `${title} 冻结 ⏂${Number(freeze.amount || 0).toFixed(2)}`, createdAt: freeze.createdAt },
+      { title: "冻结释放", detail: freeze.releaseCondition, createdAt: freeze.releasedAt }
+    ];
+  }
+  return [
+    { title: "冻结生效", detail: `${title} 冻结 ⏂${Number(freeze.amount || 0).toFixed(2)}`, createdAt: freeze.createdAt },
+    { title: "预计释放", detail: freeze.releaseCondition, createdAt: null }
+  ];
 }
 
 function sqlString(value) {

@@ -84,6 +84,11 @@ export function createApiClient(options = {}) {
     transactions: {
       list: (token, params = {}) => request(withQuery("/api/transactions", params), { token })
     },
+    wallet: {
+      me: (token) => request("/api/wallet/me", { token }),
+      transactions: (token, params = {}) => request(withQuery("/api/wallet/me/transactions", params), { token }),
+      freezes: (token, params = {}) => request(withQuery("/api/wallet/me/freezes", params), { token })
+    },
     auth: {
       register: (payload) => request("/api/auth/register", {
         method: "POST",

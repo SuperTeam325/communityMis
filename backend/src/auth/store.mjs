@@ -15,6 +15,7 @@ export function createMemoryAuthStore(options = {}) {
   const serviceRequests = new Map();
   const serviceOrders = new Map();
   const transactionLogs = new Map();
+  const walletFreezes = new Map();
   const notifications = new Map();
   const reviews = [];
   let nextUserId = options.nextUserId ?? 10000;
@@ -22,6 +23,7 @@ export function createMemoryAuthStore(options = {}) {
   let nextRequestId = options.nextRequestId ?? 30000;
   let nextOrderId = options.nextOrderId ?? 40000;
   let nextTransactionLogId = options.nextTransactionLogId ?? 45000;
+  let nextWalletFreezeId = options.nextWalletFreezeId ?? 47000;
   let nextNotificationId = options.nextNotificationId ?? 50000;
 
   for (const seedUser of options.seedUsers ?? defaultSeedUsers()) {
@@ -39,6 +41,10 @@ export function createMemoryAuthStore(options = {}) {
   for (const seedTransaction of options.seedTransactions ?? (options.seedRequests === undefined ? defaultSeedTransactionLogs() : [])) {
     insertSeedTransactionLog(seedTransaction);
   }
+  for (const seedFreeze of options.seedWalletFreezes ?? (options.seedRequests === undefined ? defaultSeedWalletFreezes() : [])) {
+    insertSeedWalletFreeze(seedFreeze);
+  }
+  syncFrozenBalancesFromFreezeRecords();
   for (const seedNotification of options.seedNotifications ?? (options.seedRequests === undefined ? defaultSeedNotifications() : [])) {
     insertSeedNotification(seedNotification);
   }
@@ -64,6 +70,10 @@ export function createMemoryAuthStore(options = {}) {
     findServiceOrderById,
     confirmServiceOrder,
     listTransactionLogs,
+    getWalletSummary,
+    listWalletTransactions,
+    listWalletFreezes,
+    createWalletFreeze,
     listNotificationsForUserId,
     listReviewsForTargetId,
     createSession,
@@ -100,7 +110,7 @@ export function createMemoryAuthStore(options = {}) {
       walletId: nextWalletId,
       userId: user.userId,
       balance: Number(input.initialBalance ?? INITIAL_TIME_COIN_BALANCE),
-      frozenBalance: 0,
+      frozenBalance: Number(input.initialFrozenBalance ?? input.frozenBalance ?? 0),
       version: 0,
       createdAt: now,
       updatedAt: now
@@ -433,6 +443,91 @@ export function createMemoryAuthStore(options = {}) {
       .map(clone);
   }
 
+  function getWalletSummary(userId) {
+    const id = Number(userId);
+    const wallet = wallets.get(id);
+    if (!wallet) {
+      return null;
+    }
+    const logs = Array.from(transactionLogs.values()).filter((log) => log.userId === id);
+    const freezes = Array.from(walletFreezes.values()).filter((freeze) => freeze.userId === id);
+    return {
+      wallet: clone(wallet),
+      totalIncome: roundMoney(sumLogs(logs, "income")),
+      totalExpense: roundMoney(sumLogs(logs, "expense")),
+      transactionCount: logs.length,
+      freezeCount: freezes.filter(isUnreleasedFreeze).length
+    };
+  }
+
+  function listWalletTransactions(query = {}) {
+    const userId = Number(query.userId);
+    const type = normalizeWalletFilter(query.type, "all");
+    const page = positiveInteger(query.page, 1);
+    const pageSize = positiveInteger(query.pageSize, 20);
+    const filtered = Array.from(transactionLogs.values())
+      .filter((log) => log.userId === userId)
+      .filter((log) => type === "all" || log.type === type)
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime() || right.logId - left.logId);
+    const offset = (page - 1) * pageSize;
+    return {
+      transactions: filtered.slice(offset, offset + pageSize).map(enrichTransactionLog).map(clone),
+      total: filtered.length
+    };
+  }
+
+  function listWalletFreezes(query = {}) {
+    const userId = Number(query.userId);
+    const status = normalizeWalletFilter(query.status, "all");
+    const reasonType = normalizeWalletFilter(query.reasonType, "all");
+    const page = positiveInteger(query.page, 1);
+    const pageSize = positiveInteger(query.pageSize, 20);
+    const filtered = Array.from(walletFreezes.values())
+      .filter((freeze) => freeze.userId === userId)
+      .filter((freeze) => status === "all" || freeze.status === status)
+      .filter((freeze) => reasonType === "all" || freeze.reasonType === reasonType)
+      .sort(compareFreezes);
+    const offset = (page - 1) * pageSize;
+    return {
+      freezes: filtered.slice(offset, offset + pageSize).map(enrichWalletFreeze).map(clone),
+      total: filtered.length
+    };
+  }
+
+  function createWalletFreeze(input) {
+    const userId = Number(input.userId);
+    const wallet = wallets.get(userId);
+    if (!wallet) {
+      throw storeError("WALLET_NOT_FOUND", "Wallet was not found.");
+    }
+    const now = input.createdAt ?? new Date().toISOString();
+    const freeze = normalizeWalletFreeze({
+      ...input,
+      freezeId: nextWalletFreezeId,
+      userId,
+      createdAt: now
+    });
+    nextWalletFreezeId += 1;
+    walletFreezes.set(freeze.freezeId, freeze);
+
+    if (isUnreleasedFreeze(freeze)) {
+      wallet.frozenBalance = roundMoney(wallet.frozenBalance + freeze.amount);
+      wallet.version += 1;
+      wallet.updatedAt = now;
+    }
+
+    insertTransactionLog({
+      userId,
+      orderId: freeze.orderId,
+      type: "freeze",
+      amount: freeze.amount,
+      balanceAfter: wallet.balance,
+      remark: freeze.reason,
+      createdAt: now
+    });
+    return clone(enrichWalletFreeze(freeze));
+  }
+
   function listNotificationsForUserId(userId) {
     const id = Number(userId);
     return Array.from(notifications.values())
@@ -538,6 +633,15 @@ export function createMemoryAuthStore(options = {}) {
     nextTransactionLogId = Math.max(nextTransactionLogId, transaction.logId + 1);
   }
 
+  function insertSeedWalletFreeze(seedFreeze) {
+    const freeze = normalizeWalletFreeze({
+      ...seedFreeze,
+      freezeId: seedFreeze.freezeId ?? nextWalletFreezeId
+    });
+    walletFreezes.set(freeze.freezeId, freeze);
+    nextWalletFreezeId = Math.max(nextWalletFreezeId, freeze.freezeId + 1);
+  }
+
   function insertTransactionLog(input) {
     const transaction = normalizeTransactionLog({
       ...input,
@@ -563,6 +667,62 @@ export function createMemoryAuthStore(options = {}) {
       ...request,
       category: category ? clone(category) : null
     };
+  }
+
+  function enrichTransactionLog(log) {
+    const order = log.orderId === null ? null : serviceOrders.get(log.orderId);
+    const request = order ? serviceRequests.get(order.requestId) : null;
+    const freeze = findFreezeForTransaction(log);
+    const disputeId = freeze?.disputeId ?? null;
+    return {
+      ...log,
+      requestId: request?.requestId ?? null,
+      disputeId,
+      relatedTitle: request?.title ?? null,
+      businessType: disputeId !== null ? "dispute" : (log.orderId !== null ? "order" : "system"),
+      businessId: disputeId ?? log.orderId ?? null
+    };
+  }
+
+  function enrichWalletFreeze(freeze) {
+    const order = freeze.orderId === null ? null : serviceOrders.get(freeze.orderId);
+    const request = order ? serviceRequests.get(order.requestId) : null;
+    const businessType = freeze.disputeId !== null || freeze.reasonType === "dispute" ? "dispute" : "order";
+    const businessId = businessType === "dispute" ? freeze.disputeId : freeze.orderId;
+    return {
+      ...freeze,
+      requestId: request?.requestId ?? null,
+      relatedTitle: request?.title ?? null,
+      businessType,
+      businessId,
+      timeline: freeze.timeline.length > 0 ? freeze.timeline : freezeTimeline(freeze, order, request)
+    };
+  }
+
+  function findFreezeForTransaction(log) {
+    if (log.type !== "freeze") {
+      return null;
+    }
+    return Array.from(walletFreezes.values()).find((freeze) => (
+      freeze.userId === log.userId
+        && freeze.orderId === log.orderId
+        && freeze.amount === log.amount
+    )) ?? null;
+  }
+
+  function syncFrozenBalancesFromFreezeRecords() {
+    const totals = new Map();
+    for (const freeze of walletFreezes.values()) {
+      if (isUnreleasedFreeze(freeze)) {
+        totals.set(freeze.userId, roundMoney((totals.get(freeze.userId) ?? 0) + freeze.amount));
+      }
+    }
+    for (const [userId, total] of totals.entries()) {
+      const wallet = wallets.get(userId);
+      if (wallet) {
+        wallet.frozenBalance = total;
+      }
+    }
   }
 }
 
@@ -874,6 +1034,23 @@ export function defaultSeedTransactionLogs() {
   ];
 }
 
+export function defaultSeedWalletFreezes() {
+  return [
+    {
+      freezeId: 4601,
+      userId: 1001,
+      orderId: 3003,
+      disputeId: 8001,
+      reasonType: "dispute",
+      status: "dispute",
+      amount: 40,
+      reason: "纠纷处理中，相关时间币保持冻结",
+      releaseCondition: "管理员终审后按裁决释放或退回",
+      createdAt: "2026-05-28T10:05:00.000Z"
+    }
+  ];
+}
+
 export function defaultSeedReviews() {
   return [
     {
@@ -1000,6 +1177,35 @@ function normalizeTransactionLog(input) {
     balanceAfter: input.balanceAfter === undefined || input.balanceAfter === null ? null : roundMoney(input.balanceAfter),
     remark: normalizeOptionalString(input.remark),
     createdAt: input.createdAt ?? new Date().toISOString()
+  };
+}
+
+function normalizeWalletFreeze(input) {
+  const now = new Date().toISOString();
+  return {
+    freezeId: Number(input.freezeId),
+    userId: Number(input.userId),
+    orderId: input.orderId === undefined || input.orderId === null ? null : Number(input.orderId),
+    disputeId: input.disputeId === undefined || input.disputeId === null ? null : Number(input.disputeId),
+    reasonType: ["order", "dispute"].includes(String(input.reasonType ?? input.reason_type)) ? String(input.reasonType ?? input.reason_type) : "order",
+    status: ["active", "dispute", "released"].includes(String(input.status ?? "")) ? String(input.status) : "active",
+    amount: roundMoney(input.amount ?? 0),
+    reason: normalizeOptionalString(input.reason) ?? "订单时间币冻结",
+    releaseCondition: normalizeOptionalString(input.releaseCondition ?? input.release_condition) ?? "双方确认或平台处理后释放",
+    timeline: Array.isArray(input.timeline) ? input.timeline.map(normalizeTimelineItem).filter(Boolean).slice(0, 8) : [],
+    createdAt: input.createdAt ?? input.created_at ?? now,
+    releasedAt: input.releasedAt ?? input.released_at ?? null
+  };
+}
+
+function normalizeTimelineItem(item) {
+  if (!item || typeof item !== "object") {
+    return null;
+  }
+  return {
+    title: normalizeOptionalString(item.title) ?? "冻结状态更新",
+    detail: normalizeOptionalString(item.detail) ?? "",
+    createdAt: item.createdAt ?? item.created_at ?? null
   };
 }
 
@@ -1140,6 +1346,48 @@ function clone(value) {
 
 function roundMoney(value) {
   return Math.round(Number(value) * 100) / 100;
+}
+
+function sumLogs(logs, type) {
+  return logs
+    .filter((log) => log.type === type)
+    .reduce((sum, log) => sum + Number(log.amount ?? 0), 0);
+}
+
+function positiveInteger(raw, fallback) {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function normalizeWalletFilter(value, fallback) {
+  const text = String(value ?? "").trim().toLowerCase();
+  return text || fallback;
+}
+
+function isUnreleasedFreeze(freeze) {
+  return ["active", "dispute"].includes(freeze.status);
+}
+
+function compareFreezes(left, right) {
+  const leftActive = isUnreleasedFreeze(left) ? 0 : 1;
+  const rightActive = isUnreleasedFreeze(right) ? 0 : 1;
+  return leftActive - rightActive
+    || new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+    || right.freezeId - left.freezeId;
+}
+
+function freezeTimeline(freeze, order, request) {
+  const title = request?.title ?? "关联订单";
+  if (freeze.status === "released") {
+    return [
+      { title: "冻结生效", detail: `${title} 冻结 ⏂${roundMoney(freeze.amount).toFixed(2)}`, createdAt: freeze.createdAt },
+      { title: "冻结释放", detail: freeze.releaseCondition, createdAt: freeze.releasedAt }
+    ];
+  }
+  return [
+    { title: "冻结生效", detail: `${title} 冻结 ⏂${roundMoney(freeze.amount).toFixed(2)}`, createdAt: freeze.createdAt },
+    { title: "预计释放", detail: freeze.releaseCondition, createdAt: order?.completedAt ?? null }
+  ];
 }
 
 function storeError(code, message) {
