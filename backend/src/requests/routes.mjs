@@ -5,6 +5,9 @@ const REQUEST_DETAIL_RE = /^\/api\/requests\/([^/]+)$/;
 const REQUEST_ACCEPT_RE = /^\/api\/requests\/([^/]+)\/accept$/;
 const ORDER_DETAIL_RE = /^\/api\/orders\/([^/]+)$/;
 const ORDER_CONFIRM_RE = /^\/api\/orders\/([^/]+)\/confirm$/;
+const ORDER_DISPUTES_RE = /^\/api\/orders\/([^/]+)\/disputes$/;
+const DISPUTE_DETAIL_RE = /^\/api\/disputes\/([^/]+)$/;
+const DISPUTE_EVIDENCE_RE = /^\/api\/disputes\/([^/]+)\/evidence$/;
 const ORDER_REVIEWS_RE = /^\/api\/orders\/([^/]+)\/reviews$/;
 const NOTIFICATION_READ_RE = /^\/api\/notifications\/([^/]+)\/read$/;
 const PUBLIC_REQUEST_STATUSES = new Set(["open", "accepted", "completed"]);
@@ -12,6 +15,8 @@ const ORDER_STATUSES = new Set(["accepted", "payer_confirmed", "both_confirmed",
 const ORDER_CONFIRMABLE_STATUSES = new Set(["accepted", "payer_confirmed", "both_confirmed"]);
 const STATUS_FILTERS = new Set(["open", "accepted", "completed", "cancelled", "all"]);
 const ORDER_STATUS_FILTERS = new Set(["accepted", "payer_confirmed", "both_confirmed", "completed", "disputed", "active", "settlement_ready", "all"]);
+const DISPUTE_STATUS_FILTERS = new Set(["pending", "evidence_collecting", "jury_voting", "admin_review", "resolved", "cancelled", "all"]);
+const DISPUTE_ROLE_FILTERS = new Set(["all", "initiator", "respondent"]);
 const ORDER_ROLE_FILTERS = new Set(["all", "posted", "accepted", "publisher", "provider"]);
 const SORTS = new Set(["latest", "oldest", "coin_desc", "coin_asc", "credit_desc", "credit_asc", "hours_desc", "hours_asc"]);
 const ORDER_SORTS = new Set(["latest", "oldest", "coin_desc", "coin_asc"]);
@@ -170,6 +175,14 @@ export async function handleRequestRoutes({ request, response, url, authService 
     return true;
   }
 
+  if (url.pathname === "/api/disputes/my") {
+    allowOnly(request, response, ["GET"]);
+    const context = await authService.authenticateRequest(request);
+    authService.requireRole(context, ["user"]);
+    sendJson(response, 200, await disputeMyListPayload(authService.store, context.user.userId, url.searchParams));
+    return true;
+  }
+
   const acceptMatch = url.pathname.match(REQUEST_ACCEPT_RE);
   if (acceptMatch) {
     allowOnly(request, response, ["POST"]);
@@ -193,6 +206,94 @@ export async function handleRequestRoutes({ request, response, url, authService 
     sendJson(response, 201, await orderDetailPayload(authService.store, order.orderId, {
       viewerId: context.user.userId
     }));
+    return true;
+  }
+
+  const orderDisputeMatch = url.pathname.match(ORDER_DISPUTES_RE);
+  if (orderDisputeMatch) {
+    allowOnly(request, response, ["POST"]);
+    const context = await authService.authenticateRequest(request);
+    authService.requireRole(context, ["user"]);
+    const orderId = parseOrderId(orderDisputeMatch[1]);
+    const visible = await findVisibleOrderForViewer(authService.store, orderId, {
+      viewerId: context.user.userId,
+      viewerRole: context.user.role
+    });
+    const actorRole = orderActorRole(visible, context.user.userId);
+    if (!actorRole) {
+      throw new HttpError(403, "DISPUTE_FORBIDDEN", "Only order participants can create a dispute.");
+    }
+    if (typeof authService.store.createDispute !== "function") {
+      throw new HttpError(500, "DISPUTE_STORE_UNAVAILABLE", "Dispute creation is not available.");
+    }
+
+    const body = await readJsonBody(request, { maxBytes: REQUEST_BODY_MAX_BYTES });
+    const input = normalizeCreateDisputeInput(body);
+    let dispute;
+    try {
+      dispute = await authService.store.createDispute({
+        ...input,
+        orderId,
+        initiatorId: context.user.userId
+      });
+    } catch (error) {
+      throw disputeError(error);
+    }
+
+    sendJson(response, 201, {
+      dispute: disputeDto(dispute, { viewerId: context.user.userId }),
+      order: (await orderDetailPayload(authService.store, orderId, {
+        viewerId: context.user.userId,
+        viewerRole: context.user.role
+      })).order
+    });
+    return true;
+  }
+
+  const disputeDetailMatch = url.pathname.match(DISPUTE_DETAIL_RE);
+  if (disputeDetailMatch) {
+    allowOnly(request, response, ["GET"]);
+    const context = await authService.authenticateRequest(request);
+    authService.requireRole(context, ["user", "admin", "super_admin"]);
+    sendJson(response, 200, await disputeDetailPayload(authService.store, disputeDetailMatch[1], {
+      viewerId: context.user.userId,
+      viewerRole: context.user.role
+    }));
+    return true;
+  }
+
+  const disputeEvidenceMatch = url.pathname.match(DISPUTE_EVIDENCE_RE);
+  if (disputeEvidenceMatch) {
+    allowOnly(request, response, ["POST"]);
+    const context = await authService.authenticateRequest(request);
+    authService.requireRole(context, ["user"]);
+    const dispute = await findVisibleDisputeForViewer(authService.store, disputeEvidenceMatch[1], {
+      viewerId: context.user.userId,
+      viewerRole: context.user.role
+    });
+    if (typeof authService.store.addDisputeEvidence !== "function") {
+      throw new HttpError(500, "DISPUTE_STORE_UNAVAILABLE", "Dispute evidence submission is not available.");
+    }
+    const body = await readJsonBody(request, { maxBytes: REQUEST_BODY_MAX_BYTES });
+    const input = normalizeEvidenceInput(body);
+    let evidence;
+    try {
+      evidence = await authService.store.addDisputeEvidence({
+        ...input,
+        disputeId: dispute.dispute.disputeId,
+        uploaderId: context.user.userId
+      });
+    } catch (error) {
+      throw disputeError(error);
+    }
+    const updated = await disputeDetailPayload(authService.store, dispute.dispute.disputeId, {
+      viewerId: context.user.userId,
+      viewerRole: context.user.role
+    });
+    sendJson(response, 201, {
+      evidence: evidenceDto(evidence),
+      dispute: updated.dispute
+    });
     return true;
   }
 
@@ -456,6 +557,106 @@ function normalizeReviewInput(input, order, reviewerId) {
   };
 }
 
+function normalizeCreateDisputeInput(input) {
+  return {
+    type: normalizeDisputeType(input?.type ?? input?.reasonType ?? input?.reason_type),
+    reason: requiredText(input?.reason ?? input?.title, 2, 100, "INVALID_DISPUTE_REASON", "Dispute reason is required."),
+    description: requiredText(input?.description ?? input?.content, 10, 1000, "INVALID_DISPUTE_DESCRIPTION", "Dispute description must be at least 10 characters."),
+    evidence: normalizeEvidencePayload(input?.evidence ?? input?.evidences ?? input?.attachments)
+  };
+}
+
+function normalizeEvidenceInput(input) {
+  const content = optionalInputText(input?.content ?? input?.description, 1000, "INVALID_EVIDENCE_CONTENT") ?? "";
+  const attachments = normalizeAttachments(input?.attachments ?? input?.attachment ?? input?.files ?? input?.file);
+  if (!content && attachments.length === 0) {
+    throw new HttpError(400, "INVALID_EVIDENCE_CONTENT", "Evidence content or attachment metadata is required.");
+  }
+  return {
+    evidenceType: normalizeEvidenceType(input?.evidenceType ?? input?.evidence_type ?? (attachments.length > 0 ? "file" : "text")),
+    content,
+    attachments
+  };
+}
+
+function normalizeEvidencePayload(value) {
+  const list = Array.isArray(value) ? value : value ? [value] : [];
+  return list.map((item) => {
+    if (!item || typeof item !== "object") {
+      const name = optionalInputText(item, 120, "INVALID_EVIDENCE_ATTACHMENT");
+      return name ? { evidenceType: "file", content: "", attachments: [{ name, type: "file", size: 0 }] } : null;
+    }
+    const attachments = normalizeAttachments(item.attachments ?? item.attachment ?? item.files ?? item.file ?? item);
+    const content = optionalInputText(item.content ?? item.description, 1000, "INVALID_EVIDENCE_CONTENT") ?? "";
+    if (!content && attachments.length === 0) {
+      return null;
+    }
+    return {
+      evidenceType: normalizeEvidenceType(item.evidenceType ?? item.evidence_type ?? (attachments.length > 0 ? "file" : "text")),
+      content,
+      attachments
+    };
+  }).filter(Boolean).slice(0, 8);
+}
+
+function normalizeAttachments(value) {
+  const list = Array.isArray(value) ? value : value ? [value] : [];
+  const attachments = [];
+  for (const item of list) {
+    const attachment = normalizeAttachment(item);
+    if (attachment) {
+      attachments.push(attachment);
+    }
+    if (attachments.length >= 8) {
+      break;
+    }
+  }
+  return attachments;
+}
+
+function normalizeAttachment(item) {
+  if (!item || typeof item !== "object") {
+    const name = optionalInputText(item, 120, "INVALID_EVIDENCE_ATTACHMENT");
+    return name ? { name, type: "file", size: 0, url: null } : null;
+  }
+  const name = optionalInputText(item.name ?? item.filename ?? item.fileName, 120, "INVALID_EVIDENCE_ATTACHMENT");
+  if (!name) {
+    return null;
+  }
+  return {
+    name,
+    type: optionalInputText(item.type ?? item.mimeType, 80, "INVALID_EVIDENCE_ATTACHMENT") ?? "file",
+    size: Number.isFinite(Number(item.size)) ? Math.max(0, Math.round(Number(item.size))) : 0,
+    url: optionalInputText(item.url ?? item.fileUrl, 500, "INVALID_EVIDENCE_ATTACHMENT")
+  };
+}
+
+function normalizeDisputeType(raw) {
+  const type = optionalLower(raw, 40) ?? "other";
+  const map = new Map([
+    ["quality", "quality_issue"],
+    ["quality_issue", "quality_issue"],
+    ["nofinish", "not_completed"],
+    ["not_completed", "not_completed"],
+    ["nopay", "communication"],
+    ["communication", "communication"],
+    ["other", "other"]
+  ]);
+  const normalized = map.get(type);
+  if (!normalized) {
+    throw new HttpError(400, "INVALID_DISPUTE_TYPE", "Unsupported dispute type.");
+  }
+  return normalized;
+}
+
+function normalizeEvidenceType(raw) {
+  const type = optionalLower(raw, 40) ?? "text";
+  if (!["text", "image", "file", "chat"].includes(type)) {
+    throw new HttpError(400, "INVALID_EVIDENCE_TYPE", "Unsupported evidence type.");
+  }
+  return type;
+}
+
 function normalizeReviewTags(rawTags) {
   const values = Array.isArray(rawTags)
     ? rawTags
@@ -652,6 +853,7 @@ async function orderDetailPayload(store, rawOrderId, options = {}) {
       provider,
       providerCredit: await creditSummary(store, provider.userId),
       reviews: await reviewsForOrder(store, order.orderId),
+      dispute: await disputeForOrder(store, order.orderId),
       viewerId: options.viewerId
     })
   };
@@ -772,6 +974,59 @@ async function messageListPayload(store, userId, searchParams) {
   };
 }
 
+async function disputeMyListPayload(store, userId, searchParams) {
+  if (typeof store.listDisputesForUserId !== "function") {
+    throw new HttpError(500, "DISPUTE_STORE_UNAVAILABLE", "Dispute listing is not available.");
+  }
+  const query = normalizeDisputeQuery(searchParams);
+  const result = await store.listDisputesForUserId(userId, {
+    status: query.status,
+    role: query.role,
+    page: query.page,
+    pageSize: query.pageSize
+  });
+  const disputes = Array.isArray(result?.disputes) ? result.disputes : [];
+  const total = Number(result?.total ?? disputes.length);
+  return {
+    disputes: disputes.map((item) => disputeSummaryDto(item, { viewerId: userId })),
+    pagination: paginationDto(query.page, query.pageSize, total),
+    filters: {
+      status: query.status,
+      role: query.role,
+      page: query.page,
+      pageSize: query.pageSize
+    }
+  };
+}
+
+async function disputeDetailPayload(store, rawDisputeId, options = {}) {
+  const visible = await findVisibleDisputeForViewer(store, rawDisputeId, options);
+  return {
+    dispute: disputeDto(visible.dispute, {
+      viewerId: options.viewerId,
+      viewerRole: options.viewerRole
+    })
+  };
+}
+
+async function findVisibleDisputeForViewer(store, rawDisputeId, options = {}) {
+  const disputeId = parseDisputeId(rawDisputeId);
+  if (typeof store.findDisputeById !== "function") {
+    throw new HttpError(500, "DISPUTE_STORE_UNAVAILABLE", "Dispute lookup is not available.");
+  }
+  const dispute = await store.findDisputeById(disputeId);
+  if (!dispute) {
+    throw new HttpError(404, "DISPUTE_NOT_FOUND", "Dispute was not found.");
+  }
+  if (options.viewerId !== undefined && options.viewerId !== null) {
+    const viewerId = Number(options.viewerId);
+    if (!canViewDispute(dispute, viewerId, options.viewerRole)) {
+      throw new HttpError(403, "DISPUTE_FORBIDDEN", "You do not have permission to view this dispute.");
+    }
+  }
+  return { dispute };
+}
+
 async function orderReviewsPayload(store, order, options = {}) {
   const reviews = await reviewsForOrder(store, order.orderId);
   return {
@@ -786,6 +1041,13 @@ async function reviewsForOrder(store, orderId) {
     return await store.listReviewsForOrderId(orderId);
   }
   return [];
+}
+
+async function disputeForOrder(store, orderId) {
+  if (typeof store.findDisputeByOrderId === "function") {
+    return await store.findDisputeByOrderId(orderId);
+  }
+  return null;
 }
 
 async function enrichOrder(store, order, categoryMap, options = {}) {
@@ -817,6 +1079,7 @@ async function enrichOrder(store, order, categoryMap, options = {}) {
     provider,
     providerCredit: await creditSummary(store, provider.userId),
     reviews: await reviewsForOrder(store, order.orderId),
+    dispute: await disputeForOrder(store, order.orderId),
     viewerId: options.viewerId
   });
 }
@@ -996,7 +1259,7 @@ function requestDetailDto(item) {
 }
 
 function serviceOrderDto(item) {
-  const { order, request, provider, providerCredit, reviews = [], viewerId } = item;
+  const { order, request, provider, providerCredit, reviews = [], dispute = null, viewerId } = item;
   const myRole = orderMyRole(request.publisherId, order.providerId, viewerId);
   const confirmation = orderConfirmationState(order);
   const reviewState = reviewStateForOrder({
@@ -1015,6 +1278,9 @@ function serviceOrderDto(item) {
     confirmation,
     myRole,
     canConfirm: Boolean(myRole) && ORDER_CONFIRMABLE_STATUSES.has(order.status) && !confirmation[myRole === "posted" ? "payerConfirmed" : "providerConfirmed"],
+    canDispute: Boolean(myRole) && !dispute && ["accepted", "payer_confirmed", "both_confirmed"].includes(order.status),
+    disputeId: dispute?.disputeId ?? null,
+    disputeStatus: dispute?.status ?? null,
     canReview: reviewState.canReview,
     reviewState,
     settlementReady: order.status === "both_confirmed",
@@ -1223,6 +1489,87 @@ function reviewDto(item) {
   };
 }
 
+function disputeSummaryDto(item, options = {}) {
+  const order = item.order ?? {};
+  const request = item.request ?? {};
+  return {
+    disputeId: item.disputeId,
+    orderId: item.orderId,
+    requestId: order.requestId ?? request.requestId ?? null,
+    status: item.status,
+    type: item.type,
+    reason: item.reason,
+    descriptionSummary: summarize(item.description),
+    coinAmount: order.coinAmount ?? request.coinAmount ?? null,
+    myRole: disputeMyRole(item, options.viewerId),
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    order: order ? {
+      orderId: item.orderId,
+      status: order.status ?? null,
+      coinAmount: order.coinAmount ?? null
+    } : null,
+    request: request ? {
+      requestId: request.requestId ?? null,
+      title: request.title ?? "邻里互助订单",
+      location: request.location ?? null
+    } : null,
+    initiator: item.initiator ? publicPublisherDto(item.initiator) : null,
+    respondent: item.respondent ? publicPublisherDto(item.respondent) : null,
+    href: `/disputes/${encodeURIComponent(item.disputeId)}`
+  };
+}
+
+function disputeDto(item, options = {}) {
+  return {
+    ...disputeSummaryDto(item, options),
+    description: item.description,
+    finalResult: item.finalResult ?? null,
+    refundAmount: item.refundAmount ?? null,
+    resolvedAt: item.resolvedAt ?? null,
+    publisher: item.publisher ? publicPublisherDto(item.publisher) : null,
+    provider: item.provider ? publicPublisherDto(item.provider) : null,
+    evidence: Array.isArray(item.evidence) ? item.evidence.map(evidenceDto) : [],
+    progress: progressDto(item.progress),
+    freeze: item.freeze ? walletFreezeDto(item.freeze) : null
+  };
+}
+
+function evidenceDto(item) {
+  return {
+    evidenceId: item.evidenceId,
+    disputeId: item.disputeId,
+    uploaderId: item.uploaderId,
+    evidenceType: item.evidenceType,
+    content: item.content ?? "",
+    attachments: Array.isArray(item.attachments) ? item.attachments.map(attachmentDto) : [],
+    uploader: item.uploader ? publicPublisherDto(item.uploader) : null,
+    createdAt: item.createdAt
+  };
+}
+
+function attachmentDto(item) {
+  return {
+    name: item.name,
+    type: item.type ?? "file",
+    size: Number(item.size ?? 0),
+    url: item.url ?? null
+  };
+}
+
+function progressDto(progress) {
+  return {
+    currentStatus: progress?.currentStatus ?? "pending",
+    steps: Array.isArray(progress?.steps) ? progress.steps.map((item) => ({
+      key: item.key,
+      title: item.title,
+      detail: item.detail,
+      state: item.state,
+      createdAt: item.createdAt ?? null
+    })) : []
+  };
+}
+
 function timelineDto(item) {
   return {
     title: item.title ?? "冻结状态更新",
@@ -1337,6 +1684,23 @@ function normalizeNotificationQuery(searchParams) {
 
 function normalizeMessageQuery(searchParams) {
   return {
+    page: parsePositiveInt(searchParams.get("page") ?? "1", "INVALID_PAGE", 1, 1000),
+    pageSize: parsePositiveInt(searchParams.get("pageSize") ?? searchParams.get("limit") ?? "20", "INVALID_PAGE_SIZE", 1, 50)
+  };
+}
+
+function normalizeDisputeQuery(searchParams) {
+  const status = optionalLower(searchParams.get("status") ?? "all") ?? "all";
+  if (!DISPUTE_STATUS_FILTERS.has(status)) {
+    throw new HttpError(400, "INVALID_DISPUTE_STATUS", "Unsupported dispute status filter.");
+  }
+  const role = optionalLower(searchParams.get("role") ?? "all") ?? "all";
+  if (!DISPUTE_ROLE_FILTERS.has(role)) {
+    throw new HttpError(400, "INVALID_DISPUTE_ROLE", "Unsupported dispute role filter.");
+  }
+  return {
+    status,
+    role,
     page: parsePositiveInt(searchParams.get("page") ?? "1", "INVALID_PAGE", 1, 1000),
     pageSize: parsePositiveInt(searchParams.get("pageSize") ?? searchParams.get("limit") ?? "20", "INVALID_PAGE_SIZE", 1, 50)
   };
@@ -1521,6 +1885,13 @@ function parseOrderId(raw) {
   return Number(raw);
 }
 
+function parseDisputeId(raw) {
+  if (!/^\d+$/.test(String(raw))) {
+    throw new HttpError(404, "DISPUTE_NOT_FOUND", "Dispute was not found.");
+  }
+  return Number(raw);
+}
+
 function canViewOrder({ publisherId, providerId, viewerId, viewerRole }) {
   if (viewerId === undefined || viewerId === null) {
     return false;
@@ -1530,6 +1901,28 @@ function canViewOrder({ publisherId, providerId, viewerId, viewerRole }) {
   }
   const id = Number(viewerId);
   return [Number(publisherId), Number(providerId)].includes(id);
+}
+
+function canViewDispute(dispute, viewerId, viewerRole) {
+  if (viewerId === undefined || viewerId === null) {
+    return false;
+  }
+  if (["admin", "super_admin"].includes(String(viewerRole ?? ""))) {
+    return true;
+  }
+  const id = Number(viewerId);
+  return [Number(dispute.initiatorId), Number(dispute.respondentId)].includes(id);
+}
+
+function disputeMyRole(dispute, viewerId) {
+  const id = Number(viewerId);
+  if (Number(dispute.initiatorId) === id) {
+    return "initiator";
+  }
+  if (Number(dispute.respondentId) === id) {
+    return "respondent";
+  }
+  return null;
 }
 
 function orderActorRole(payload, actorId) {
@@ -1705,6 +2098,31 @@ function reviewError(error) {
   }
   if (error?.code === "REVIEW_ALREADY_EXISTS" || error?.code === "DUPLICATE_ENTRY") {
     return new HttpError(409, "REVIEW_ALREADY_EXISTS", "This review direction already exists.");
+  }
+  return error;
+}
+
+function disputeError(error) {
+  if (error?.code === "ORDER_NOT_FOUND") {
+    return new HttpError(404, "ORDER_NOT_FOUND", "Service order was not found.");
+  }
+  if (error?.code === "DISPUTE_NOT_FOUND") {
+    return new HttpError(404, "DISPUTE_NOT_FOUND", "Dispute was not found.");
+  }
+  if (error?.code === "DISPUTE_FORBIDDEN") {
+    return new HttpError(403, "DISPUTE_FORBIDDEN", "Only dispute participants can perform this operation.");
+  }
+  if (error?.code === "DISPUTE_ORDER_STATUS_INVALID") {
+    return new HttpError(409, "DISPUTE_ORDER_STATUS_INVALID", "This order status cannot enter dispute.");
+  }
+  if (error?.code === "DISPUTE_ALREADY_EXISTS") {
+    return new HttpError(409, "DISPUTE_ALREADY_EXISTS", "This order already has a dispute.");
+  }
+  if (error?.code === "DISPUTE_CLOSED") {
+    return new HttpError(409, "DISPUTE_CLOSED", "Closed disputes do not accept new evidence.");
+  }
+  if (error?.code === "WALLET_NOT_FOUND") {
+    return new HttpError(409, "WALLET_NOT_FOUND", "Payer wallet was not found for dispute freeze.");
   }
   return error;
 }

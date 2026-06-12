@@ -85,6 +85,11 @@ export function createApiClient(options = {}) {
         method: "POST",
         token,
         body: payload
+      }),
+      dispute: (token, orderId, payload) => request(`/api/orders/${encodeURIComponent(orderId)}/disputes`, {
+        method: "POST",
+        token,
+        body: payload
       })
     },
     transactions: {
@@ -108,6 +113,15 @@ export function createApiClient(options = {}) {
     },
     messages: {
       list: (token, params = {}) => request(withQuery("/api/messages", params), { token })
+    },
+    disputes: {
+      my: (token, params = {}) => request(withQuery("/api/disputes/my", params), { token }),
+      detail: (token, disputeId) => request(`/api/disputes/${encodeURIComponent(disputeId)}`, { token }),
+      evidence: (token, disputeId, payload) => request(`/api/disputes/${encodeURIComponent(disputeId)}/evidence`, {
+        method: "POST",
+        token,
+        body: payload
+      })
     },
     auth: {
       register: (payload) => request("/api/auth/register", {

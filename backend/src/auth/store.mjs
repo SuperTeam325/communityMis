@@ -19,6 +19,8 @@ export function createMemoryAuthStore(options = {}) {
   const notifications = new Map();
   const messages = new Map();
   const reviews = [];
+  const disputes = new Map();
+  const disputeEvidence = new Map();
   let nextUserId = options.nextUserId ?? 10000;
   let nextWalletId = options.nextWalletId ?? 20000;
   let nextRequestId = options.nextRequestId ?? 30000;
@@ -28,6 +30,8 @@ export function createMemoryAuthStore(options = {}) {
   let nextNotificationId = options.nextNotificationId ?? 50000;
   let nextMessageId = options.nextMessageId ?? 55000;
   let nextReviewId = options.nextReviewId ?? 60000;
+  let nextDisputeId = options.nextDisputeId ?? 65000;
+  let nextDisputeEvidenceId = options.nextDisputeEvidenceId ?? 66000;
 
   for (const seedUser of options.seedUsers ?? defaultSeedUsers()) {
     insertSeedUser(seedUser);
@@ -56,6 +60,12 @@ export function createMemoryAuthStore(options = {}) {
   }
   for (const seedReview of options.seedReviews ?? defaultSeedReviews()) {
     reviews.push(normalizeReview(seedReview));
+  }
+  for (const seedDispute of options.seedDisputes ?? (options.seedRequests === undefined ? defaultSeedDisputes() : [])) {
+    insertSeedDispute(seedDispute);
+  }
+  for (const seedEvidence of options.seedDisputeEvidence ?? (options.seedRequests === undefined ? defaultSeedDisputeEvidence() : [])) {
+    insertSeedDisputeEvidence(seedEvidence);
   }
 
   return {
@@ -87,6 +97,12 @@ export function createMemoryAuthStore(options = {}) {
     createReview,
     listReviewsForOrderId,
     listReviewsForTargetId,
+    createDispute,
+    findDisputeById,
+    findDisputeByOrderId,
+    listDisputesForUserId,
+    addDisputeEvidence,
+    listDisputeEvidence,
     createSession,
     findSession,
     revokeSession
@@ -543,6 +559,7 @@ export function createMemoryAuthStore(options = {}) {
     insertTransactionLog({
       userId,
       orderId: freeze.orderId,
+      disputeId: freeze.disputeId,
       type: "freeze",
       amount: freeze.amount,
       balanceAfter: wallet.balance,
@@ -716,6 +733,233 @@ export function createMemoryAuthStore(options = {}) {
       .map(enrichReview);
   }
 
+  function createDispute(input) {
+    const orderId = Number(input.orderId);
+    const initiatorId = Number(input.initiatorId);
+    const order = serviceOrders.get(orderId);
+
+    if (!order) {
+      throw storeError("ORDER_NOT_FOUND", "Service order was not found.");
+    }
+
+    const request = serviceRequests.get(order.requestId);
+    if (!request || request.visible === false) {
+      throw storeError("ORDER_NOT_FOUND", "Service order was not found.");
+    }
+    if (request.publisherId !== initiatorId && order.providerId !== initiatorId) {
+      throw storeError("DISPUTE_FORBIDDEN", "Only order participants can create a dispute.");
+    }
+    if (!["accepted", "payer_confirmed", "both_confirmed", "disputed"].includes(order.status)) {
+      throw storeError("DISPUTE_ORDER_STATUS_INVALID", "This order status cannot enter dispute.");
+    }
+    const existing = Array.from(disputes.values()).find((dispute) => dispute.orderId === orderId && !["cancelled"].includes(dispute.status));
+    if (existing) {
+      throw storeError("DISPUTE_ALREADY_EXISTS", "This order already has a dispute.");
+    }
+
+    const now = input.createdAt ?? new Date().toISOString();
+    const respondentId = request.publisherId === initiatorId ? order.providerId : request.publisherId;
+    const previousOrder = clone(order);
+    const previousRequest = clone(request);
+    const payerWallet = wallets.get(request.publisherId);
+    const previousPayerWallet = payerWallet ? clone(payerWallet) : null;
+    const previousNextDisputeId = nextDisputeId;
+    const previousNextEvidenceId = nextDisputeEvidenceId;
+    const previousNextFreezeId = nextWalletFreezeId;
+    const previousNextTransactionLogId = nextTransactionLogId;
+    const previousNextNotificationId = nextNotificationId;
+    const createdDisputeIds = [];
+    const createdEvidenceIds = [];
+    const createdFreezeIds = [];
+    const createdLogIds = [];
+    const createdNotificationIds = [];
+
+    try {
+      const dispute = normalizeDispute({
+        disputeId: nextDisputeId,
+        orderId,
+        initiatorId,
+        respondentId,
+        type: input.type,
+        reason: input.reason,
+        description: input.description,
+        status: "pending",
+        createdAt: now,
+        updatedAt: now
+      });
+      nextDisputeId += 1;
+      disputes.set(dispute.disputeId, dispute);
+      createdDisputeIds.push(dispute.disputeId);
+
+      order.status = "disputed";
+      order.updatedAt = now;
+      request.updatedAt = now;
+
+      const initialEvidence = normalizeEvidenceList(input.evidence).map((evidence) => insertDisputeEvidence({
+        ...evidence,
+        disputeId: dispute.disputeId,
+        uploaderId: initiatorId,
+        createdAt: evidence.createdAt ?? now
+      }));
+      createdEvidenceIds.push(...initialEvidence.map((item) => item.evidenceId));
+
+      const freeze = createWalletFreeze({
+        userId: request.publisherId,
+        orderId,
+        disputeId: dispute.disputeId,
+        reasonType: "dispute",
+        status: "dispute",
+        amount: order.coinAmount,
+        reason: "纠纷处理中，相关时间币保持冻结",
+        releaseCondition: "管理员终审后按裁决释放或退回",
+        timeline: [
+          {
+            title: "纠纷发起",
+            detail: `${displayUserName(users.get(initiatorId))} 发起纠纷，订单进入争议状态。`,
+            createdAt: now
+          }
+        ],
+        createdAt: now
+      });
+      if (freeze?.freezeId) {
+        createdFreezeIds.push(freeze.freezeId);
+      }
+      for (const log of transactionLogs.values()) {
+        if (log.createdAt === now && log.userId === request.publisherId && log.orderId === orderId && log.type === "freeze") {
+          createdLogIds.push(log.logId);
+        }
+      }
+      for (const notification of notifications.values()) {
+        if (notification.createdAt === now && notification.type === "dispute") {
+          createdNotificationIds.push(notification.notificationId);
+        }
+      }
+
+      createNotification({
+        userId: respondentId,
+        type: "dispute",
+        title: "订单进入纠纷处理",
+        content: `${displayUserName(users.get(initiatorId))} 对订单「${request.title}」发起纠纷，请补充证据或等待处理。`,
+        businessType: "dispute",
+        businessId: dispute.disputeId,
+        createdAt: now
+      });
+      createNotification({
+        userId: request.publisherId,
+        type: "wallet",
+        title: "纠纷冻结已记录",
+        content: `订单「${request.title}」进入纠纷处理，${roundMoney(order.coinAmount).toFixed(2)} 时间币保持冻结。`,
+        businessType: "dispute",
+        businessId: dispute.disputeId,
+        createdAt: now
+      });
+      for (const notification of notifications.values()) {
+        if (notification.createdAt === now && !createdNotificationIds.includes(notification.notificationId)) {
+          createdNotificationIds.push(notification.notificationId);
+        }
+      }
+
+      return enrichDispute(dispute);
+    } catch (error) {
+      serviceOrders.set(previousOrder.orderId, previousOrder);
+      serviceRequests.set(previousRequest.requestId, previousRequest);
+      if (previousPayerWallet) {
+        wallets.set(previousPayerWallet.userId, previousPayerWallet);
+      }
+      for (const id of createdEvidenceIds) {
+        disputeEvidence.delete(id);
+      }
+      for (const id of createdDisputeIds) {
+        disputes.delete(id);
+      }
+      for (const id of createdFreezeIds) {
+        walletFreezes.delete(id);
+      }
+      for (const id of createdLogIds) {
+        transactionLogs.delete(id);
+      }
+      for (const id of createdNotificationIds) {
+        notifications.delete(id);
+      }
+      nextDisputeId = previousNextDisputeId;
+      nextDisputeEvidenceId = previousNextEvidenceId;
+      nextWalletFreezeId = previousNextFreezeId;
+      nextTransactionLogId = previousNextTransactionLogId;
+      nextNotificationId = previousNextNotificationId;
+      throw error;
+    }
+  }
+
+  function findDisputeById(disputeId) {
+    const dispute = disputes.get(Number(disputeId));
+    return dispute ? clone(enrichDispute(dispute)) : null;
+  }
+
+  function findDisputeByOrderId(orderId) {
+    const id = Number(orderId);
+    const dispute = Array.from(disputes.values())
+      .filter((item) => item.orderId === id)
+      .sort(compareDisputes)[0];
+    return dispute ? clone(enrichDispute(dispute)) : null;
+  }
+
+  function listDisputesForUserId(userId, query = {}) {
+    const id = Number(userId);
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(50, positiveInteger(query.pageSize, 20));
+    const status = normalizeDisputeFilter(query.status, "all");
+    const role = normalizeDisputeFilter(query.role, "all");
+    const filtered = Array.from(disputes.values())
+      .filter((dispute) => dispute.initiatorId === id || dispute.respondentId === id)
+      .filter((dispute) => status === "all" || dispute.status === status)
+      .filter((dispute) => role === "all" || (role === "initiator" ? dispute.initiatorId === id : dispute.respondentId === id))
+      .sort(compareDisputes);
+    const offset = (page - 1) * pageSize;
+    return {
+      disputes: filtered.slice(offset, offset + pageSize).map(enrichDispute).map(clone),
+      total: filtered.length
+    };
+  }
+
+  function addDisputeEvidence(input) {
+    const dispute = disputes.get(Number(input.disputeId));
+    const uploaderId = Number(input.uploaderId);
+    if (!dispute) {
+      throw storeError("DISPUTE_NOT_FOUND", "Dispute was not found.");
+    }
+    if (dispute.initiatorId !== uploaderId && dispute.respondentId !== uploaderId) {
+      throw storeError("DISPUTE_FORBIDDEN", "Only dispute participants can add evidence.");
+    }
+    if (["resolved", "cancelled"].includes(dispute.status)) {
+      throw storeError("DISPUTE_CLOSED", "Closed disputes do not accept new evidence.");
+    }
+    const evidence = insertDisputeEvidence({
+      ...input,
+      disputeId: dispute.disputeId,
+      uploaderId
+    });
+    dispute.updatedAt = evidence.createdAt;
+    createNotification({
+      userId: dispute.initiatorId === uploaderId ? dispute.respondentId : dispute.initiatorId,
+      type: "dispute",
+      title: "纠纷证据已更新",
+      content: `${displayUserName(users.get(uploaderId))} 为纠纷 #DSP-${dispute.disputeId} 补充了证据。`,
+      businessType: "dispute",
+      businessId: dispute.disputeId,
+      createdAt: evidence.createdAt
+    });
+    return clone(enrichDisputeEvidence(evidence));
+  }
+
+  function listDisputeEvidence(disputeId) {
+    const id = Number(disputeId);
+    return Array.from(disputeEvidence.values())
+      .filter((item) => item.disputeId === id)
+      .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime() || left.evidenceId - right.evidenceId)
+      .map(enrichDisputeEvidence)
+      .map(clone);
+  }
+
   function enrichReview(review) {
     const output = clone(review);
     return {
@@ -846,6 +1090,24 @@ export function createMemoryAuthStore(options = {}) {
     });
     notifications.set(notification.notificationId, notification);
     nextNotificationId = Math.max(nextNotificationId, notification.notificationId + 1);
+  }
+
+  function insertSeedDispute(seedDispute) {
+    const dispute = normalizeDispute({
+      ...seedDispute,
+      disputeId: seedDispute.disputeId ?? nextDisputeId
+    });
+    disputes.set(dispute.disputeId, dispute);
+    nextDisputeId = Math.max(nextDisputeId, dispute.disputeId + 1);
+  }
+
+  function insertSeedDisputeEvidence(seedEvidence) {
+    const evidence = normalizeDisputeEvidence({
+      ...seedEvidence,
+      evidenceId: seedEvidence.evidenceId ?? nextDisputeEvidenceId
+    });
+    disputeEvidence.set(evidence.evidenceId, evidence);
+    nextDisputeEvidenceId = Math.max(nextDisputeEvidenceId, evidence.evidenceId + 1);
   }
 
   function createNotification(input) {
@@ -1005,9 +1267,52 @@ export function createMemoryAuthStore(options = {}) {
     };
   }
 
+  function enrichDispute(dispute) {
+    const order = serviceOrders.get(dispute.orderId);
+    const request = order ? serviceRequests.get(order.requestId) : null;
+    const initiator = users.get(dispute.initiatorId);
+    const respondent = users.get(dispute.respondentId);
+    const publisher = request ? users.get(request.publisherId) : null;
+    const provider = order ? users.get(order.providerId) : null;
+    const evidence = listDisputeEvidence(dispute.disputeId);
+    const freeze = Array.from(walletFreezes.values()).find((item) => item.disputeId === dispute.disputeId) ?? null;
+    return {
+      ...dispute,
+      order: order ? clone(order) : null,
+      request: request ? clone(withCategory(request)) : null,
+      initiator: publicReviewer(initiator),
+      respondent: publicReviewer(respondent),
+      publisher: publicReviewer(publisher),
+      provider: publicReviewer(provider),
+      evidence,
+      freeze: freeze ? clone(enrichWalletFreeze(freeze)) : null,
+      progress: disputeProgress(dispute, evidence)
+    };
+  }
+
+  function enrichDisputeEvidence(evidence) {
+    return {
+      ...evidence,
+      uploader: publicReviewer(users.get(evidence.uploaderId))
+    };
+  }
+
+  function insertDisputeEvidence(input) {
+    const evidence = normalizeDisputeEvidence({
+      ...input,
+      evidenceId: nextDisputeEvidenceId
+    });
+    disputeEvidence.set(evidence.evidenceId, evidence);
+    nextDisputeEvidenceId += 1;
+    return evidence;
+  }
+
   function findFreezeForTransaction(log) {
     if (log.type !== "freeze") {
       return null;
+    }
+    if (log.disputeId !== null && log.disputeId !== undefined) {
+      return Array.from(walletFreezes.values()).find((freeze) => freeze.disputeId === log.disputeId) ?? null;
     }
     return Array.from(walletFreezes.values()).find((freeze) => (
       freeze.userId === log.userId
@@ -1389,6 +1694,53 @@ export function defaultSeedWalletFreezes() {
   ];
 }
 
+export function defaultSeedDisputes() {
+  return [
+    {
+      disputeId: 8001,
+      orderId: 3003,
+      initiatorId: 1001,
+      respondentId: 1003,
+      type: "quality_issue",
+      reason: "服务质量争议",
+      description: "需求方认为辅导内容与约定不一致，请核对聊天记录和课堂截图。",
+      status: "admin_review",
+      finalResult: null,
+      refundAmount: 12,
+      createdAt: "2026-05-28T10:40:00.000Z",
+      updatedAt: "2026-05-28T11:00:00.000Z",
+      resolvedAt: null
+    }
+  ];
+}
+
+export function defaultSeedDisputeEvidence() {
+  return [
+    {
+      evidenceId: 8101,
+      disputeId: 8001,
+      uploaderId: 1001,
+      evidenceType: "text",
+      content: "课堂中途调整了讲解内容，与原需求不一致。",
+      attachments: [
+        { name: "聊天记录-约定辅导内容.png", type: "image/png", size: 182000 }
+      ],
+      createdAt: "2026-05-28T10:45:00.000Z"
+    },
+    {
+      evidenceId: 8102,
+      disputeId: 8001,
+      uploaderId: 1003,
+      evidenceType: "image",
+      content: "已上传课堂板书截图，证明完成函数和几何讲解。",
+      attachments: [
+        { name: "课堂板书截图.png", type: "image/png", size: 244000 }
+      ],
+      createdAt: "2026-05-28T10:52:00.000Z"
+    }
+  ];
+}
+
 export function defaultSeedReviews() {
   return [
     {
@@ -1510,6 +1862,7 @@ function normalizeTransactionLog(input) {
     logId: Number(input.logId),
     userId: input.userId === undefined || input.userId === null ? null : Number(input.userId),
     orderId: input.orderId === undefined || input.orderId === null ? null : Number(input.orderId),
+    disputeId: input.disputeId === undefined || input.disputeId === null ? null : Number(input.disputeId),
     type: String(input.type ?? "expense"),
     amount: roundMoney(input.amount ?? 0),
     balanceAfter: input.balanceAfter === undefined || input.balanceAfter === null ? null : roundMoney(input.balanceAfter),
@@ -1588,6 +1941,93 @@ function normalizeReview(input) {
     tags: normalizeTextList(input.tags).slice(0, 8),
     createdAt: input.createdAt ?? new Date().toISOString()
   };
+}
+
+function normalizeDispute(input) {
+  const now = new Date().toISOString();
+  return {
+    disputeId: Number(input.disputeId ?? input.dispute_id),
+    orderId: Number(input.orderId ?? input.order_id),
+    initiatorId: Number(input.initiatorId ?? input.initiator_id),
+    respondentId: Number(input.respondentId ?? input.respondent_id),
+    type: normalizeDisputeType(input.type ?? input.reasonType ?? input.reason_type),
+    reason: normalizeOptionalString(input.reason) ?? "订单纠纷",
+    description: normalizeOptionalString(input.description) ?? normalizeOptionalString(input.reason) ?? "纠纷说明待补充",
+    status: normalizeDisputeStatus(input.status),
+    finalResult: normalizeOptionalString(input.finalResult ?? input.final_result),
+    refundAmount: input.refundAmount === undefined || input.refundAmount === null ? null : roundMoney(input.refundAmount),
+    createdAt: input.createdAt ?? input.created_at ?? now,
+    updatedAt: input.updatedAt ?? input.updated_at ?? input.createdAt ?? input.created_at ?? now,
+    resolvedAt: input.resolvedAt ?? input.resolved_at ?? null
+  };
+}
+
+function normalizeDisputeEvidence(input) {
+  const attachmentInput = input.attachments ?? input.attachment ?? [];
+  const attachments = Array.isArray(attachmentInput)
+    ? attachmentInput.map(normalizeEvidenceAttachment).filter(Boolean).slice(0, 8)
+    : [];
+  if (attachments.length === 0) {
+    const directAttachment = normalizeEvidenceAttachment(input);
+    if (directAttachment) {
+      attachments.push(directAttachment);
+    }
+  }
+  const fileUrl = normalizeOptionalString(input.fileUrl ?? input.file_url);
+  if (fileUrl && attachments.length === 0) {
+    attachments.push({
+      name: fileUrl.split("/").filter(Boolean).at(-1) ?? "附件",
+      type: normalizeOptionalString(input.fileType ?? input.file_type) ?? "file",
+      size: Number(input.fileSize ?? input.file_size ?? 0),
+      url: fileUrl
+    });
+  }
+
+  return {
+    evidenceId: Number(input.evidenceId ?? input.evidence_id),
+    disputeId: Number(input.disputeId ?? input.dispute_id),
+    uploaderId: Number(input.uploaderId ?? input.uploader_id),
+    evidenceType: normalizeEvidenceType(input.evidenceType ?? input.evidence_type),
+    content: normalizeOptionalString(input.content) ?? "",
+    attachments,
+    createdAt: input.createdAt ?? input.created_at ?? new Date().toISOString()
+  };
+}
+
+function normalizeEvidenceAttachment(input) {
+  if (!input || typeof input !== "object") {
+    const name = normalizeOptionalString(input);
+    return name ? { name, type: "file", size: 0, url: null } : null;
+  }
+  const name = normalizeOptionalString(input.name ?? input.filename ?? input.fileName);
+  if (!name) {
+    return null;
+  }
+  return {
+    name,
+    type: normalizeOptionalString(input.type ?? input.mimeType) ?? "file",
+    size: Number(input.size ?? 0),
+    url: normalizeOptionalString(input.url ?? input.fileUrl)
+  };
+}
+
+function normalizeEvidenceList(value) {
+  const list = Array.isArray(value) ? value : value ? [value] : [];
+  return list.map((item) => {
+    if (!item || typeof item !== "object") {
+      return {
+        evidenceType: "file",
+        content: "",
+        attachments: [{ name: String(item ?? "").trim(), type: "file", size: 0 }]
+      };
+    }
+    return item;
+  }).filter((item) => (
+    normalizeOptionalString(item.content)
+      || normalizeEvidenceAttachment(item.attachment)
+      || normalizeEvidenceAttachment(item)
+      || (Array.isArray(item.attachments) && item.attachments.length > 0)
+  )).slice(0, 8);
 }
 
 function isVisibleServiceRequest(request, publisher) {
@@ -1716,9 +2156,85 @@ function normalizeWalletFilter(value, fallback) {
   return text || fallback;
 }
 
+function normalizeDisputeFilter(value, fallback) {
+  const text = String(value ?? "").trim().toLowerCase();
+  return text || fallback;
+}
+
 function normalizeNotificationFilter(value, fallback) {
   const text = String(value ?? "").trim().toLowerCase();
   return text || fallback;
+}
+
+function normalizeDisputeType(value) {
+  const text = String(value ?? "").trim().toLowerCase();
+  const map = new Map([
+    ["quality", "quality_issue"],
+    ["quality_issue", "quality_issue"],
+    ["nofinish", "not_completed"],
+    ["not_completed", "not_completed"],
+    ["nopay", "communication"],
+    ["communication", "communication"],
+    ["other", "other"]
+  ]);
+  return map.get(text) ?? "other";
+}
+
+function normalizeDisputeStatus(value) {
+  const text = String(value ?? "").trim().toLowerCase();
+  return ["pending", "evidence_collecting", "jury_voting", "admin_review", "resolved", "cancelled"].includes(text)
+    ? text
+    : "pending";
+}
+
+function normalizeEvidenceType(value) {
+  const text = String(value ?? "").trim().toLowerCase();
+  return ["text", "image", "file", "chat"].includes(text) ? text : "text";
+}
+
+function compareDisputes(left, right) {
+  return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+    || right.disputeId - left.disputeId;
+}
+
+function disputeProgress(dispute, evidence) {
+  return {
+    currentStatus: dispute.status,
+    steps: [
+      {
+        key: "created",
+        title: "纠纷已发起",
+        detail: "订单进入争议状态，双方可补充证据。",
+        state: "done",
+        createdAt: dispute.createdAt
+      },
+      {
+        key: "evidence",
+        title: "证据收集中",
+        detail: `已记录 ${Array.isArray(evidence) ? evidence.length : 0} 条证据。`,
+        state: ["pending", "evidence_collecting"].includes(dispute.status) ? "active" : "done",
+        createdAt: dispute.updatedAt
+      },
+      {
+        key: "admin_review",
+        title: "管理员处理",
+        detail: "管理员终审后按裁决释放或退回冻结时间币。",
+        state: dispute.status === "resolved" ? "done" : ["admin_review", "jury_voting"].includes(dispute.status) ? "active" : "pending",
+        createdAt: dispute.status === "admin_review" ? dispute.updatedAt : null
+      },
+      {
+        key: "resolved",
+        title: "处理完成",
+        detail: dispute.finalResult ? `最终结果：${dispute.finalResult}` : "等待最终处理结果。",
+        state: dispute.status === "resolved" ? "done" : "pending",
+        createdAt: dispute.resolvedAt
+      }
+    ]
+  };
+}
+
+function displayUserName(user) {
+  return user?.displayName ?? user?.username ?? "邻帮用户";
 }
 
 function compareNotifications(left, right) {

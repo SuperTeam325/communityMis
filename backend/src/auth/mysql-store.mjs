@@ -46,6 +46,12 @@ export function createMysqlAuthStore(options = {}) {
     createReview,
     listReviewsForOrderId,
     listReviewsForTargetId,
+    createDispute,
+    findDisputeById,
+    findDisputeByOrderId,
+    listDisputesForUserId,
+    addDisputeEvidence,
+    listDisputeEvidence,
     createSession,
     findSession,
     revokeSession
@@ -1317,6 +1323,376 @@ SELECT JSON_OBJECT(
     return listReviews(`r.\`target_id\` = ${Number(userId)}`);
   }
 
+  async function createDispute(input) {
+    const orderId = Number(input.orderId);
+    const initiatorId = Number(input.initiatorId);
+    const type = normalizeDisputeType(input.type);
+    const reason = normalizeOptionalString(input.description) ?? normalizeOptionalString(input.reason) ?? "订单纠纷";
+    const evidence = Array.isArray(input.evidence) ? input.evidence.slice(0, 8) : [];
+    const sql = `
+START TRANSACTION;
+SET @order_id = ${orderId};
+SET @initiator_id = ${initiatorId};
+SET @order_found = 0;
+SET @authorized = 0;
+SET @status_allowed = 0;
+SET @duplicate = 0;
+SET @request_id = NULL;
+SET @payer_id = NULL;
+SET @provider_id = NULL;
+SET @respondent_id = NULL;
+SET @coin_amount = NULL;
+SELECT
+  @order_found := 1,
+  @request_id := so.\`request_id\`,
+  @payer_id := sr.\`publisher_id\`,
+  @provider_id := so.\`provider_id\`,
+  @coin_amount := so.\`coin_amount\`,
+  @authorized := IF(sr.\`publisher_id\` = @initiator_id OR so.\`provider_id\` = @initiator_id, 1, 0),
+  @status_allowed := IF(so.\`status\` IN ('accepted', 'payer_confirmed', 'both_confirmed', 'disputed'), 1, 0),
+  @respondent_id := IF(sr.\`publisher_id\` = @initiator_id, so.\`provider_id\`, sr.\`publisher_id\`)
+FROM \`service_order\` so
+JOIN \`service_request\` sr ON sr.\`request_id\` = so.\`request_id\`
+WHERE so.\`order_id\` = @order_id
+FOR UPDATE;
+SELECT @duplicate := COUNT(*)
+FROM \`dispute\` d
+WHERE d.\`order_id\` = @order_id
+  AND d.\`status\` <> 'cancelled'
+FOR UPDATE;
+INSERT INTO \`dispute\` (
+  \`order_id\`,
+  \`initiator_id\`,
+  \`respondent_id\`,
+  \`type\`,
+  \`reason\`,
+  \`status\`
+)
+SELECT
+  @order_id,
+  @initiator_id,
+  @respondent_id,
+  ${sqlString(type)},
+  ${sqlString(reason)},
+  'pending'
+WHERE @order_found = 1
+  AND @authorized = 1
+  AND @status_allowed = 1
+  AND @duplicate = 0;
+SET @created_dispute_id = IF(ROW_COUNT() = 1, LAST_INSERT_ID(), NULL);
+UPDATE \`service_order\`
+SET \`status\` = 'disputed', \`updated_at\` = CURRENT_TIMESTAMP
+WHERE \`order_id\` = @order_id
+  AND @created_dispute_id IS NOT NULL
+LIMIT 1;
+INSERT INTO \`notification\` (
+  \`user_id\`,
+  \`type\`,
+  \`title\`,
+  \`content\`,
+  \`business_type\`,
+  \`business_id\`
+)
+SELECT
+  @respondent_id,
+  'dispute',
+  '订单进入纠纷处理',
+  CONCAT('订单 #', @order_id, ' 已进入纠纷处理，请补充证据或等待处理。'),
+  'dispute',
+  @created_dispute_id
+WHERE @created_dispute_id IS NOT NULL;
+SET @transaction_sql = IF(@created_dispute_id IS NOT NULL, 'COMMIT', 'ROLLBACK');
+PREPARE transaction_statement FROM @transaction_sql;
+EXECUTE transaction_statement;
+DEALLOCATE PREPARE transaction_statement;
+SELECT JSON_OBJECT(
+  'orderFound', @order_found,
+  'authorized', @authorized,
+  'statusAllowed', @status_allowed,
+  'duplicate', @duplicate,
+  'disputeId', @created_dispute_id,
+  'payerId', @payer_id,
+  'coinAmount', CAST(@coin_amount AS DOUBLE)
+);
+`;
+    let result;
+    try {
+      result = await mysqlJson(sql);
+    } catch (error) {
+      if (error.code === "DUPLICATE_ENTRY") {
+        throw storeError("DISPUTE_ALREADY_EXISTS", "This order already has a dispute.");
+      }
+      throw error;
+    }
+    if (Number(result?.orderFound ?? 0) !== 1) {
+      throw storeError("ORDER_NOT_FOUND", "Service order was not found.");
+    }
+    if (Number(result?.authorized ?? 0) !== 1) {
+      throw storeError("DISPUTE_FORBIDDEN", "Only order participants can create a dispute.");
+    }
+    if (Number(result?.statusAllowed ?? 0) !== 1) {
+      throw storeError("DISPUTE_ORDER_STATUS_INVALID", "This order status cannot enter dispute.");
+    }
+    if (Number(result?.duplicate ?? 0) > 0 || !result?.disputeId) {
+      throw storeError("DISPUTE_ALREADY_EXISTS", "This order already has a dispute.");
+    }
+
+    for (const item of evidence) {
+      await addDisputeEvidence({
+        ...item,
+        disputeId: result.disputeId,
+        uploaderId: initiatorId
+      });
+    }
+    await createWalletFreeze({
+      userId: result.payerId,
+      orderId,
+      disputeId: result.disputeId,
+      reasonType: "dispute",
+      status: "dispute",
+      amount: result.coinAmount,
+      reason: "纠纷处理中，相关时间币保持冻结",
+      releaseCondition: "管理员终审后按裁决释放或退回"
+    });
+    return findDisputeById(result.disputeId);
+  }
+
+  async function findDisputeById(disputeId) {
+    const disputes = await listDisputes(`d.\`dispute_id\` = ${Number(disputeId)}`);
+    return disputes[0] ?? null;
+  }
+
+  async function findDisputeByOrderId(orderId) {
+    const disputes = await listDisputes(`d.\`order_id\` = ${Number(orderId)}`);
+    return disputes[0] ?? null;
+  }
+
+  async function listDisputesForUserId(userId, query = {}) {
+    const id = Number(userId);
+    const conditions = [`(d.\`initiator_id\` = ${id} OR d.\`respondent_id\` = ${id})`];
+    const status = String(query.status ?? "all").trim().toLowerCase();
+    const role = String(query.role ?? "all").trim().toLowerCase();
+    if (status !== "all") {
+      conditions.push(`d.\`status\` = ${sqlString(status)}`);
+    }
+    if (role === "initiator") {
+      conditions.push(`d.\`initiator_id\` = ${id}`);
+    } else if (role === "respondent") {
+      conditions.push(`d.\`respondent_id\` = ${id}`);
+    }
+    const disputes = await listDisputes(conditions.join(" AND "));
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(50, positiveInteger(query.pageSize, 20));
+    const offset = (page - 1) * pageSize;
+    return {
+      disputes: disputes.slice(offset, offset + pageSize),
+      total: disputes.length
+    };
+  }
+
+  async function addDisputeEvidence(input) {
+    const disputeId = Number(input.disputeId);
+    const uploaderId = Number(input.uploaderId);
+    const dispute = await findDisputeById(disputeId);
+    if (!dispute) {
+      throw storeError("DISPUTE_NOT_FOUND", "Dispute was not found.");
+    }
+    if (dispute.initiatorId !== uploaderId && dispute.respondentId !== uploaderId) {
+      throw storeError("DISPUTE_FORBIDDEN", "Only dispute participants can add evidence.");
+    }
+    if (["resolved", "cancelled"].includes(dispute.status)) {
+      throw storeError("DISPUTE_CLOSED", "Closed disputes do not accept new evidence.");
+    }
+    const evidenceType = normalizeEvidenceType(input.evidenceType ?? input.evidence_type);
+    const content = normalizeOptionalString(input.content) ?? "";
+    const attachment = Array.isArray(input.attachments) && input.attachments.length > 0 ? input.attachments[0] : null;
+    const fileUrl = normalizeOptionalString(attachment?.url);
+    const sql = `
+INSERT INTO \`dispute_evidence\` (
+  \`dispute_id\`,
+  \`uploader_id\`,
+  \`evidence_type\`,
+  \`content\`,
+  \`file_url\`
+)
+VALUES (
+  ${disputeId},
+  ${uploaderId},
+  ${sqlString(evidenceType)},
+  ${sqlNullableString(content)},
+  ${sqlNullableString(fileUrl)}
+);
+SET @created_evidence_id = LAST_INSERT_ID();
+UPDATE \`dispute\`
+SET \`updated_at\` = CURRENT_TIMESTAMP
+WHERE \`dispute_id\` = ${disputeId}
+LIMIT 1;
+INSERT INTO \`notification\` (
+  \`user_id\`,
+  \`type\`,
+  \`title\`,
+  \`content\`,
+  \`business_type\`,
+  \`business_id\`
+)
+VALUES (
+  ${dispute.initiatorId === uploaderId ? dispute.respondentId : dispute.initiatorId},
+  'dispute',
+  '纠纷证据已更新',
+  CONCAT('纠纷 #', ${disputeId}, ' 已补充证据。'),
+  'dispute',
+  ${disputeId}
+);
+SELECT JSON_OBJECT('evidenceId', @created_evidence_id);
+`;
+    const result = await mysqlJson(sql);
+    const evidence = (await listDisputeEvidence(disputeId)).find((item) => item.evidenceId === Number(result.evidenceId));
+    return evidence ?? null;
+  }
+
+  async function listDisputeEvidence(disputeId) {
+    const sql = `
+SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
+  'evidenceId', q.\`evidence_id\`,
+  'disputeId', q.\`dispute_id\`,
+  'uploaderId', q.\`uploader_id\`,
+  'evidenceType', q.\`evidence_type\`,
+  'content', q.\`content\`,
+  'fileUrl', q.\`file_url\`,
+  'createdAt', q.\`created_at\`,
+  'uploader', JSON_OBJECT(
+    'userId', q.\`uploader_id\`,
+    'username', q.\`uploader_username\`,
+    'displayName', q.\`uploader_username\`
+  )
+)), JSON_ARRAY())
+FROM (
+  SELECT
+    de.\`evidence_id\`,
+    de.\`dispute_id\`,
+    de.\`uploader_id\`,
+    de.\`evidence_type\`,
+    de.\`content\`,
+    de.\`file_url\`,
+    DATE_FORMAT(de.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    u.\`username\` AS \`uploader_username\`
+  FROM \`dispute_evidence\` de
+  JOIN \`user\` u ON u.\`user_id\` = de.\`uploader_id\`
+  WHERE de.\`dispute_id\` = ${Number(disputeId)}
+  ORDER BY de.\`created_at\` ASC, de.\`evidence_id\` ASC
+) q;
+`;
+    const rows = await mysqlJson(sql, { optional: true });
+    return Array.isArray(rows) ? rows.map(normalizeDisputeEvidence) : [];
+  }
+
+  async function listDisputes(whereSql) {
+    const sql = `
+SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
+  'disputeId', q.\`dispute_id\`,
+  'orderId', q.\`order_id\`,
+  'initiatorId', q.\`initiator_id\`,
+  'respondentId', q.\`respondent_id\`,
+  'type', q.\`type\`,
+  'reason', q.\`reason\`,
+  'description', q.\`reason\`,
+  'status', q.\`status\`,
+  'finalResult', q.\`final_result\`,
+  'refundAmount', q.\`refund_amount\`,
+  'createdAt', q.\`created_at\`,
+  'updatedAt', q.\`updated_at\`,
+  'resolvedAt', q.\`resolved_at\`,
+  'order', JSON_OBJECT(
+    'orderId', q.\`order_id\`,
+    'requestId', q.\`request_id\`,
+    'providerId', q.\`provider_id\`,
+    'status', q.\`order_status\`,
+    'payerConfirmed', q.\`payer_confirmed\`,
+    'providerConfirmed', q.\`provider_confirmed\`,
+    'coinAmount', q.\`coin_amount\`,
+    'createdAt', q.\`order_created_at\`,
+    'updatedAt', q.\`order_updated_at\`,
+    'completedAt', q.\`completed_at\`
+  ),
+  'request', JSON_OBJECT(
+    'requestId', q.\`request_id\`,
+    'publisherId', q.\`publisher_id\`,
+    'categoryId', q.\`category_id\`,
+    'title', q.\`title\`,
+    'description', q.\`request_description\`,
+    'location', q.\`location\`,
+    'estimatedHours', q.\`estimated_hours\`,
+    'coinAmount', q.\`request_coin_amount\`,
+    'status', q.\`request_status\`,
+    'tags', JSON_ARRAY(),
+    'visible', TRUE,
+    'createdAt', q.\`request_created_at\`,
+    'updatedAt', q.\`request_updated_at\`
+  ),
+  'initiator', JSON_OBJECT('userId', q.\`initiator_id\`, 'username', q.\`initiator_username\`, 'displayName', q.\`initiator_username\`),
+  'respondent', JSON_OBJECT('userId', q.\`respondent_id\`, 'username', q.\`respondent_username\`, 'displayName', q.\`respondent_username\`),
+  'publisher', JSON_OBJECT('userId', q.\`publisher_id\`, 'username', q.\`publisher_username\`, 'displayName', q.\`publisher_username\`),
+  'provider', JSON_OBJECT('userId', q.\`provider_id\`, 'username', q.\`provider_username\`, 'displayName', q.\`provider_username\`)
+)), JSON_ARRAY())
+FROM (
+  SELECT
+    d.\`dispute_id\`,
+    d.\`order_id\`,
+    d.\`initiator_id\`,
+    d.\`respondent_id\`,
+    d.\`type\`,
+    d.\`reason\`,
+    d.\`status\`,
+    d.\`final_result\`,
+    CAST(d.\`refund_amount\` AS DOUBLE) AS \`refund_amount\`,
+    DATE_FORMAT(d.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    DATE_FORMAT(d.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`updated_at\`,
+    IF(d.\`resolved_at\` IS NULL, NULL, DATE_FORMAT(d.\`resolved_at\`, '%Y-%m-%dT%H:%i:%s.000Z')) AS \`resolved_at\`,
+    so.\`request_id\`,
+    so.\`provider_id\`,
+    so.\`status\` AS \`order_status\`,
+    so.\`payer_confirmed\`,
+    so.\`provider_confirmed\`,
+    CAST(so.\`coin_amount\` AS DOUBLE) AS \`coin_amount\`,
+    DATE_FORMAT(so.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`order_created_at\`,
+    DATE_FORMAT(so.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`order_updated_at\`,
+    IF(so.\`completed_at\` IS NULL, NULL, DATE_FORMAT(so.\`completed_at\`, '%Y-%m-%dT%H:%i:%s.000Z')) AS \`completed_at\`,
+    sr.\`publisher_id\`,
+    sr.\`category_id\`,
+    sr.\`title\`,
+    sr.\`description\` AS \`request_description\`,
+    sr.\`location\`,
+    CAST(sr.\`estimated_hours\` AS DOUBLE) AS \`estimated_hours\`,
+    CAST(sr.\`coin_amount\` AS DOUBLE) AS \`request_coin_amount\`,
+    sr.\`status\` AS \`request_status\`,
+    DATE_FORMAT(sr.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`request_created_at\`,
+    DATE_FORMAT(sr.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`request_updated_at\`,
+    initiator.\`username\` AS \`initiator_username\`,
+    respondent.\`username\` AS \`respondent_username\`,
+    publisher.\`username\` AS \`publisher_username\`,
+    provider.\`username\` AS \`provider_username\`
+  FROM \`dispute\` d
+  JOIN \`service_order\` so ON so.\`order_id\` = d.\`order_id\`
+  JOIN \`service_request\` sr ON sr.\`request_id\` = so.\`request_id\`
+  JOIN \`user\` initiator ON initiator.\`user_id\` = d.\`initiator_id\`
+  JOIN \`user\` respondent ON respondent.\`user_id\` = d.\`respondent_id\`
+  JOIN \`user\` publisher ON publisher.\`user_id\` = sr.\`publisher_id\`
+  JOIN \`user\` provider ON provider.\`user_id\` = so.\`provider_id\`
+  WHERE ${whereSql}
+  ORDER BY d.\`created_at\` DESC, d.\`dispute_id\` DESC
+) q;
+`;
+    const rows = await mysqlJson(sql, { optional: true });
+    const disputes = Array.isArray(rows) ? rows.map(normalizeDispute) : [];
+    for (const dispute of disputes) {
+      dispute.evidence = await listDisputeEvidence(dispute.disputeId);
+      const freezes = await listWalletFreezes({ userId: dispute.request?.publisherId ?? dispute.publisher?.userId, reasonType: "dispute", page: 1, pageSize: 50 });
+      dispute.freeze = freezes.freezes.find((item) => item.disputeId === dispute.disputeId) ?? null;
+      dispute.progress = disputeProgress(dispute, dispute.evidence);
+    }
+    return disputes;
+  }
+
   async function listReviews(whereSql) {
     const sql = `
 SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
@@ -1712,6 +2088,68 @@ function normalizeWalletFreeze(input) {
   };
 }
 
+function normalizeDispute(input) {
+  const dispute = {
+    disputeId: Number(input.disputeId ?? input.dispute_id),
+    orderId: Number(input.orderId ?? input.order_id),
+    initiatorId: Number(input.initiatorId ?? input.initiator_id),
+    respondentId: Number(input.respondentId ?? input.respondent_id),
+    type: normalizeDisputeType(input.type),
+    reason: normalizeOptionalString(input.reason) ?? "订单纠纷",
+    description: normalizeOptionalString(input.description) ?? normalizeOptionalString(input.reason) ?? "纠纷说明待补充",
+    status: normalizeOptionalString(input.status) ?? "pending",
+    finalResult: normalizeOptionalString(input.finalResult ?? input.final_result),
+    refundAmount: input.refundAmount === undefined || input.refundAmount === null ? null : Number(input.refundAmount),
+    createdAt: input.createdAt ?? input.created_at ?? null,
+    updatedAt: input.updatedAt ?? input.updated_at ?? input.createdAt ?? input.created_at ?? null,
+    resolvedAt: input.resolvedAt ?? input.resolved_at ?? null,
+    order: input.order ? normalizeServiceOrder(input.order) : null,
+    request: input.request ? normalizeServiceRequest(input.request) : null,
+    initiator: normalizeDisputeUser(input.initiator),
+    respondent: normalizeDisputeUser(input.respondent),
+    publisher: normalizeDisputeUser(input.publisher),
+    provider: normalizeDisputeUser(input.provider),
+    evidence: Array.isArray(input.evidence) ? input.evidence.map(normalizeDisputeEvidence) : [],
+    freeze: input.freeze ? normalizeWalletFreeze(input.freeze) : null,
+    progress: input.progress ?? null
+  };
+  return {
+    ...dispute,
+    progress: dispute.progress ?? disputeProgress(dispute, dispute.evidence)
+  };
+}
+
+function normalizeDisputeEvidence(input) {
+  const fileUrl = normalizeOptionalString(input.fileUrl ?? input.file_url);
+  const attachmentName = fileUrl ? fileUrl.split("/").filter(Boolean).at(-1) ?? "附件" : null;
+  return {
+    evidenceId: Number(input.evidenceId ?? input.evidence_id),
+    disputeId: Number(input.disputeId ?? input.dispute_id),
+    uploaderId: Number(input.uploaderId ?? input.uploader_id),
+    evidenceType: normalizeEvidenceType(input.evidenceType ?? input.evidence_type),
+    content: normalizeOptionalString(input.content) ?? "",
+    attachments: Array.isArray(input.attachments) ? input.attachments : (attachmentName ? [{
+      name: attachmentName,
+      type: "file",
+      size: 0,
+      url: fileUrl
+    }] : []),
+    uploader: normalizeDisputeUser(input.uploader),
+    createdAt: input.createdAt ?? input.created_at ?? null
+  };
+}
+
+function normalizeDisputeUser(input) {
+  if (!input) {
+    return null;
+  }
+  return {
+    userId: Number(input.userId ?? input.user_id),
+    username: String(input.username ?? ""),
+    displayName: normalizeOptionalString(input.displayName ?? input.display_name) ?? String(input.username ?? "")
+  };
+}
+
 function normalizeNotification(input) {
   if (!input) {
     return null;
@@ -1936,6 +2374,61 @@ function addTagCount(tagMap, rawTag, field) {
 function positiveInteger(raw, fallback) {
   const value = Number(raw);
   return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function normalizeDisputeType(value) {
+  const text = String(value ?? "").trim().toLowerCase();
+  const map = new Map([
+    ["quality", "quality_issue"],
+    ["quality_issue", "quality_issue"],
+    ["nofinish", "not_completed"],
+    ["not_completed", "not_completed"],
+    ["nopay", "communication"],
+    ["communication", "communication"],
+    ["other", "other"]
+  ]);
+  return map.get(text) ?? "other";
+}
+
+function normalizeEvidenceType(value) {
+  const text = String(value ?? "").trim().toLowerCase();
+  return ["text", "image", "file", "chat"].includes(text) ? text : "text";
+}
+
+function disputeProgress(dispute, evidence) {
+  return {
+    currentStatus: dispute.status,
+    steps: [
+      {
+        key: "created",
+        title: "纠纷已发起",
+        detail: "订单进入争议状态，双方可补充证据。",
+        state: "done",
+        createdAt: dispute.createdAt
+      },
+      {
+        key: "evidence",
+        title: "证据收集中",
+        detail: `已记录 ${Array.isArray(evidence) ? evidence.length : 0} 条证据。`,
+        state: ["pending", "evidence_collecting"].includes(dispute.status) ? "active" : "done",
+        createdAt: dispute.updatedAt
+      },
+      {
+        key: "admin_review",
+        title: "管理员处理",
+        detail: "管理员终审后按裁决释放或退回冻结时间币。",
+        state: dispute.status === "resolved" ? "done" : ["admin_review", "jury_voting"].includes(dispute.status) ? "active" : "pending",
+        createdAt: dispute.status === "admin_review" ? dispute.updatedAt : null
+      },
+      {
+        key: "resolved",
+        title: "处理完成",
+        detail: dispute.finalResult ? `最终结果：${dispute.finalResult}` : "等待最终处理结果。",
+        state: dispute.status === "resolved" ? "done" : "pending",
+        createdAt: dispute.resolvedAt
+      }
+    ]
+  };
 }
 
 function notificationHref(type, id) {

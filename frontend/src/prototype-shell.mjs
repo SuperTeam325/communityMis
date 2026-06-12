@@ -343,6 +343,14 @@ async function hydrateCurrentRoute(session) {
       await hydrateReviewRoute(session);
       return;
     }
+    if (route.id === "dispute-create") {
+      await hydrateDisputeCreateRoute(session);
+      return;
+    }
+    if (route.id === "dispute-detail") {
+      await hydrateDisputeDetailRoute(session);
+      return;
+    }
     if (route.id === "ai-results") {
       hydrateAiResultsRoute();
       return;
@@ -1324,8 +1332,14 @@ function orderCardHtml(order) {
 }
 
 function orderListActionHtml(order) {
+  if (order.disputeId) {
+    return `<div class="order-actions"><a class="btn btn--outline btn--sm" href="/disputes/${encodeURIComponent(order.disputeId)}">查看纠纷</a></div>`;
+  }
   if (order.canConfirm) {
     return `<div class="order-actions"><button class="btn btn--primary btn--sm" type="button" data-order-confirm="${escapeHtml(order.orderId)}">确认完成</button></div>`;
+  }
+  if (order.canDispute) {
+    return `<div class="order-actions"><a class="btn btn--outline btn--sm" href="/disputes/new?order=${encodeURIComponent(order.orderId)}">发起纠纷</a></div>`;
   }
   if (order.status === "both_confirmed") {
     return `<div class="order-actions"><span class="badge badge--success">待阶段 11 结算</span></div>`;
@@ -1459,7 +1473,7 @@ function applyOrderDetail(order, userSession) {
       <div class="ai-content">
         <p><strong>服务事项：</strong>${escapeHtml(request.description || request.descriptionSummary || "双方按需求详情完成服务。")}</p>
         <p style="margin-top:8px;"><strong>确认状态：</strong>${escapeHtml(orderConfirmText(order))}</p>
-        <p style="margin-top:8px;"><strong>结算入口：</strong>${escapeHtml(order.settlementReady ? "双方已确认，等待阶段 11 执行时间币结算。" : "需双方都确认完成后才进入结算。")}</p>
+        <p style="margin-top:8px;"><strong>处理状态：</strong>${escapeHtml(order.status === "disputed" ? "订单已进入纠纷处理，关联时间币保持冻结。" : order.settlementReady ? "双方已确认，等待阶段 11 执行时间币结算。" : "需双方都确认完成后才进入结算。")}</p>
       </div>
     </div>
   `;
@@ -1516,8 +1530,14 @@ function timelineStepHtml(state, title, description, time, hasLine) {
 }
 
 function orderDetailConfirmActionHtml(order) {
+  if (order.disputeId) {
+    return `<a class="btn btn--primary" href="/disputes/${encodeURIComponent(order.disputeId)}">查看纠纷</a>`;
+  }
   if (order.canConfirm) {
     return `<button class="btn btn--primary" id="confirm-order" type="button" data-order-confirm="${escapeHtml(order.orderId)}">确认完成</button>`;
+  }
+  if (order.canDispute) {
+    return `<a class="btn btn--outline" href="/disputes/new?order=${encodeURIComponent(order.orderId)}">发起纠纷</a>`;
   }
   if (order.canReview) {
     return `<a class="btn btn--primary" href="/reviews/new?order=${encodeURIComponent(order.orderId)}">去评价</a>`;
@@ -1551,6 +1571,306 @@ function orderConfirmText(order) {
   const payer = order.payerConfirmed ? "需求方已确认" : "需求方未确认";
   const provider = order.providerConfirmed ? "服务方已确认" : "服务方未确认";
   return `${payer} · ${provider}`;
+}
+
+async function hydrateDisputeCreateRoute(session) {
+  const userSession = session ?? auth.readSession("user");
+  const orderId = disputeCreateOrderId();
+  if (!userSession?.token) {
+    navigateTo(`/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+    return;
+  }
+  installDisputeCreateControls(userSession, orderId);
+  if (!orderId) {
+    renderDisputeCreateUnavailable("请先从订单详情或我的订单中选择要发起纠纷的订单。");
+    return;
+  }
+  try {
+    const payload = await api.orders.detail(userSession.token, orderId);
+    applyDisputeOrderRef(payload.order, userSession);
+  } catch (error) {
+    renderDisputeCreateUnavailable(orderErrorMessage(error));
+  }
+}
+
+function installDisputeCreateControls(userSession, orderId) {
+  const button = document.getElementById("submit-btn");
+  const textarea = document.getElementById("disp-desc");
+  if (!button || !textarea || button.dataset.disputeBound === "true") {
+    return;
+  }
+  button.dataset.disputeBound = "true";
+  button.addEventListener("click", interceptSubmit(async () => {
+    if (button.disabled) {
+      return;
+    }
+    if (!orderId) {
+      showInlineMessage(button, "缺少关联订单，无法发起纠纷。", "error");
+      return;
+    }
+    const selected = document.querySelector(".dispute-type-option.selected");
+    const payload = {
+      type: selected?.dataset.type || "other",
+      reason: selected?.querySelector(".dt-name")?.textContent.trim() || "订单纠纷",
+      description: textarea.value.trim(),
+      evidence: readDisputeEvidenceFiles()
+    };
+    const restore = setLoading(button, "提交中...");
+    try {
+      const result = await api.orders.dispute(userSession.token, orderId, payload);
+      renderDisputeCreateSuccess(result.dispute);
+    } catch (error) {
+      showInlineMessage(button, disputeErrorMessage(error), "error");
+    } finally {
+      restore();
+    }
+  }), true);
+}
+
+function applyDisputeOrderRef(order, userSession) {
+  const ref = document.querySelector(".order-ref");
+  if (!ref) {
+    return;
+  }
+  const counterparty = order.myRole === "posted" ? order.provider : order.publisher;
+  ref.innerHTML = `
+    <div class="ref-label">关联订单</div>
+    <div class="ref-id">#ORD-${escapeHtml(order.orderId)}</div>
+    <div class="ref-title">${escapeHtml(order.request?.title || "邻里互助订单")}</div>
+    <div class="ref-meta">对方：${escapeHtml(displayName(counterparty))} · 时间币 ⏂${escapeHtml(formatAmount(order.coinAmount))} · ${escapeHtml(formatDateTime(order.createdAt))}</div>
+  `;
+  if (order.disputeId) {
+    renderDisputeCreateUnavailable("这笔订单已经进入纠纷处理。", `/disputes/${encodeURIComponent(order.disputeId)}`);
+    return;
+  }
+  const button = document.getElementById("submit-btn");
+  if (!order.canDispute && button) {
+    button.disabled = true;
+    button.style.opacity = "0.4";
+    showInlineMessage(button, userSession?.user?.role === "user" && !order.myRole ? "只有订单相关的需求方和服务方可以发起纠纷。" : "当前订单状态不能发起纠纷。", "error");
+  }
+}
+
+function renderDisputeCreateUnavailable(message, href = "/orders") {
+  const body = document.querySelector(".disp-body");
+  if (!body) {
+    return;
+  }
+  body.innerHTML = `
+    <div class="success-card" data-state="blocked">
+      <h3>无法发起纠纷</h3>
+      <p>${escapeHtml(message)}</p>
+      <div style="margin-top:var(--space-xl);display:flex;gap:var(--space-md);justify-content:center;flex-wrap:wrap;">
+        <a class="btn btn--primary" href="${escapeHtml(href)}">${href.startsWith("/disputes/") ? "查看纠纷" : "返回订单"}</a>
+      </div>
+    </div>
+  `;
+}
+
+function readDisputeEvidenceFiles() {
+  return Array.from(document.querySelectorAll("#evidence-files .ev-file span:first-of-type"))
+    .map((item) => item.textContent.trim())
+    .filter(Boolean)
+    .slice(0, 8)
+    .map((name) => ({
+      evidenceType: "file",
+      content: "模拟附件证据",
+      attachments: [{ name, type: attachmentTypeFromName(name), size: 0 }]
+    }));
+}
+
+function renderDisputeCreateSuccess(dispute) {
+  const body = document.querySelector(".disp-body");
+  if (!body) {
+    return;
+  }
+  body.innerHTML = `
+    <div class="success-card">
+      ${checkIcon("56")}
+      <h3>纠纷申请已提交</h3>
+      <p>纠纷编号：DSP-${escapeHtml(dispute.disputeId)}</p>
+      <p style="font-size:13px;color:var(--muted);margin-top:var(--space-sm);">订单已进入争议状态，相关时间币保持冻结。请留意消息通知。</p>
+      <div style="margin-top:var(--space-xl);display:flex;gap:var(--space-md);justify-content:center;flex-wrap:wrap;">
+        <a class="btn btn--primary" href="/orders">返回订单</a>
+        <a class="btn btn--ghost" href="/disputes/${encodeURIComponent(dispute.disputeId)}">查看详情</a>
+      </div>
+    </div>
+  `;
+}
+
+async function hydrateDisputeDetailRoute(session) {
+  const userSession = session ?? auth.readSession("user");
+  const disputeId = routeDisputeId();
+  if (!disputeId || !userSession?.token) {
+    return;
+  }
+  renderDisputeDetailLoading();
+  try {
+    const payload = await api.disputes.detail(userSession.token, disputeId);
+    applyDisputeDetail(payload.dispute, userSession);
+  } catch (error) {
+    renderDisputeDetailError(disputeErrorMessage(error));
+  }
+}
+
+function renderDisputeDetailLoading() {
+  const body = document.querySelector(".dd-body");
+  if (body) {
+    body.innerHTML = `<div class="task-runtime-state"><strong>加载中</strong><p>正在读取纠纷详情。</p></div>`;
+  }
+}
+
+function renderDisputeDetailError(message) {
+  const body = document.querySelector(".dd-body");
+  if (body) {
+    body.innerHTML = `
+      <div class="task-runtime-state" data-state="error">
+        <strong>纠纷加载失败</strong>
+        <p>${escapeHtml(message)}</p>
+        <a class="btn btn--outline" href="/orders">返回我的订单</a>
+      </div>
+    `;
+  }
+}
+
+function applyDisputeDetail(dispute, userSession) {
+  const body = document.querySelector(".dd-body");
+  if (!body) {
+    return;
+  }
+  const request = dispute.request ?? {};
+  const order = dispute.order ?? {};
+  const publisher = dispute.publisher ?? {};
+  const provider = dispute.provider ?? {};
+  const initiatorId = Number(dispute.initiator?.userId);
+  body.innerHTML = `
+    <div class="status-banner in-progress">
+      <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <div class="sb-text">
+        <h4>${escapeHtml(disputeStatusTitle(dispute.status))}</h4>
+        <p>${escapeHtml(disputeStatusText(dispute.status))}</p>
+      </div>
+    </div>
+
+    <div class="dd-info">
+      <div class="dd-no">#DSP-${escapeHtml(dispute.disputeId)}</div>
+      <div class="dd-dispute-title">${escapeHtml(request.title || "邻里互助订单")} - ${escapeHtml(dispute.reason)}</div>
+      <div class="dd-meta-row">
+        <span>${escapeHtml(`订单 ORD-${dispute.orderId}`)}</span>
+        <span>${escapeHtml(formatDateTime(dispute.createdAt))}</span>
+        <span>⏂ ${escapeHtml(formatAmount(dispute.coinAmount ?? order.coinAmount))}</span>
+      </div>
+    </div>
+
+    <div class="evidence-grid">
+      ${disputePartyPanel("需求方", publisher, dispute, initiatorId === Number(publisher.userId))}
+      ${disputePartyPanel("服务方", provider, dispute, initiatorId === Number(provider.userId))}
+    </div>
+
+    <div class="dd-timeline">
+      <h3>纠纷时间线</h3>
+      ${disputeProgressHtml(dispute.progress)}
+    </div>
+
+    <div class="my-vote-section">
+      <h4>补充证据</h4>
+      <div class="vote-extra" style="display:block;">
+        <textarea id="new-evidence-content" placeholder="补充事实说明或对现有证据的回应..."></textarea>
+      </div>
+      <button class="btn btn--primary btn--lg" id="submit-evidence-btn" style="margin-top:var(--space-lg);">提交证据</button>
+    </div>
+
+    <div class="ai-summary-card">
+      <div class="ai-header">
+        <span style="font-weight:600;font-size:15px;">纠纷处理摘要</span>
+        <span class="ai-badge">阶段 15</span>
+      </div>
+      <div class="ai-content">
+        <strong>双方主张</strong>
+        <p>${escapeHtml(dispute.description || "双方主张已记录，等待补充证据。")}</p>
+        <strong>时间币冻结</strong>
+        <p>${escapeHtml(dispute.freeze ? `已冻结 ⏂${formatAmount(dispute.freeze.amount)}，${dispute.freeze.releaseCondition}` : "当前没有关联冻结记录。")}</p>
+      </div>
+      <div class="ai-disclaimer">AI 摘要入口保留为后续阶段；当前展示的是已记录的纠纷材料。</div>
+    </div>
+  `;
+  installEvidenceSubmit(dispute, userSession);
+}
+
+function disputePartyPanel(role, user, dispute, isInitiator) {
+  const evidence = (dispute.evidence ?? []).filter((item) => Number(item.uploaderId) === Number(user.userId));
+  return `
+    <div class="ev-panel" style="border-left: 3px solid ${isInitiator ? "var(--danger)" : "var(--accent)"};">
+      <div class="ev-panel-header">
+        <div class="avatar sm" style="background:${escapeHtml(avatarColor(user.userId))};display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700;">${escapeHtml(firstCharacter(displayName(user)))}</div>
+        <div>
+          <div style="font-weight:600;font-size:14px;">${escapeHtml(displayName(user))}（${escapeHtml(role)}）</div>
+          <div class="ev-party-role" style="color:${isInitiator ? "var(--danger)" : "var(--accent)"};">${isInitiator ? "纠纷发起方" : "被投诉方"}</div>
+        </div>
+      </div>
+      <div class="ev-panel-body">
+        <div class="ev-claim"><strong>${isInitiator ? "主张" : "回应"}：</strong>${escapeHtml(isInitiator ? dispute.description : evidence[0]?.content || "等待对方补充回应与证据。")}</div>
+        <div class="ev-files">
+          ${evidence.length === 0 ? '<div class="ev-file-item"><span>暂无证据</span></div>' : evidence.map(disputeEvidenceHtml).join("")}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function disputeEvidenceHtml(item) {
+  const attachments = Array.isArray(item.attachments) && item.attachments.length > 0 ? item.attachments : [{ name: item.content || "文字说明" }];
+  return attachments.map((attachment) => `
+    <div class="ev-file-item" title="${escapeHtml(item.content || "")}">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="9 3 9 21"/></svg>
+      <span>${escapeHtml(attachment.name)}</span>
+    </div>
+  `).join("");
+}
+
+function disputeProgressHtml(progress) {
+  const steps = Array.isArray(progress?.steps) ? progress.steps : [];
+  return steps.map((step, index) => `
+    <div class="dtl-step ${escapeHtml(step.state === "pending" ? "event" : step.state)}">
+      <div class="dtl-node-wrap">
+        <div class="dtl-node">${step.state === "done" ? "✓" : step.state === "active" ? "!" : "·"}</div>
+        ${index < steps.length - 1 ? '<div class="dtl-line"></div>' : ""}
+      </div>
+      <div class="dtl-content">
+        <div class="dtl-title">${escapeHtml(step.title)}</div>
+        <div class="dtl-desc">${escapeHtml(step.detail)}</div>
+        <div class="dtl-time">${escapeHtml(step.createdAt ? formatDateTime(step.createdAt) : "待处理")}</div>
+      </div>
+    </div>
+  `).join("");
+}
+
+function installEvidenceSubmit(dispute, userSession) {
+  const button = document.getElementById("submit-evidence-btn");
+  const textarea = document.getElementById("new-evidence-content");
+  if (!button || !textarea) {
+    return;
+  }
+  button.addEventListener("click", interceptSubmit(async () => {
+    const content = textarea.value.trim();
+    if (content.length < 5) {
+      showInlineMessage(button, "请填写至少 5 个字的证据说明。", "error");
+      return;
+    }
+    const restore = setLoading(button, "提交中...");
+    try {
+      const result = await api.disputes.evidence(userSession.token, dispute.disputeId, {
+        evidenceType: "text",
+        content
+      });
+      applyDisputeDetail(result.dispute, userSession);
+      showGlobalMessage("证据已提交。", "success");
+    } catch (error) {
+      showInlineMessage(button, disputeErrorMessage(error), "error");
+    } finally {
+      restore();
+    }
+  }), true);
 }
 
 async function hydrateReviewRoute(session) {
@@ -3183,6 +3503,18 @@ function routeOrderId() {
   return raw && /^\d+$/.test(raw) ? raw : null;
 }
 
+function disputeCreateOrderId() {
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get("order") || params.get("orderId") || params.get("order_id");
+  return raw && /^\d+$/.test(raw) ? raw : null;
+}
+
+function routeDisputeId() {
+  const match = window.location.pathname.match(/^\/disputes\/([^/]+)$/);
+  const raw = match?.[1];
+  return raw && /^\d+$/.test(raw) ? raw : null;
+}
+
 function reviewOrderId() {
   const params = new URLSearchParams(window.location.search);
   const raw = params.get("order") || params.get("orderId") || params.get("order_id");
@@ -3303,6 +3635,35 @@ function reviewErrorMessage(error) {
   return error?.message || "评价提交失败，请稍后重试。";
 }
 
+function disputeErrorMessage(error) {
+  const code = error?.payload?.error?.code;
+  if (code === "ORDER_NOT_FOUND" || code === "DISPUTE_NOT_FOUND") {
+    return "这笔纠纷或关联订单不存在，或你没有查看权限。";
+  }
+  if (code === "DISPUTE_FORBIDDEN" || code === "ORDER_FORBIDDEN") {
+    return "只有订单相关的需求方和服务方可以操作纠纷。";
+  }
+  if (code === "DISPUTE_ORDER_STATUS_INVALID") {
+    return "当前订单状态不能发起纠纷。";
+  }
+  if (code === "DISPUTE_ALREADY_EXISTS") {
+    return "这笔订单已经发起过纠纷。";
+  }
+  if (code === "DISPUTE_CLOSED") {
+    return "已关闭的纠纷不能继续补充证据。";
+  }
+  if (code?.startsWith("INVALID_DISPUTE_") || code?.startsWith("INVALID_EVIDENCE_")) {
+    return "请检查纠纷类型、描述和证据内容。";
+  }
+  if (code === "WALLET_NOT_FOUND") {
+    return "需求方钱包不存在，无法记录纠纷冻结。";
+  }
+  if (error?.status === 0 || error instanceof TypeError) {
+    return "无法连接纠纷服务，请确认后端服务已启动。";
+  }
+  return error?.message || "纠纷操作失败，请稍后重试。";
+}
+
 function publishErrorMessage(error, context = "") {
   const code = error?.payload?.error?.code;
   if (context === "catalog") {
@@ -3369,6 +3730,41 @@ function formatDateTime(value) {
     hour: "2-digit",
     minute: "2-digit"
   }).format(date);
+}
+
+function disputeStatusTitle(status) {
+  const map = new Map([
+    ["pending", "纠纷处理中 - 证据收集中"],
+    ["evidence_collecting", "纠纷处理中 - 证据收集中"],
+    ["jury_voting", "纠纷处理中 - 等待陪审"],
+    ["admin_review", "纠纷处理中 - 等待管理员终审"],
+    ["resolved", "纠纷已处理完成"],
+    ["cancelled", "纠纷已取消"]
+  ]);
+  return map.get(status) ?? "纠纷处理中";
+}
+
+function disputeStatusText(status) {
+  const map = new Map([
+    ["pending", "双方可以继续补充主张和证据，管理员会根据材料推进处理。"],
+    ["evidence_collecting", "双方可以继续补充主张和证据，管理员会根据材料推进处理。"],
+    ["jury_voting", "纠纷已进入陪审处理阶段，请等待投票结果。"],
+    ["admin_review", "管理员正在审核双方证据和处理进度，将在终审后作出裁决。"],
+    ["resolved", "纠纷已完成处理，冻结时间币会按处理结果释放或退回。"],
+    ["cancelled", "纠纷已取消，订单将按后续规则继续处理。"]
+  ]);
+  return map.get(status) ?? "纠纷已记录，等待处理。";
+}
+
+function attachmentTypeFromName(name) {
+  const lower = String(name).toLowerCase();
+  if (lower.endsWith(".png")) {
+    return "image/png";
+  }
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+    return "image/jpeg";
+  }
+  return "file";
 }
 
 function avatarColor(seed) {
