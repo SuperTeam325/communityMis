@@ -262,6 +262,22 @@ export function createApiClient(options = {}) {
         body: payload
       }),
       stats: (token) => request("/api/admin/stats", { token }),
+      aiCallLogs: (token, params = {}) => request(withQuery("/api/admin/ai/call-logs", params), { token }),
+      aiConversations: (token, params = {}) => request(withQuery("/api/admin/ai/conversations", params), { token }),
+      aiConversation: (token, conversationId) => request(`/api/admin/ai/conversations/${encodeURIComponent(conversationId)}`, { token }),
+      aiFeedback: (token, params = {}) => request(withQuery("/api/admin/ai/feedback", params), { token }),
+      resolveAiFeedback: (token, feedbackId, payload) => request(`/api/admin/ai/feedback/${encodeURIComponent(feedbackId)}/resolve`, {
+        method: "POST",
+        token,
+        body: payload
+      }),
+      aiErrors: (token, params = {}) => request(withQuery("/api/admin/ai/errors", params), { token }),
+      aiConfig: (token) => request("/api/admin/ai/config", { token }),
+      updateAiConfig: (token, payload) => request("/api/admin/ai/config", {
+        method: "PUT",
+        token,
+        body: payload
+      }),
       auditLogs: (token, params = {}) => request(withQuery("/api/admin/audit-logs", params), { token }),
       system: (token) => request("/api/admin/system", { token }),
       updateSystem: (token, payload) => request("/api/admin/system", {

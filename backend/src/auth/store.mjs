@@ -30,6 +30,7 @@ export function createMemoryAuthStore(options = {}) {
   const aiMessages = new Map();
   const aiCallLogs = new Map();
   const aiFeedback = new Map();
+  let aiConfig = normalizeAiConfig(options.seedAiConfig ?? options.aiConfig);
   let systemSettings = normalizeSystemSettings(options.seedSystemSettings ?? options.systemSettings);
   let nextUserId = options.nextUserId ?? 10000;
   let nextWalletId = options.nextWalletId ?? 20000;
@@ -178,11 +179,18 @@ export function createMemoryAuthStore(options = {}) {
     createAiConversation,
     findAiConversationById,
     listAiConversationsForUserId,
+    listAdminAiConversations,
     createAiMessage,
     findAiMessageById,
     listAiMessagesForConversationId,
     createAiCallLog,
+    listAdminAiCallLogs,
+    listAdminAiErrors,
     createAiFeedback,
+    listAdminAiFeedback,
+    resolveAiFeedback,
+    getAiConfig,
+    updateAiConfig,
     createSession,
     findSession,
     revokeSession
@@ -1729,7 +1737,17 @@ export function createMemoryAuthStore(options = {}) {
   function listAuditLogs(query = {}) {
     const page = positiveInteger(query.page, 1);
     const pageSize = positiveInteger(query.pageSize, 20);
+    const actorId = query.actorId === undefined || query.actorId === null ? null : Number(query.actorId);
+    const targetId = query.targetId === undefined || query.targetId === null ? null : Number(query.targetId);
+    const action = normalizeOptionalString(query.action);
+    const targetType = normalizeOptionalString(query.targetType ?? query.target_type);
+    const keyword = normalizeOptionalString(query.keyword)?.toLowerCase() ?? null;
     const filtered = Array.from(auditLogs.values())
+      .filter((item) => actorId === null || Number(item.actorId) === actorId)
+      .filter((item) => targetId === null || Number(item.targetId) === targetId)
+      .filter((item) => !action || item.action === action)
+      .filter((item) => !targetType || item.targetType === targetType)
+      .filter((item) => !keyword || auditLogHaystack(item).includes(keyword))
       .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime() || right.auditId - left.auditId);
     const offset = (page - 1) * pageSize;
     return {
@@ -1764,6 +1782,24 @@ export function createMemoryAuthStore(options = {}) {
     return {
       conversations: filtered.slice(offset, offset + pageSize).map(withAiConversationStats).map(clone),
       total: filtered.length,
+      page,
+      pageSize
+    };
+  }
+
+  function listAdminAiConversations(query = {}) {
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(100, positiveInteger(query.pageSize, 20));
+    const filters = normalizeAdminAiQuery(query);
+    const filtered = Array.from(aiConversations.values())
+      .map(enrichAiConversationForAdmin)
+      .filter((item) => aiConversationMatches(item, filters))
+      .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime() || right.conversationId - left.conversationId);
+    const offset = (page - 1) * pageSize;
+    return {
+      conversations: filtered.slice(offset, offset + pageSize).map(clone),
+      total: filtered.length,
+      summary: aiConversationSummary(filtered),
       page,
       pageSize
     };
@@ -1807,6 +1843,45 @@ export function createMemoryAuthStore(options = {}) {
     return clone(callLog);
   }
 
+  function listAdminAiCallLogs(query = {}) {
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(100, positiveInteger(query.pageSize, 20));
+    const filters = normalizeAdminAiQuery(query);
+    const filtered = Array.from(aiCallLogs.values())
+      .map(enrichAiCallLogForAdmin)
+      .filter((item) => aiCallLogMatches(item, filters))
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime() || right.callId - left.callId);
+    const offset = (page - 1) * pageSize;
+    return {
+      callLogs: filtered.slice(offset, offset + pageSize).map(clone),
+      total: filtered.length,
+      summary: aiCallLogSummary(filtered),
+      page,
+      pageSize
+    };
+  }
+
+  function listAdminAiErrors(query = {}) {
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(100, positiveInteger(query.pageSize, 20));
+    const filters = normalizeAdminAiQuery(query);
+    const type = normalizeOptionalString(query.type ?? query.errorType) ?? "all";
+    const filtered = Array.from(aiCallLogs.values())
+      .map(enrichAiCallLogForAdmin)
+      .filter((item) => item.status !== "success" || item.exceptionType !== "none")
+      .filter((item) => type === "all" || item.exceptionType === type)
+      .filter((item) => aiCallLogMatches(item, filters))
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime() || right.callId - left.callId);
+    const offset = (page - 1) * pageSize;
+    return {
+      errors: filtered.slice(offset, offset + pageSize).map(clone),
+      total: filtered.length,
+      summary: aiErrorSummary(filtered),
+      page,
+      pageSize
+    };
+  }
+
   function createAiFeedback(input) {
     const message = aiMessages.get(Number(input.messageId));
     if (!message || message.senderType !== "ai") {
@@ -1829,6 +1904,49 @@ export function createMemoryAuthStore(options = {}) {
     aiFeedback.set(feedback.feedbackId, feedback);
     nextAiFeedbackId = Math.max(nextAiFeedbackId, feedback.feedbackId + 1);
     return clone(feedback);
+  }
+
+  function listAdminAiFeedback(query = {}) {
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(100, positiveInteger(query.pageSize, 20));
+    const filters = normalizeAdminAiQuery(query);
+    const rating = normalizeOptionalString(query.rating ?? query.type) ?? "all";
+    const resolved = normalizeFeedbackResolvedFilter(query.status ?? query.resolved);
+    const filtered = Array.from(aiFeedback.values())
+      .map(enrichAiFeedbackForAdmin)
+      .filter((item) => rating === "all" || item.rating === rating)
+      .filter((item) => resolved === "all" || (resolved === "resolved" ? item.resolved : !item.resolved))
+      .filter((item) => aiFeedbackMatches(item, filters))
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime() || right.feedbackId - left.feedbackId);
+    const offset = (page - 1) * pageSize;
+    return {
+      feedback: filtered.slice(offset, offset + pageSize).map(clone),
+      total: filtered.length,
+      summary: aiFeedbackSummary(filtered),
+      page,
+      pageSize
+    };
+  }
+
+  function resolveAiFeedback(feedbackId, input = {}) {
+    const feedback = aiFeedback.get(Number(feedbackId));
+    if (!feedback) {
+      throw storeError("AI_FEEDBACK_NOT_FOUND", "AI feedback was not found.");
+    }
+    feedback.status = "resolved";
+    feedback.resolution = normalizeOptionalString(input.resolution ?? input.note) ?? "已处理";
+    feedback.resolvedBy = input.actorId === undefined || input.actorId === null ? null : Number(input.actorId);
+    feedback.resolvedAt = input.resolvedAt ?? new Date().toISOString();
+    return clone(enrichAiFeedbackForAdmin(feedback));
+  }
+
+  function getAiConfig() {
+    return clone(aiConfig);
+  }
+
+  function updateAiConfig(input = {}) {
+    aiConfig = mergeAiConfig(aiConfig, input);
+    return clone(aiConfig);
   }
 
   function createSession(input) {
@@ -2388,6 +2506,51 @@ export function createMemoryAuthStore(options = {}) {
       ...conversation,
       preview: last?.content ? summarizeText(last.content) : "",
       messageCount: items.length
+    };
+  }
+
+  function enrichAiConversationForAdmin(conversation) {
+    const withStats = withAiConversationStats(conversation);
+    const user = conversation.userId === null ? null : users.get(conversation.userId);
+    const messages = listAiMessagesForConversationId(conversation.conversationId);
+    return {
+      ...withStats,
+      user: user ? clone(user) : null,
+      messages,
+      lastMessage: messages.at(-1) ?? null,
+      sensitiveHitCount: messages.filter((item) => item.sensitiveHit).length
+    };
+  }
+
+  function enrichAiCallLogForAdmin(log) {
+    const conversation = log.conversationId === null ? null : aiConversations.get(log.conversationId);
+    const user = log.userId === null ? null : users.get(log.userId);
+    const messages = conversation ? listAiMessagesForConversationId(conversation.conversationId) : [];
+    return {
+      ...log,
+      user: user ? clone(user) : null,
+      conversation: conversation ? clone(withAiConversationStats(conversation)) : null,
+      messages,
+      exceptionType: classifyAiException(log, messages),
+      riskLevel: aiExceptionRisk(classifyAiException(log, messages)),
+      reason: log.errorMessage ?? summarizeText(messages.at(-1)?.content)
+    };
+  }
+
+  function enrichAiFeedbackForAdmin(feedback) {
+    const message = aiMessages.get(feedback.messageId) ?? null;
+    const conversation = message ? aiConversations.get(message.conversationId) : null;
+    const user = users.get(feedback.userId) ?? null;
+    return {
+      ...feedback,
+      resolved: feedback.status === "resolved" || Boolean(feedback.resolvedAt),
+      status: feedback.status ?? (feedback.resolvedAt ? "resolved" : "pending"),
+      resolution: feedback.resolution ?? null,
+      resolvedBy: feedback.resolvedBy ?? null,
+      resolvedAt: feedback.resolvedAt ?? null,
+      user: user ? clone(user) : null,
+      message: message ? clone(message) : null,
+      conversation: conversation ? clone(withAiConversationStats(conversation)) : null
     };
   }
 
@@ -3316,6 +3479,10 @@ function normalizeAiFeedback(input) {
     userId: Number(input.userId ?? input.user_id),
     rating: normalizeAiFeedbackRating(input.rating),
     comment: normalizeOptionalString(input.comment),
+    status: normalizeAiFeedbackStatus(input.status),
+    resolution: normalizeOptionalString(input.resolution),
+    resolvedBy: input.resolvedBy === undefined || input.resolvedBy === null ? null : Number(input.resolvedBy ?? input.resolved_by),
+    resolvedAt: input.resolvedAt ?? input.resolved_at ?? null,
     createdAt: input.createdAt ?? input.created_at ?? now
   };
 }
@@ -3553,6 +3720,47 @@ function normalizeSystemSettings(input = {}) {
   return mergeSystemSettings(base, input);
 }
 
+function normalizeAiConfig(input = {}) {
+  const base = {
+    enabled: true,
+    rateLimitPerHour: 60,
+    contextMessages: 12,
+    contextTokenLimit: 4000,
+    logRetentionDays: 180,
+    safetyThreshold: 80,
+    blockHighRisk: true,
+    model: "local-rule-assistant",
+    updatedAt: "2026-06-01T09:00:00.000Z"
+  };
+  return mergeAiConfig(base, input);
+}
+
+function mergeAiConfig(current, patch = {}) {
+  const numberPatch = (keys, min, max, fallback) => {
+    const key = keys.find((item) => hasOwn(patch, item));
+    if (!key) {
+      return fallback;
+    }
+    const value = Number(patch[key]);
+    return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+  };
+  const booleanPatchValue = (keys, fallback) => {
+    const key = keys.find((item) => hasOwn(patch, item));
+    return key ? Boolean(patch[key]) : Boolean(fallback);
+  };
+  return {
+    enabled: booleanPatchValue(["enabled", "aiEnabled"], current.enabled),
+    rateLimitPerHour: numberPatch(["rateLimitPerHour", "frequencyLimit", "rate_limit_per_hour"], 1, 1000, Number(current.rateLimitPerHour ?? 60)),
+    contextMessages: numberPatch(["contextMessages", "contextLength", "context_messages"], 1, 100, Number(current.contextMessages ?? 12)),
+    contextTokenLimit: numberPatch(["contextTokenLimit", "contextTokens", "context_token_limit"], 500, 64000, Number(current.contextTokenLimit ?? 4000)),
+    logRetentionDays: numberPatch(["logRetentionDays", "retentionDays", "log_retention_days"], 1, 3650, Number(current.logRetentionDays ?? 180)),
+    safetyThreshold: numberPatch(["safetyThreshold", "securityThreshold", "safety_threshold"], 1, 100, Number(current.safetyThreshold ?? 80)),
+    blockHighRisk: booleanPatchValue(["blockHighRisk", "aiHighRiskBlock"], current.blockHighRisk),
+    model: normalizeOptionalString(patch.model) ?? current.model ?? "local-rule-assistant",
+    updatedAt: patch.updatedAt ?? new Date().toISOString()
+  };
+}
+
 function mergeSystemSettings(current, patch = {}) {
   const numberPatch = (key, min, max, fallback) => {
     if (!hasOwn(patch, key)) {
@@ -3745,6 +3953,248 @@ function normalizeAiCallStatus(value) {
 function normalizeAiFeedbackRating(value) {
   const text = String(value ?? "useful").trim().toLowerCase();
   return ["useful", "useless", "wrong", "unsafe"].includes(text) ? text : "useful";
+}
+
+function normalizeAiFeedbackStatus(value) {
+  const text = String(value ?? "pending").trim().toLowerCase();
+  return ["pending", "processing", "resolved"].includes(text) ? text : "pending";
+}
+
+function normalizeFeedbackResolvedFilter(value) {
+  const text = String(value ?? "all").trim().toLowerCase();
+  if (["resolved", "done", "closed", "已处理", "已复盘"].includes(text)) {
+    return "resolved";
+  }
+  if (["pending", "open", "todo", "待处理", "处理中"].includes(text)) {
+    return "pending";
+  }
+  return "all";
+}
+
+function normalizeAdminAiQuery(query = {}) {
+  return {
+    keyword: normalizeOptionalString(query.keyword ?? query.q)?.toLowerCase() ?? null,
+    userId: query.userId === undefined || query.userId === null || query.userId === "" ? null : Number(query.userId),
+    conversationId: query.conversationId === undefined || query.conversationId === null || query.conversationId === "" ? null : Number(query.conversationId),
+    scene: normalizeOptionalString(query.scene) ?? "all",
+    status: normalizeOptionalString(query.status) ?? "all",
+    minDurationMs: query.minDurationMs === undefined || query.minDurationMs === null || query.minDurationMs === "" ? null : Number(query.minDurationMs),
+    maxDurationMs: query.maxDurationMs === undefined || query.maxDurationMs === null || query.maxDurationMs === "" ? null : Number(query.maxDurationMs),
+    createdFrom: normalizeOptionalString(query.createdFrom ?? query.from),
+    createdTo: normalizeOptionalString(query.createdTo ?? query.to)
+  };
+}
+
+function aiConversationMatches(item, filters) {
+  if (filters.userId !== null && Number(item.userId) !== filters.userId) {
+    return false;
+  }
+  if (filters.conversationId !== null && Number(item.conversationId) !== filters.conversationId) {
+    return false;
+  }
+  if (filters.scene !== "all" && item.scene !== filters.scene) {
+    return false;
+  }
+  if (filters.status !== "all" && item.status !== filters.status) {
+    return false;
+  }
+  if (!withinDateRange(item.updatedAt ?? item.createdAt, filters)) {
+    return false;
+  }
+  return !filters.keyword || aiConversationHaystack(item).includes(filters.keyword);
+}
+
+function aiCallLogMatches(item, filters) {
+  if (filters.userId !== null && Number(item.userId) !== filters.userId) {
+    return false;
+  }
+  if (filters.conversationId !== null && Number(item.conversationId) !== filters.conversationId) {
+    return false;
+  }
+  if (filters.scene !== "all" && item.scene !== filters.scene) {
+    return false;
+  }
+  if (filters.status !== "all" && item.status !== filters.status) {
+    return false;
+  }
+  if (filters.minDurationMs !== null && Number(item.durationMs) < filters.minDurationMs) {
+    return false;
+  }
+  if (filters.maxDurationMs !== null && Number(item.durationMs) > filters.maxDurationMs) {
+    return false;
+  }
+  if (!withinDateRange(item.createdAt, filters)) {
+    return false;
+  }
+  return !filters.keyword || aiCallLogHaystack(item).includes(filters.keyword);
+}
+
+function aiFeedbackMatches(item, filters) {
+  if (filters.userId !== null && Number(item.userId) !== filters.userId) {
+    return false;
+  }
+  if (filters.conversationId !== null && Number(item.conversation?.conversationId) !== filters.conversationId) {
+    return false;
+  }
+  if (filters.scene !== "all" && item.conversation?.scene !== filters.scene) {
+    return false;
+  }
+  if (!withinDateRange(item.createdAt, filters)) {
+    return false;
+  }
+  return !filters.keyword || aiFeedbackHaystack(item).includes(filters.keyword);
+}
+
+function withinDateRange(value, filters) {
+  const time = new Date(value ?? 0).getTime();
+  if (filters.createdFrom) {
+    const from = new Date(filters.createdFrom).getTime();
+    if (!Number.isNaN(from) && time < from) {
+      return false;
+    }
+  }
+  if (filters.createdTo) {
+    const to = new Date(filters.createdTo).getTime();
+    if (!Number.isNaN(to) && time > to + 24 * 60 * 60 * 1000 - 1) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function aiConversationHaystack(item) {
+  return [
+    item.conversationId,
+    item.userId,
+    item.user?.username,
+    item.user?.displayName,
+    item.scene,
+    item.status,
+    item.preview,
+    ...(item.messages ?? []).map((message) => message.content)
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function aiCallLogHaystack(item) {
+  return [
+    item.callId,
+    item.conversationId,
+    item.userId,
+    item.user?.username,
+    item.user?.displayName,
+    item.scene,
+    item.status,
+    item.errorMessage,
+    item.exceptionType,
+    item.reason,
+    ...(item.messages ?? []).map((message) => message.content)
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function aiFeedbackHaystack(item) {
+  return [
+    item.feedbackId,
+    item.userId,
+    item.user?.username,
+    item.user?.displayName,
+    item.rating,
+    item.comment,
+    item.status,
+    item.resolution,
+    item.message?.content,
+    item.conversation?.scene
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function auditLogHaystack(item) {
+  return [
+    item.auditId,
+    item.actorId,
+    item.actorRole,
+    item.action,
+    item.targetType,
+    item.targetId,
+    item.ipAddress,
+    JSON.stringify(item.detail ?? {})
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function aiConversationSummary(items) {
+  const list = Array.isArray(items) ? items : [];
+  return {
+    total: list.length,
+    activeCount: list.filter((item) => item.status === "active").length,
+    reviewCount: list.filter((item) => item.status === "review").length,
+    sensitiveHitCount: list.reduce((sum, item) => sum + Number(item.sensitiveHitCount ?? 0), 0)
+  };
+}
+
+function aiCallLogSummary(items) {
+  const list = Array.isArray(items) ? items : [];
+  const success = list.filter((item) => item.status === "success").length;
+  const totalDuration = list.reduce((sum, item) => sum + Number(item.durationMs ?? 0), 0);
+  return {
+    total: list.length,
+    successCount: success,
+    failedCount: list.filter((item) => item.status === "failed").length,
+    blockedCount: list.filter((item) => item.status === "blocked").length,
+    avgDurationMs: list.length > 0 ? Math.round(totalDuration / list.length) : 0,
+    successRate: list.length > 0 ? Math.round((success / list.length) * 1000) / 10 : 0
+  };
+}
+
+function aiErrorSummary(items) {
+  const list = Array.isArray(items) ? items : [];
+  return {
+    total: list.length,
+    timeoutCount: list.filter((item) => item.exceptionType === "timeout").length,
+    failedCount: list.filter((item) => item.exceptionType === "failed").length,
+    sensitiveHitCount: list.filter((item) => item.exceptionType === "sensitive_hit").length,
+    unauthorizedCount: list.filter((item) => item.exceptionType === "unauthorized").length,
+    highRiskCount: list.filter((item) => item.exceptionType === "high_risk").length
+  };
+}
+
+function aiFeedbackSummary(items) {
+  const list = Array.isArray(items) ? items : [];
+  return {
+    total: list.length,
+    usefulCount: list.filter((item) => item.rating === "useful").length,
+    negativeCount: list.filter((item) => ["useless", "wrong", "unsafe"].includes(item.rating)).length,
+    unsafeCount: list.filter((item) => item.rating === "unsafe").length,
+    pendingCount: list.filter((item) => !item.resolved).length,
+    resolvedCount: list.filter((item) => item.resolved).length
+  };
+}
+
+function classifyAiException(log, messages = []) {
+  const text = `${log.status ?? ""} ${log.errorMessage ?? ""} ${messages.map((item) => item.content).join(" ")}`.toLowerCase();
+  if (Number(log.durationMs ?? 0) >= 3000 || /timeout|超时/.test(text)) {
+    return "timeout";
+  }
+  if (messages.some((item) => item.sensitiveHit) || /敏感词|sensitive/.test(text)) {
+    return "sensitive_hit";
+  }
+  if (/越权|unauthorized|forbidden|无权|权限/.test(text)) {
+    return "unauthorized";
+  }
+  if (/高风险|blocked|拦截|封禁|结算|退款|裁决/.test(text) || log.status === "blocked") {
+    return "high_risk";
+  }
+  if (log.status === "failed") {
+    return "failed";
+  }
+  return "none";
+}
+
+function aiExceptionRisk(type) {
+  if (["unauthorized", "high_risk", "sensitive_hit"].includes(type)) {
+    return "high";
+  }
+  if (["timeout", "failed"].includes(type)) {
+    return "medium";
+  }
+  return "low";
 }
 
 function riskScoreFromHits(hits) {

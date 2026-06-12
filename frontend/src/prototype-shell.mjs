@@ -89,6 +89,7 @@ const ADMIN_DISPUTES_PAGE_SIZE = 20;
 const ADMIN_SENSITIVE_WORDS_PAGE_SIZE = 20;
 const ADMIN_RISK_CONTENT_PAGE_SIZE = 20;
 const ADMIN_AUDIT_LOG_PAGE_SIZE = 15;
+const ADMIN_AI_PAGE_SIZE = 20;
 const ADMIN_USER_STATUS_LABEL = new Map([
   ["active", "正常"],
   ["disabled", "已禁用"]
@@ -472,6 +473,26 @@ async function hydrateCurrentRoute(session) {
     }
     if (route.id === "admin-stats") {
       await hydrateAdminStatsRoute(session);
+      return;
+    }
+    if (route.id === "admin-ai-logs") {
+      await hydrateAdminAiLogsRoute(session);
+      return;
+    }
+    if (route.id === "admin-ai-conversations") {
+      await hydrateAdminAiConversationsRoute(session);
+      return;
+    }
+    if (route.id === "admin-ai-feedback") {
+      await hydrateAdminAiFeedbackRoute(session);
+      return;
+    }
+    if (route.id === "admin-ai-errors") {
+      await hydrateAdminAiErrorsRoute(session);
+      return;
+    }
+    if (route.id === "admin-ai-config") {
+      await hydrateAdminAiConfigRoute(session);
       return;
     }
     if (route.id === "admin-audit-log") {
@@ -2963,6 +2984,56 @@ async function hydrateAdminSystemRoute(session) {
   await loadAdminSystem(adminSession);
 }
 
+async function hydrateAdminAiLogsRoute(session) {
+  const adminSession = session ?? auth.readSession("admin");
+  if (!adminSession?.token) {
+    return;
+  }
+  applyAdminIdentity(adminSession.user);
+  installAdminAiFilters(adminSession, "logs");
+  await loadAdminAiLogs(readAdminAiQuery(), adminSession);
+}
+
+async function hydrateAdminAiConversationsRoute(session) {
+  const adminSession = session ?? auth.readSession("admin");
+  if (!adminSession?.token) {
+    return;
+  }
+  applyAdminIdentity(adminSession.user);
+  installAdminAiFilters(adminSession, "conversations");
+  await loadAdminAiConversations(readAdminAiQuery(), adminSession);
+}
+
+async function hydrateAdminAiFeedbackRoute(session) {
+  const adminSession = session ?? auth.readSession("admin");
+  if (!adminSession?.token) {
+    return;
+  }
+  applyAdminIdentity(adminSession.user);
+  installAdminAiFilters(adminSession, "feedback");
+  await loadAdminAiFeedback(readAdminAiQuery(), adminSession);
+}
+
+async function hydrateAdminAiErrorsRoute(session) {
+  const adminSession = session ?? auth.readSession("admin");
+  if (!adminSession?.token) {
+    return;
+  }
+  applyAdminIdentity(adminSession.user);
+  installAdminAiFilters(adminSession, "errors");
+  await loadAdminAiErrors(readAdminAiQuery(), adminSession);
+}
+
+async function hydrateAdminAiConfigRoute(session) {
+  const adminSession = session ?? auth.readSession("admin");
+  if (!adminSession?.token) {
+    return;
+  }
+  applyAdminIdentity(adminSession.user);
+  installAdminAiConfigControls(adminSession);
+  await loadAdminAiConfig(adminSession);
+}
+
 function applyAdminIdentity(user) {
   const name = user?.displayName || user?.username;
   if (!name) {
@@ -3695,6 +3766,533 @@ function readAdminSystemForm() {
     autoBackup: readSwitchState("自动备份"),
     aiHighRiskBlock: readSwitchState("AI 高风险拦截")
   };
+}
+
+function installAdminAiFilters(adminSession, view) {
+  if (document.body.dataset.adminAiBound === view) {
+    return;
+  }
+  document.body.dataset.adminAiBound = view;
+  document.querySelectorAll("#searchInput,#sceneFilter,#statusFilter,#typeFilter,#userFilter,#durationFilter").forEach((element) => {
+    element.addEventListener("input", debounce(() => {
+      updateAdminAiQuery(readAdminAiControls(view), adminSession, view);
+    }, 250), true);
+  });
+  document.querySelector('[data-action="refresh"], .head-actions .btn--secondary')?.addEventListener("click", (event) => {
+    event.preventDefault();
+    loadAdminAiView(view, readAdminAiQuery(), adminSession);
+  }, true);
+}
+
+function readAdminAiControls(view) {
+  const patch = {
+    keyword: document.getElementById("searchInput")?.value.trim() || "",
+    scene: normalizeAdminAiSceneValue(document.getElementById("sceneFilter")?.value || ""),
+    status: normalizeAdminAiStatusValue(document.getElementById("statusFilter")?.value || "", view),
+    page: 1
+  };
+  const typeValue = normalizeAdminAiTypeValue(document.getElementById("typeFilter")?.value || "", view);
+  if (view === "feedback") {
+    patch.rating = typeValue;
+  } else if (view === "errors") {
+    patch.type = typeValue;
+  }
+  const duration = String(document.getElementById("durationFilter")?.value || "");
+  if (duration === "slow") {
+    patch.minDurationMs = 800;
+  } else if (duration === "fast") {
+    patch.maxDurationMs = 800;
+  }
+  return patch;
+}
+
+function readAdminAiQuery() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    keyword: params.get("keyword") || "",
+    userId: params.get("userId") || "",
+    conversationId: params.get("conversationId") || "",
+    scene: params.get("scene") || "all",
+    status: params.get("status") || "all",
+    type: params.get("type") || "all",
+    rating: params.get("rating") || "all",
+    minDurationMs: params.get("minDurationMs") || "",
+    maxDurationMs: params.get("maxDurationMs") || "",
+    createdFrom: params.get("createdFrom") || "",
+    createdTo: params.get("createdTo") || "",
+    page: positiveInteger(params.get("page"), 1),
+    pageSize: ADMIN_AI_PAGE_SIZE
+  };
+}
+
+function updateAdminAiQuery(patch, adminSession, view) {
+  const next = { ...readAdminAiQuery(), ...patch };
+  const params = new URLSearchParams();
+  for (const key of ["keyword", "userId", "conversationId", "scene", "status", "type", "rating", "minDurationMs", "maxDurationMs", "createdFrom", "createdTo"]) {
+    if (next[key] && next[key] !== "all") {
+      params.set(key, String(next[key]));
+    }
+  }
+  if (next.page > 1) {
+    params.set("page", String(next.page));
+  }
+  history.replaceState({}, "", `${window.location.pathname}${params.toString() ? `?${params}` : ""}`);
+  loadAdminAiView(view, readAdminAiQuery(), adminSession);
+}
+
+function loadAdminAiView(view, state, adminSession) {
+  if (view === "logs") {
+    return loadAdminAiLogs(state, adminSession);
+  }
+  if (view === "conversations") {
+    return loadAdminAiConversations(state, adminSession);
+  }
+  if (view === "feedback") {
+    return loadAdminAiFeedback(state, adminSession);
+  }
+  if (view === "errors") {
+    return loadAdminAiErrors(state, adminSession);
+  }
+  return Promise.resolve();
+}
+
+async function loadAdminAiLogs(state, adminSession) {
+  const table = document.querySelector("#logTable, .al-table tbody, .data-table tbody");
+  if (table) {
+    table.innerHTML = `<tr><td colspan="8">${adminPanelLoadingHtml("正在加载 AI 调用日志。")}</td></tr>`;
+  }
+  try {
+    const payload = await api.admin.aiCallLogs(adminSession.token, state);
+    renderAdminAiLogs(payload, state, adminSession);
+  } catch (error) {
+    if (table) {
+      table.innerHTML = `<tr><td colspan="8">${escapeHtml(adminErrorMessage(error))}</td></tr>`;
+    }
+  }
+}
+
+function renderAdminAiLogs(payload, state, adminSession) {
+  const logs = Array.isArray(payload.callLogs) ? payload.callLogs : [];
+  const summary = payload.summary ?? {};
+  setAdminAiMetrics([summary.total, `${summary.successRate || 0}%`, `${summary.avgDurationMs || 0}ms`, summary.blockedCount]);
+  const table = document.querySelector("#logTable, .al-table tbody, .data-table tbody");
+  if (!table) {
+    return;
+  }
+  table.innerHTML = logs.length === 0
+    ? `<tr><td colspan="8">暂无符合条件的 AI 调用日志。</td></tr>`
+    : logs.map(adminAiLogRowHtml).join("");
+  table.querySelectorAll("[data-ai-log-detail]").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.getElementById(`ai-log-detail-${button.dataset.aiLogDetail}`)?.classList.toggle("show");
+    });
+  });
+  renderAdminAiPageInfo(payload.pagination, logs.length);
+  renderAdminSimplePager(document.querySelector(".al-page-btns, .au-page-btns"), payload.pagination, state, adminSession, (patch, sessionArg) => updateAdminAiQuery(patch, sessionArg, "logs"));
+}
+
+function adminAiLogRowHtml(item) {
+  const statusClass = item.status === "success" ? "ok" : item.status === "blocked" ? "warn" : "err";
+  return `
+    <tr>
+      <td><span class="mono">#${escapeHtml(item.callId)}</span></td>
+      <td>${adminAiUserCell(item.user, item.userId)}</td>
+      <td><strong>${escapeHtml(item.sceneText || item.scene)}</strong><div class="muted small">${escapeHtml(item.conversationId ? `会话 #${item.conversationId}` : "无会话")}</div></td>
+      <td><span class="status-dot ${escapeHtml(statusClass)}"></span>${escapeHtml(item.statusText || item.status)}</td>
+      <td><span class="mono">${escapeHtml(item.durationMs)}ms</span></td>
+      <td><span class="mono">${escapeHtml(item.requestTokens)} / ${escapeHtml(item.responseTokens)}</span></td>
+      <td class="muted small">${escapeHtml(formatDateTime(item.createdAt))}</td>
+      <td><button class="al-expand-btn" type="button" data-ai-log-detail="${escapeHtml(item.callId)}">详情</button></td>
+    </tr>
+    <tr class="al-detail-row" id="ai-log-detail-${escapeHtml(item.callId)}"><td colspan="8"><div class="al-detail-content">
+      <div><h5>调用信息</h5><div class="msg-log">状态：${escapeHtml(item.statusText || item.status)}\n场景：${escapeHtml(item.sceneText || item.scene)}\n耗时：${escapeHtml(item.durationMs)}ms\n异常：${escapeHtml(item.errorMessage || item.exceptionType || "无")}</div></div>
+      <div><h5>会话预览</h5><div class="msg-log">${escapeHtml(item.conversation?.preview || "暂无会话内容")}</div></div>
+    </div></td></tr>
+  `;
+}
+
+async function loadAdminAiConversations(state, adminSession) {
+  const table = document.querySelector("#conversationRows, .data-table tbody");
+  if (table) {
+    table.innerHTML = `<tr><td colspan="7">${adminPanelLoadingHtml("正在加载 AI 会话。")}</td></tr>`;
+  }
+  try {
+    const payload = await api.admin.aiConversations(adminSession.token, state);
+    renderAdminAiConversations(payload, state, adminSession);
+  } catch (error) {
+    if (table) {
+      table.innerHTML = `<tr><td colspan="7">${escapeHtml(adminErrorMessage(error))}</td></tr>`;
+    }
+  }
+}
+
+function renderAdminAiConversations(payload, state, adminSession) {
+  const conversations = Array.isArray(payload.conversations) ? payload.conversations : [];
+  const summary = payload.summary ?? {};
+  setAdminAiMetrics([summary.total, summary.activeCount, summary.reviewCount, summary.sensitiveHitCount]);
+  const table = document.querySelector("#conversationRows, .data-table tbody");
+  if (!table) {
+    return;
+  }
+  table.innerHTML = conversations.length === 0
+    ? `<tr><td colspan="7">暂无符合条件的 AI 会话。</td></tr>`
+    : conversations.map(adminAiConversationRowHtml).join("");
+  table.querySelectorAll("[data-ai-conversation]").forEach((button) => {
+    button.addEventListener("click", interceptSubmit(async () => {
+      const detail = await api.admin.aiConversation(adminSession.token, button.dataset.aiConversation);
+      renderAdminAiConversationDetail(detail.conversation ?? detail, adminSession);
+    }));
+  });
+  renderAdminAiConversationDetail(conversations[0], adminSession);
+  renderAdminAiPageInfo(payload.pagination, conversations.length);
+  renderAdminSimplePager(document.querySelector(".al-page-btns, .au-page-btns"), payload.pagination, state, adminSession, (patch, sessionArg) => updateAdminAiQuery(patch, sessionArg, "conversations"));
+}
+
+function adminAiConversationRowHtml(item) {
+  return `
+    <tr>
+      <td><span class="mono">#${escapeHtml(item.conversationId)}</span></td>
+      <td>${adminAiUserCell(item.user, item.userId)}</td>
+      <td><strong>${escapeHtml(item.sceneText || item.scene)}</strong><div class="muted small">${escapeHtml(item.preview || "暂无消息")}</div></td>
+      <td><span class="badge-state ${item.status === "review" || item.sensitiveHitCount > 0 ? "warning" : "success"}">${escapeHtml(item.statusText || item.status)}</span></td>
+      <td><span class="mono">${escapeHtml(item.messageCount || 0)}</span></td>
+      <td class="muted small">${escapeHtml(formatDateTime(item.updatedAt))}</td>
+      <td><button class="link-btn" type="button" data-ai-conversation="${escapeHtml(item.conversationId)}">查看</button></td>
+    </tr>
+  `;
+}
+
+function renderAdminAiConversationDetail(conversation) {
+  const panel = document.getElementById("detailPanel");
+  if (!panel) {
+    return;
+  }
+  if (!conversation) {
+    panel.innerHTML = `<div class="panel-head"><h3>会话详情</h3></div><p class="muted">暂无会话。</p>`;
+    return;
+  }
+  const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
+  panel.innerHTML = `
+    <div class="panel-head"><h3>会话 #${escapeHtml(conversation.conversationId)}</h3></div>
+    <div class="detail-list">
+      <div class="detail-item"><div class="label">用户</div><div class="value">${adminAiUserText(conversation.user, conversation.userId)}</div></div>
+      <div class="detail-item"><div class="label">场景</div><div class="value">${escapeHtml(conversation.sceneText || conversation.scene)}</div></div>
+      <div class="detail-item"><div class="label">状态</div><div class="value">${escapeHtml(conversation.statusText || conversation.status)}</div></div>
+      <div class="detail-item"><div class="label">脱敏说明</div><div class="value muted">密码、密钥、令牌、手机号和邮箱在后台展示前已脱敏。</div></div>
+      <div class="detail-item" style="grid-column:1/-1"><div class="label">消息记录</div><div class="value">${messages.length === 0 ? escapeHtml(conversation.preview || "暂无消息") : messages.map(adminAiMessageBubbleHtml).join("")}</div></div>
+    </div>
+  `;
+}
+
+function adminAiMessageBubbleHtml(message) {
+  return `<div class="quote-box" style="margin-bottom:8px"><strong>${escapeHtml(message.senderType === "user" ? "用户" : "AI")}</strong><br>${escapeHtml(message.content || "")}<div class="muted small">${escapeHtml(formatDateTime(message.createdAt))}</div></div>`;
+}
+
+async function loadAdminAiFeedback(state, adminSession) {
+  const table = document.getElementById("feedbackRows") ?? document.querySelector(".data-table tbody");
+  if (table) {
+    table.innerHTML = `<tr><td colspan="7">${adminPanelLoadingHtml("正在加载 AI 用户反馈。")}</td></tr>`;
+  }
+  try {
+    const payload = await api.admin.aiFeedback(adminSession.token, state);
+    renderAdminAiFeedback(payload, state, adminSession);
+  } catch (error) {
+    if (table) {
+      table.innerHTML = `<tr><td colspan="7">${escapeHtml(adminErrorMessage(error))}</td></tr>`;
+    }
+  }
+}
+
+function renderAdminAiFeedback(payload, state, adminSession) {
+  const feedback = Array.isArray(payload.feedback) ? payload.feedback : [];
+  const summary = payload.summary ?? {};
+  setAdminAiMetrics([summary.total, summary.negativeCount, summary.pendingCount, summary.resolvedCount]);
+  const table = document.getElementById("feedbackRows") ?? document.querySelector(".data-table tbody");
+  if (!table) {
+    return;
+  }
+  table.innerHTML = feedback.length === 0
+    ? `<tr><td colspan="7">暂无符合条件的 AI 反馈。</td></tr>`
+    : feedback.map(adminAiFeedbackRowHtml).join("");
+  table.querySelectorAll("[data-ai-feedback]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const item = feedback.find((entry) => String(entry.feedbackId) === button.dataset.aiFeedback);
+      renderAdminAiFeedbackDetail(item, adminSession, state);
+    });
+  });
+  renderAdminAiFeedbackDetail(feedback[0], adminSession, state);
+  renderAdminAiPageInfo(payload.pagination, feedback.length);
+  renderAdminSimplePager(document.querySelector(".al-page-btns, .au-page-btns"), payload.pagination, state, adminSession, (patch, sessionArg) => updateAdminAiQuery(patch, sessionArg, "feedback"));
+}
+
+function adminAiFeedbackRowHtml(item) {
+  return `
+    <tr>
+      <td><span class="feedback-type ${escapeHtml(item.rating)}">${escapeHtml(item.ratingText || item.rating)}</span><div class="muted small">${escapeHtml(item.comment || "无文字反馈")}</div></td>
+      <td>${adminAiUserCell(item.user, item.userId)}</td>
+      <td>${escapeHtml(item.conversation?.sceneText || item.conversation?.scene || "--")}</td>
+      <td><span class="mono">#${escapeHtml(item.messageId)}</span></td>
+      <td><span class="badge-state ${item.resolved ? "success" : "warning"}">${escapeHtml(item.statusText || item.status)}</span></td>
+      <td class="muted small">${escapeHtml(formatDateTime(item.createdAt))}</td>
+      <td><button class="link-btn" type="button" data-ai-feedback="${escapeHtml(item.feedbackId)}">处理</button></td>
+    </tr>
+  `;
+}
+
+function renderAdminAiFeedbackDetail(item, adminSession, state) {
+  const panel = document.getElementById("detailPanel");
+  if (!panel) {
+    return;
+  }
+  if (!item) {
+    panel.innerHTML = `<div class="panel-head"><h3>反馈处理</h3></div><p class="muted">暂无反馈。</p>`;
+    return;
+  }
+  panel.innerHTML = `
+    <div class="panel-head"><h3>反馈 #${escapeHtml(item.feedbackId)}</h3></div>
+    <div class="detail-list">
+      <div class="detail-item"><div class="label">反馈类型</div><div class="value"><span class="feedback-type ${escapeHtml(item.rating)}">${escapeHtml(item.ratingText || item.rating)}</span></div></div>
+      <div class="detail-item"><div class="label">处理状态</div><div class="value">${escapeHtml(item.statusText || item.status)}</div></div>
+      <div class="detail-item"><div class="label">用户反馈</div><div class="value quote-box">${escapeHtml(item.comment || "用户未填写文字说明")}</div></div>
+      <div class="detail-item"><div class="label">关联 AI 回复</div><div class="value quote-box">${escapeHtml(item.message?.content || "")}</div></div>
+      <div class="detail-item"><div class="label">处理备注</div><div class="value"><textarea class="textarea-field" id="ai-feedback-resolution" placeholder="记录处理结论">${escapeHtml(item.resolution || "")}</textarea></div></div>
+      <div class="detail-item"><div class="label">动作</div><div class="value resolution-grid"><button class="link-btn" type="button" data-ai-feedback-resolve="${escapeHtml(item.feedbackId)}" ${item.resolved ? "disabled" : ""}>标记已处理</button><a class="link-btn" href="/admin/ai/conversations?conversationId=${escapeHtml(item.conversation?.conversationId || "")}">查看会话</a></div></div>
+    </div>
+  `;
+  panel.querySelector("[data-ai-feedback-resolve]")?.addEventListener("click", interceptSubmit(async () => {
+    await api.admin.resolveAiFeedback(adminSession.token, item.feedbackId, {
+      resolution: document.getElementById("ai-feedback-resolution")?.value.trim() || "已复盘处理"
+    });
+    showAdminToast("AI 反馈已标记处理，并写入审计日志");
+    await loadAdminAiFeedback(state, adminSession);
+  }));
+}
+
+async function loadAdminAiErrors(state, adminSession) {
+  const table = document.getElementById("errorRows") ?? document.querySelector(".data-table tbody");
+  if (table) {
+    table.innerHTML = `<tr><td colspan="7">${adminPanelLoadingHtml("正在加载 AI 异常调用。")}</td></tr>`;
+  }
+  try {
+    const payload = await api.admin.aiErrors(adminSession.token, state);
+    renderAdminAiErrors(payload, state, adminSession);
+  } catch (error) {
+    if (table) {
+      table.innerHTML = `<tr><td colspan="7">${escapeHtml(adminErrorMessage(error))}</td></tr>`;
+    }
+  }
+}
+
+function renderAdminAiErrors(payload, state, adminSession) {
+  const errors = Array.isArray(payload.errors) ? payload.errors : [];
+  const summary = payload.summary ?? {};
+  setAdminAiMetrics([summary.total, summary.timeoutCount, summary.unauthorizedCount, summary.highRiskCount]);
+  const table = document.getElementById("errorRows") ?? document.querySelector(".data-table tbody");
+  if (!table) {
+    return;
+  }
+  table.innerHTML = errors.length === 0
+    ? `<tr><td colspan="7">暂无符合条件的 AI 异常调用。</td></tr>`
+    : errors.map(adminAiErrorRowHtml).join("");
+  table.querySelectorAll("[data-ai-error]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const item = errors.find((entry) => String(entry.callId) === button.dataset.aiError);
+      renderAdminAiErrorDetail(item);
+    });
+  });
+  renderAdminAiErrorDetail(errors[0]);
+  renderAdminAiPageInfo(payload.pagination, errors.length);
+  renderAdminSimplePager(document.querySelector(".al-page-btns, .au-page-btns"), payload.pagination, state, adminSession, (patch, sessionArg) => updateAdminAiQuery(patch, sessionArg, "errors"));
+}
+
+function adminAiErrorRowHtml(item) {
+  return `
+    <tr>
+      <td><span class="severity ${escapeHtml(item.riskLevel || "medium")}">${escapeHtml(item.exceptionText || item.exceptionType)}</span></td>
+      <td><span class="mono">#${escapeHtml(item.callId)}</span></td>
+      <td>${adminAiUserCell(item.user, item.userId)}</td>
+      <td>${escapeHtml(item.sceneText || item.scene)}</td>
+      <td>${escapeHtml(item.reason || item.errorMessage || "--")}</td>
+      <td class="muted small">${escapeHtml(formatDateTime(item.createdAt))}</td>
+      <td><button class="link-btn" type="button" data-ai-error="${escapeHtml(item.callId)}">查看</button></td>
+    </tr>
+  `;
+}
+
+function renderAdminAiErrorDetail(item) {
+  const panel = document.getElementById("detailPanel");
+  if (!panel) {
+    return;
+  }
+  if (!item) {
+    panel.innerHTML = `<div class="panel-head"><h3>异常详情</h3></div><p class="muted">暂无异常调用。</p>`;
+    return;
+  }
+  panel.innerHTML = `
+    <div class="panel-head"><h3>异常 #${escapeHtml(item.callId)}</h3></div>
+    <div class="detail-list">
+      <div class="detail-item"><div class="label">类型</div><div class="value">${escapeHtml(item.exceptionText || item.exceptionType)}</div></div>
+      <div class="detail-item"><div class="label">风险等级</div><div class="value"><span class="severity ${escapeHtml(item.riskLevel || "medium")}">${escapeHtml(item.riskLevel || "medium")}</span></div></div>
+      <div class="detail-item"><div class="label">用户</div><div class="value">${adminAiUserText(item.user, item.userId)}</div></div>
+      <div class="detail-item"><div class="label">场景</div><div class="value">${escapeHtml(item.sceneText || item.scene)}</div></div>
+      <div class="detail-item" style="grid-column:1/-1"><div class="label">异常说明</div><div class="value quote-box">${escapeHtml(item.reason || item.errorMessage || "无异常说明")}</div></div>
+    </div>
+  `;
+}
+
+async function loadAdminAiConfig(adminSession) {
+  try {
+    const payload = await api.admin.aiConfig(adminSession.token);
+    renderAdminAiConfig(payload);
+  } catch (error) {
+    showGlobalMessage(adminErrorMessage(error), "error");
+  }
+}
+
+function installAdminAiConfigControls(adminSession) {
+  if (document.body.dataset.adminAiConfigBound === "true") {
+    return;
+  }
+  document.body.dataset.adminAiConfigBound = "true";
+  document.querySelectorAll(".switch").forEach((button) => {
+    button.addEventListener("click", () => button.classList.toggle("on"), true);
+  });
+  document.querySelector(".save-bar .btn--primary, #save-ai-config, [data-action='save']")?.addEventListener("click", interceptSubmit(async () => {
+    await api.admin.updateAiConfig(adminSession.token, readAdminAiConfigForm());
+    showAdminToast("AI 配置已保存，并写入审计日志");
+    await loadAdminAiConfig(adminSession);
+  }), true);
+}
+
+function renderAdminAiConfig(payload) {
+  const config = payload.config ?? {};
+  setSwitchState("AI 服务总开关", config.enabled);
+  setSwitchState("高风险请求拦截", config.blockHighRisk);
+  setSwitchState("AI 高风险拦截", config.blockHighRisk);
+  setFirstInputByLabels(["调用频率", "频率"], config.rateLimitPerHour);
+  setFirstInputByLabels(["上下文长度", "上下文消息"], config.contextMessages);
+  setFirstInputByLabels(["日志保留周期", "保留周期"], config.logRetentionDays);
+  setFirstInputByLabels(["安全阈值", "风险阈值"], config.safetyThreshold);
+  const status = document.querySelector(".status-indicator");
+  if (status) {
+    status.innerHTML = `<span class="status-dot ${config.enabled ? "on" : "off"}"></span>${config.enabled ? "AI 服务可用" : "AI 服务已关闭"}`;
+  }
+  const auditPreview = document.querySelector(".audit-preview");
+  if (auditPreview) {
+    auditPreview.innerHTML = `
+      <div class="ap-label">当前配置</div>
+      <div class="audit-entry"><span class="ae-action">AI</span><span class="ae-detail">频率 ${escapeHtml(config.rateLimitPerHour)} 次/小时 · 上下文 ${escapeHtml(config.contextMessages)} 条 · 保留 ${escapeHtml(config.logRetentionDays)} 天 · 安全阈值 ${escapeHtml(config.safetyThreshold)}</span></div>
+    `;
+  }
+}
+
+function readAdminAiConfigForm() {
+  return {
+    enabled: readSwitchState("AI 服务总开关"),
+    blockHighRisk: readSwitchState("高风险请求拦截") || readSwitchState("AI 高风险拦截"),
+    rateLimitPerHour: readFirstInputByLabels(["调用频率", "频率"], 60),
+    contextMessages: readFirstInputByLabels(["上下文长度", "上下文消息"], 12),
+    logRetentionDays: readFirstInputByLabels(["日志保留周期", "保留周期"], 180),
+    safetyThreshold: readFirstInputByLabels(["安全阈值", "风险阈值"], 80)
+  };
+}
+
+function setFirstInputByLabels(labels, value) {
+  const input = findInputByLabels(labels);
+  if (input) {
+    input.value = value ?? "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+}
+
+function readFirstInputByLabels(labels, fallback) {
+  const value = Number(findInputByLabels(labels)?.value);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function findInputByLabels(labels) {
+  const rows = Array.from(document.querySelectorAll(".cfg-row"));
+  const row = rows.find((item) => labels.some((label) => item.textContent.includes(label)));
+  return row?.querySelector("input[type='number'], input.cfg-input, input[type='range'], select") ?? null;
+}
+
+function setAdminAiMetrics(values) {
+  document.querySelectorAll(".metric-card .value, .al-sum-card .al-num").forEach((element, index) => {
+    if (index < values.length) {
+      element.textContent = formatIntegerOrText(values[index]);
+    }
+  });
+}
+
+function renderAdminAiPageInfo(pagination, shown) {
+  const pageInfo = document.querySelector(".al-page-info, #pageInfo");
+  if (!pageInfo || !pagination) {
+    return;
+  }
+  const total = Number(pagination.total ?? shown ?? 0);
+  const start = total === 0 ? 0 : (Number(pagination.page ?? 1) - 1) * Number(pagination.pageSize ?? ADMIN_AI_PAGE_SIZE) + 1;
+  const end = Math.min(total, start + Number(shown ?? 0) - 1);
+  pageInfo.textContent = `共 ${formatInteger(total)} 条，显示第 ${formatInteger(start)}-${formatInteger(end)} 条`;
+}
+
+function adminAiUserCell(user, userId) {
+  return `<div class="person-cell"><div class="avatar-mini">${escapeHtml(firstCharacter(user?.displayName || user?.username || "AI"))}</div><div><strong>${escapeHtml(adminAiUserText(user, userId))}</strong><div class="muted small">#${escapeHtml(user?.userId || userId || "--")}</div></div></div>`;
+}
+
+function adminAiUserText(user, userId) {
+  if (!user && !userId) {
+    return "匿名/系统";
+  }
+  return user?.displayName || user?.username || `用户 #${userId}`;
+}
+
+function normalizeAdminAiSceneValue(value) {
+  const text = String(value || "").trim();
+  const map = new Map([
+    ["智能筛选", "request_filter"],
+    ["发布辅助", "request_draft"],
+    ["订单摘要", "order_summary"],
+    ["纠纷摘要", "dispute_summary"],
+    ["规则问答", "rules"],
+    ["规则咨询", "rules"]
+  ]);
+  return map.get(text) || text || "all";
+}
+
+function normalizeAdminAiStatusValue(value, view) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "all";
+  }
+  const feedbackMap = new Map([["待处理", "pending"], ["处理中", "pending"], ["已复盘", "resolved"], ["已处理", "resolved"]]);
+  const callMap = new Map([["成功", "success"], ["失败", "failed"], ["已拦截", "blocked"], ["异常", "failed"]]);
+  const conversationMap = new Map([["进行中", "active"], ["已关闭", "closed"], ["需复核", "review"], ["异常", "error"]]);
+  if (view === "feedback") {
+    return feedbackMap.get(text) || text || "all";
+  }
+  if (view === "conversations") {
+    return conversationMap.get(text) || text || "all";
+  }
+  return callMap.get(text) || text || "all";
+}
+
+function normalizeAdminAiTypeValue(value, view) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "all";
+  }
+  if (view === "feedback") {
+    return new Map([["有用", "useful"], ["无用", "useless"], ["错误", "wrong"], ["不安全", "unsafe"]]).get(text) || text || "all";
+  }
+  return new Map([["超时", "timeout"], ["失败", "failed"], ["敏感词命中", "sensitive_hit"], ["越权尝试", "unauthorized"], ["高风险请求", "high_risk"]]).get(text) || text || "all";
+}
+
+function formatIntegerOrText(value) {
+  if (typeof value === "string" && /[%a-zA-Z]/.test(value)) {
+    return value;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? formatInteger(number) : String(value ?? "--");
 }
 
 function setSwitchState(label, enabled) {

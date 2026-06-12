@@ -59,6 +59,10 @@ const RULE_TEMPLATES = [
 ];
 
 export async function handleAiRoutes({ request, response, url, authService, aiAdapter = null }) {
+  if (url.pathname.startsWith("/api/ai/")) {
+    await ensureAiAvailable(authService.store);
+  }
+
   if (url.pathname === "/api/ai/chat") {
     allowOnly(request, response, ["POST"]);
     const context = await requireUser(request, authService);
@@ -163,6 +167,16 @@ export async function handleAiRoutes({ request, response, url, authService, aiAd
   }
 
   return false;
+}
+
+async function ensureAiAvailable(store) {
+  if (typeof store?.getAiConfig !== "function") {
+    return;
+  }
+  const config = await store.getAiConfig();
+  if (config && config.enabled === false) {
+    throw new HttpError(503, "AI_UNAVAILABLE", "AI assistant is currently disabled by administrator configuration.");
+  }
 }
 
 async function chatPayload(store, context, body, conversation, aiAdapter) {

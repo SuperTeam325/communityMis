@@ -8,6 +8,8 @@ const ADMIN_SENSITIVE_WORD_DETAIL_RE = /^\/api\/admin\/sensitive-words\/([^/]+)$
 const ADMIN_RISK_CONTENT_RESOLVE_RE = /^\/api\/admin\/risk-content\/([^/]+)\/resolve$/;
 const ADMIN_DISPUTE_DETAIL_RE = /^\/api\/admin\/disputes\/([^/]+)$/;
 const ADMIN_DISPUTE_FINALIZE_RE = /^\/api\/admin\/disputes\/([^/]+)\/finalize$/;
+const ADMIN_AI_CONVERSATION_DETAIL_RE = /^\/api\/admin\/ai\/conversations\/([^/]+)$/;
+const ADMIN_AI_FEEDBACK_RESOLVE_RE = /^\/api\/admin\/ai\/feedback\/([^/]+)\/resolve$/;
 const ADMIN_TRANSACTION_TYPES = new Set(["all", "income", "expense", "system_fee", "freeze", "release", "refund"]);
 const ADMIN_DISPUTE_STATUSES = new Set(["all", "pending", "todo", "in_progress", "processing", "reviewing", "resolved", "ruled", "closed"]);
 const USER_STATUSES = new Set(["all", "active", "disabled"]);
@@ -217,6 +219,63 @@ export async function handleAdminRoutes({ request, response, url, authService })
     return true;
   }
 
+  if (url.pathname === "/api/admin/ai/call-logs") {
+    allowOnly(request, response, ["GET"]);
+    await requireAdmin(request, authService);
+    sendJson(response, 200, await aiCallLogsPayload(authService.store, url.searchParams));
+    return true;
+  }
+
+  if (url.pathname === "/api/admin/ai/conversations") {
+    allowOnly(request, response, ["GET"]);
+    await requireAdmin(request, authService);
+    sendJson(response, 200, await aiConversationsPayload(authService.store, url.searchParams));
+    return true;
+  }
+
+  const aiConversationDetailMatch = url.pathname.match(ADMIN_AI_CONVERSATION_DETAIL_RE);
+  if (aiConversationDetailMatch) {
+    allowOnly(request, response, ["GET"]);
+    await requireAdmin(request, authService);
+    sendJson(response, 200, await aiConversationDetailPayload(authService.store, aiConversationDetailMatch[1]));
+    return true;
+  }
+
+  if (url.pathname === "/api/admin/ai/feedback") {
+    allowOnly(request, response, ["GET"]);
+    await requireAdmin(request, authService);
+    sendJson(response, 200, await aiFeedbackPayload(authService.store, url.searchParams));
+    return true;
+  }
+
+  const aiFeedbackResolveMatch = url.pathname.match(ADMIN_AI_FEEDBACK_RESOLVE_RE);
+  if (aiFeedbackResolveMatch) {
+    allowOnly(request, response, ["POST"]);
+    const context = await requireAdmin(request, authService);
+    const body = await readJsonBody(request, { maxBytes: REQUEST_BODY_MAX_BYTES });
+    sendJson(response, 200, await resolveAiFeedbackPayload(authService.store, aiFeedbackResolveMatch[1], body, context, request));
+    return true;
+  }
+
+  if (url.pathname === "/api/admin/ai/errors") {
+    allowOnly(request, response, ["GET"]);
+    await requireAdmin(request, authService);
+    sendJson(response, 200, await aiErrorsPayload(authService.store, url.searchParams));
+    return true;
+  }
+
+  if (url.pathname === "/api/admin/ai/config") {
+    allowOnly(request, response, ["GET", "PUT"]);
+    const context = await requireAdmin(request, authService);
+    if (request.method === "PUT") {
+      const body = await readJsonBody(request, { maxBytes: REQUEST_BODY_MAX_BYTES });
+      sendJson(response, 200, await updateAiConfigPayload(authService.store, body, context, request));
+      return true;
+    }
+    sendJson(response, 200, await aiConfigPayload(authService.store));
+    return true;
+  }
+
   if (url.pathname === "/api/admin/audit-logs") {
     allowOnly(request, response, ["GET"]);
     await requireAdmin(request, authService);
@@ -305,6 +364,151 @@ async function transactionsPayload(store, searchParams) {
       page: query.page,
       pageSize: query.pageSize
     }
+  };
+}
+
+async function aiCallLogsPayload(store, searchParams) {
+  ensureStoreMethod(store, "listAdminAiCallLogs", "ADMIN_AI_STORE_UNAVAILABLE");
+  const query = normalizeAiLogQuery(searchParams);
+  const result = await store.listAdminAiCallLogs(query);
+  const logs = Array.isArray(result?.callLogs) ? result.callLogs : [];
+  const total = Number(result?.total ?? logs.length);
+  return {
+    callLogs: logs.map(aiCallLogDto),
+    pagination: paginationDto(query.page, query.pageSize, total),
+    summary: aiCallLogSummaryDto(result?.summary, logs),
+    filters: aiFiltersDto(query)
+  };
+}
+
+async function aiConversationsPayload(store, searchParams) {
+  ensureStoreMethod(store, "listAdminAiConversations", "ADMIN_AI_STORE_UNAVAILABLE");
+  const query = normalizeAiConversationQuery(searchParams);
+  const result = await store.listAdminAiConversations(query);
+  const conversations = Array.isArray(result?.conversations) ? result.conversations : [];
+  const total = Number(result?.total ?? conversations.length);
+  return {
+    conversations: conversations.map(aiConversationListDto),
+    pagination: paginationDto(query.page, query.pageSize, total),
+    summary: aiConversationSummaryDto(result?.summary, conversations),
+    filters: aiFiltersDto(query)
+  };
+}
+
+async function aiConversationDetailPayload(store, rawConversationId) {
+  ensureStoreMethod(store, "findAiConversationById", "ADMIN_AI_STORE_UNAVAILABLE");
+  ensureStoreMethod(store, "listAiMessagesForConversationId", "ADMIN_AI_STORE_UNAVAILABLE");
+  const conversationId = parsePositiveResourceId(rawConversationId, "AI_CONVERSATION_NOT_FOUND", "AI conversation was not found.");
+  const conversation = await store.findAiConversationById(conversationId);
+  if (!conversation) {
+    throw new HttpError(404, "AI_CONVERSATION_NOT_FOUND", "AI conversation was not found.");
+  }
+  const messages = await store.listAiMessagesForConversationId(conversationId);
+  const user = conversation.userId && typeof store.findUserById === "function" ? await store.findUserById(conversation.userId) : null;
+  return {
+    conversation: aiConversationDetailDto({ ...conversation, user, messages }),
+    messages: messages.map(aiMessageDto),
+    redaction: {
+      applied: true,
+      fields: ["content"],
+      patterns: ["password", "token", "secret", "api_key", "phone"]
+    }
+  };
+}
+
+async function aiFeedbackPayload(store, searchParams) {
+  ensureStoreMethod(store, "listAdminAiFeedback", "ADMIN_AI_STORE_UNAVAILABLE");
+  const query = normalizeAiFeedbackQuery(searchParams);
+  const result = await store.listAdminAiFeedback(query);
+  const feedback = Array.isArray(result?.feedback) ? result.feedback : [];
+  const total = Number(result?.total ?? feedback.length);
+  return {
+    feedback: feedback.map(aiFeedbackDto),
+    pagination: paginationDto(query.page, query.pageSize, total),
+    summary: aiFeedbackSummaryDto(result?.summary, feedback),
+    filters: aiFiltersDto(query)
+  };
+}
+
+async function resolveAiFeedbackPayload(store, rawFeedbackId, body, context, request) {
+  ensureStoreMethod(store, "resolveAiFeedback", "ADMIN_AI_STORE_UNAVAILABLE");
+  const feedbackId = parsePositiveResourceId(rawFeedbackId, "AI_FEEDBACK_NOT_FOUND", "AI feedback was not found.");
+  let feedback;
+  try {
+    feedback = await store.resolveAiFeedback(feedbackId, {
+      ...normalizeAiFeedbackResolveInput(body),
+      actorId: context.user.userId,
+      resolvedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    if (error?.code === "AI_FEEDBACK_NOT_FOUND") {
+      throw new HttpError(404, "AI_FEEDBACK_NOT_FOUND", "AI feedback was not found.");
+    }
+    throw error;
+  }
+  const auditLog = await createAudit(store, context, request, {
+    action: "admin.ai_feedback.resolve",
+    targetType: "ai_feedback",
+    targetId: feedbackId,
+    detail: {
+      rating: feedback.rating,
+      resolution: feedback.resolution ?? null
+    }
+  });
+  return {
+    feedback: aiFeedbackDto(feedback),
+    auditLog: auditLog ? auditLogDto(auditLog) : null
+  };
+}
+
+async function aiErrorsPayload(store, searchParams) {
+  ensureStoreMethod(store, "listAdminAiErrors", "ADMIN_AI_STORE_UNAVAILABLE");
+  const query = normalizeAiErrorQuery(searchParams);
+  const result = await store.listAdminAiErrors(query);
+  const errors = Array.isArray(result?.errors) ? result.errors : [];
+  const total = Number(result?.total ?? errors.length);
+  return {
+    errors: errors.map(aiErrorDto),
+    pagination: paginationDto(query.page, query.pageSize, total),
+    summary: aiErrorSummaryDto(result?.summary, errors),
+    filters: aiFiltersDto(query)
+  };
+}
+
+async function aiConfigPayload(store) {
+  ensureStoreMethod(store, "getAiConfig", "ADMIN_AI_CONFIG_STORE_UNAVAILABLE");
+  const config = await store.getAiConfig();
+  return {
+    config: aiConfigDto(config),
+    safetyBoundaries: aiSafetyBoundaries()
+  };
+}
+
+async function updateAiConfigPayload(store, body, context, request) {
+  ensureStoreMethod(store, "updateAiConfig", "ADMIN_AI_CONFIG_STORE_UNAVAILABLE");
+  const input = normalizeAiConfigInput(body);
+  const config = await store.updateAiConfig({
+    ...input,
+    actorId: context.user.userId,
+    updatedAt: new Date().toISOString()
+  });
+  const auditLog = await createAudit(store, context, request, {
+    action: "admin.ai_config.update",
+    targetType: "ai_config",
+    targetId: null,
+    detail: {
+      patch: input,
+      enabled: config.enabled,
+      rateLimitPerHour: config.rateLimitPerHour,
+      contextMessages: config.contextMessages,
+      logRetentionDays: config.logRetentionDays,
+      safetyThreshold: config.safetyThreshold
+    }
+  });
+  return {
+    config: aiConfigDto(config),
+    auditLog: auditLog ? auditLogDto(auditLog) : null,
+    safetyBoundaries: aiSafetyBoundaries()
   };
 }
 
@@ -806,6 +1010,121 @@ function auditLogDto(item) {
   };
 }
 
+function aiCallLogDto(item) {
+  return {
+    callId: item.callId,
+    conversationId: item.conversationId ?? null,
+    userId: item.userId ?? null,
+    user: item.user ? adminUserLiteDto(item.user) : null,
+    scene: item.scene,
+    sceneText: aiSceneText(item.scene),
+    requestTokens: Number(item.requestTokens ?? 0),
+    responseTokens: Number(item.responseTokens ?? 0),
+    durationMs: Number(item.durationMs ?? 0),
+    status: item.status,
+    statusText: aiCallStatusText(item.status),
+    errorMessage: redactSensitiveText(item.errorMessage),
+    exceptionType: item.exceptionType ?? null,
+    riskLevel: item.riskLevel ?? "low",
+    conversation: item.conversation ? aiConversationListDto(item.conversation) : null,
+    createdAt: item.createdAt
+  };
+}
+
+function aiConversationListDto(item) {
+  return {
+    conversationId: item.conversationId,
+    userId: item.userId ?? null,
+    user: item.user ? adminUserLiteDto(item.user) : null,
+    roleType: item.roleType,
+    scene: item.scene,
+    sceneText: aiSceneText(item.scene),
+    status: item.status,
+    statusText: aiConversationStatusText(item.status),
+    preview: redactSensitiveText(item.preview),
+    messageCount: Number(item.messageCount ?? 0),
+    sensitiveHitCount: Number(item.sensitiveHitCount ?? 0),
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt
+  };
+}
+
+function aiConversationDetailDto(item) {
+  return {
+    ...aiConversationListDto(item),
+    messages: (item.messages ?? []).map(aiMessageDto)
+  };
+}
+
+function aiMessageDto(item) {
+  return {
+    messageId: item.messageId,
+    conversationId: item.conversationId,
+    senderType: item.senderType,
+    content: redactSensitiveText(item.content),
+    businessType: item.businessType ?? null,
+    businessId: item.businessId ?? null,
+    sensitiveHit: Boolean(item.sensitiveHit),
+    createdAt: item.createdAt
+  };
+}
+
+function aiFeedbackDto(item) {
+  return {
+    feedbackId: item.feedbackId,
+    messageId: item.messageId,
+    userId: item.userId,
+    user: item.user ? adminUserLiteDto(item.user) : null,
+    rating: item.rating,
+    ratingText: aiFeedbackRatingText(item.rating),
+    comment: redactSensitiveText(item.comment),
+    status: item.status ?? (item.resolved ? "resolved" : "pending"),
+    statusText: item.resolved ? "已处理" : "待处理",
+    resolved: Boolean(item.resolved),
+    resolution: redactSensitiveText(item.resolution),
+    resolvedBy: item.resolvedBy ?? null,
+    resolvedAt: item.resolvedAt ?? null,
+    message: item.message ? aiMessageDto(item.message) : null,
+    conversation: item.conversation ? aiConversationListDto(item.conversation) : null,
+    createdAt: item.createdAt
+  };
+}
+
+function aiErrorDto(item) {
+  return {
+    ...aiCallLogDto(item),
+    exceptionType: item.exceptionType ?? "failed",
+    exceptionText: aiExceptionText(item.exceptionType),
+    riskLevel: item.riskLevel ?? "medium",
+    reason: redactSensitiveText(item.reason ?? item.errorMessage)
+  };
+}
+
+function aiConfigDto(config = {}) {
+  return {
+    enabled: Boolean(config.enabled),
+    rateLimitPerHour: Number(config.rateLimitPerHour ?? 60),
+    contextMessages: Number(config.contextMessages ?? config.contextLength ?? 12),
+    contextTokenLimit: Number(config.contextTokenLimit ?? 4000),
+    logRetentionDays: Number(config.logRetentionDays ?? 180),
+    safetyThreshold: Number(config.safetyThreshold ?? 80),
+    blockHighRisk: Boolean(config.blockHighRisk ?? config.aiHighRiskBlock ?? true),
+    model: config.model ?? "local-rule-assistant",
+    updatedAt: config.updatedAt ?? null
+  };
+}
+
+function adminUserLiteDto(user) {
+  return {
+    userId: user.userId,
+    username: user.username,
+    displayName: user.displayName ?? user.username,
+    phone: maskPhone(user.phone),
+    role: user.role,
+    status: Number(user.status)
+  };
+}
+
 function systemSettingsDto(settings = {}) {
   return {
     freezeDays: Number(settings.freezeDays ?? 7),
@@ -816,6 +1135,54 @@ function systemSettingsDto(settings = {}) {
     aiHighRiskBlock: Boolean(settings.aiHighRiskBlock),
     safetyNotice: settings.safetyNotice ?? "高风险动作必须由管理员二次确认并写入审计日志。",
     updatedAt: settings.updatedAt ?? null
+  };
+}
+
+function aiCallLogSummaryDto(summary, logs) {
+  const list = Array.isArray(logs) ? logs : [];
+  const success = list.filter((item) => item.status === "success").length;
+  const totalDuration = list.reduce((sum, item) => sum + Number(item.durationMs ?? 0), 0);
+  return {
+    total: Number(summary?.total ?? list.length),
+    successCount: Number(summary?.successCount ?? success),
+    failedCount: Number(summary?.failedCount ?? list.filter((item) => item.status === "failed").length),
+    blockedCount: Number(summary?.blockedCount ?? list.filter((item) => item.status === "blocked").length),
+    avgDurationMs: Number(summary?.avgDurationMs ?? (list.length > 0 ? Math.round(totalDuration / list.length) : 0)),
+    successRate: Number(summary?.successRate ?? (list.length > 0 ? Math.round((success / list.length) * 1000) / 10 : 0))
+  };
+}
+
+function aiConversationSummaryDto(summary, items) {
+  const list = Array.isArray(items) ? items : [];
+  return {
+    total: Number(summary?.total ?? list.length),
+    activeCount: Number(summary?.activeCount ?? list.filter((item) => item.status === "active").length),
+    reviewCount: Number(summary?.reviewCount ?? list.filter((item) => item.status === "review").length),
+    sensitiveHitCount: Number(summary?.sensitiveHitCount ?? list.reduce((sum, item) => sum + Number(item.sensitiveHitCount ?? 0), 0))
+  };
+}
+
+function aiFeedbackSummaryDto(summary, items) {
+  const list = Array.isArray(items) ? items : [];
+  return {
+    total: Number(summary?.total ?? list.length),
+    usefulCount: Number(summary?.usefulCount ?? list.filter((item) => item.rating === "useful").length),
+    negativeCount: Number(summary?.negativeCount ?? list.filter((item) => ["useless", "wrong", "unsafe"].includes(item.rating)).length),
+    unsafeCount: Number(summary?.unsafeCount ?? list.filter((item) => item.rating === "unsafe").length),
+    pendingCount: Number(summary?.pendingCount ?? list.filter((item) => !item.resolved).length),
+    resolvedCount: Number(summary?.resolvedCount ?? list.filter((item) => item.resolved).length)
+  };
+}
+
+function aiErrorSummaryDto(summary, items) {
+  const list = Array.isArray(items) ? items : [];
+  return {
+    total: Number(summary?.total ?? list.length),
+    timeoutCount: Number(summary?.timeoutCount ?? list.filter((item) => item.exceptionType === "timeout").length),
+    failedCount: Number(summary?.failedCount ?? list.filter((item) => item.exceptionType === "failed").length),
+    sensitiveHitCount: Number(summary?.sensitiveHitCount ?? list.filter((item) => item.exceptionType === "sensitive_hit").length),
+    unauthorizedCount: Number(summary?.unauthorizedCount ?? list.filter((item) => item.exceptionType === "unauthorized").length),
+    highRiskCount: Number(summary?.highRiskCount ?? list.filter((item) => item.exceptionType === "high_risk").length)
   };
 }
 
@@ -1211,6 +1578,82 @@ function normalizeAuditLogQuery(searchParams) {
   };
 }
 
+function normalizeAiLogQuery(searchParams) {
+  return {
+    ...normalizeAiBaseQuery(searchParams),
+    status: normalizeAiCallStatusFilter(searchParams.get("status"))
+  };
+}
+
+function normalizeAiBaseQuery(searchParams) {
+  return {
+    keyword: optionalLower(searchParams.get("keyword") ?? searchParams.get("q"), 100),
+    userId: parseOptionalPositiveInt(searchParams.get("userId") ?? searchParams.get("user_id"), "INVALID_USER_ID"),
+    conversationId: parseOptionalPositiveInt(searchParams.get("conversationId") ?? searchParams.get("conversation_id"), "INVALID_CONVERSATION_ID"),
+    scene: normalizeAiSceneFilter(searchParams.get("scene")),
+    minDurationMs: parseOptionalNonNegativeInt(searchParams.get("minDurationMs") ?? searchParams.get("durationMin"), "INVALID_DURATION"),
+    maxDurationMs: parseOptionalNonNegativeInt(searchParams.get("maxDurationMs") ?? searchParams.get("durationMax"), "INVALID_DURATION"),
+    createdFrom: optionalText(searchParams.get("createdFrom") ?? searchParams.get("from"), 30),
+    createdTo: optionalText(searchParams.get("createdTo") ?? searchParams.get("to"), 30),
+    page: parsePositiveInt(searchParams.get("page") ?? "1", "INVALID_PAGE", 1, 1000),
+    pageSize: parsePositiveInt(searchParams.get("pageSize") ?? searchParams.get("limit") ?? "20", "INVALID_PAGE_SIZE", 1, 100)
+  };
+}
+
+function normalizeAiConversationQuery(searchParams) {
+  const query = normalizeAiBaseQuery(searchParams);
+  query.status = normalizeAiConversationStatusFilter(searchParams.get("status"));
+  return query;
+}
+
+function normalizeAiFeedbackQuery(searchParams) {
+  const query = normalizeAiBaseQuery(searchParams);
+  query.rating = normalizeAiFeedbackRatingFilter(searchParams.get("rating") ?? searchParams.get("type"));
+  query.status = normalizeAiFeedbackStatusFilter(searchParams.get("status"));
+  return query;
+}
+
+function normalizeAiErrorQuery(searchParams) {
+  const query = normalizeAiLogQuery(searchParams);
+  query.type = normalizeAiExceptionTypeFilter(searchParams.get("type") ?? searchParams.get("errorType"));
+  return query;
+}
+
+function normalizeAiFeedbackResolveInput(input) {
+  return {
+    resolution: optionalText(input?.resolution ?? input?.note ?? input?.reason, 500) ?? "已复盘处理"
+  };
+}
+
+function normalizeAiConfigInput(input = {}) {
+  const output = {};
+  if (hasPatchValue(input, "enabled")) {
+    output.enabled = Boolean(input.enabled);
+  }
+  if (hasPatchValue(input, "rateLimitPerHour") || hasPatchValue(input, "frequencyLimit")) {
+    output.rateLimitPerHour = parseInteger(input.rateLimitPerHour ?? input.frequencyLimit, "INVALID_AI_RATE_LIMIT", 1, 1000);
+  }
+  if (hasPatchValue(input, "contextMessages") || hasPatchValue(input, "contextLength")) {
+    output.contextMessages = parseInteger(input.contextMessages ?? input.contextLength, "INVALID_AI_CONTEXT_MESSAGES", 1, 100);
+  }
+  if (hasPatchValue(input, "contextTokenLimit")) {
+    output.contextTokenLimit = parseInteger(input.contextTokenLimit, "INVALID_AI_CONTEXT_TOKEN_LIMIT", 500, 64000);
+  }
+  if (hasPatchValue(input, "logRetentionDays") || hasPatchValue(input, "retentionDays")) {
+    output.logRetentionDays = parseInteger(input.logRetentionDays ?? input.retentionDays, "INVALID_AI_LOG_RETENTION", 1, 3650);
+  }
+  if (hasPatchValue(input, "safetyThreshold") || hasPatchValue(input, "securityThreshold")) {
+    output.safetyThreshold = parseInteger(input.safetyThreshold ?? input.securityThreshold, "INVALID_AI_SAFETY_THRESHOLD", 1, 100);
+  }
+  if (hasPatchValue(input, "blockHighRisk")) {
+    output.blockHighRisk = Boolean(input.blockHighRisk);
+  }
+  if (hasPatchValue(input, "model")) {
+    output.model = optionalText(input.model, 80) ?? "local-rule-assistant";
+  }
+  return output;
+}
+
 function normalizeAdminCategoryInput(input, options = {}) {
   const partial = Boolean(options.partial);
   const output = {};
@@ -1427,6 +1870,13 @@ function parseOptionalPositiveInt(raw, code) {
   return parsePositiveInt(raw, code, 1, Number.MAX_SAFE_INTEGER);
 }
 
+function parseOptionalNonNegativeInt(raw, code) {
+  if (raw === undefined || raw === null || raw === "") {
+    return null;
+  }
+  return parseInteger(raw, code, 0, Number.MAX_SAFE_INTEGER);
+}
+
 function parseInteger(raw, code, min = Number.MIN_SAFE_INTEGER, max = Number.MAX_SAFE_INTEGER) {
   if (!/^-?\d+$/.test(String(raw ?? ""))) {
     throw new HttpError(400, code, "Expected an integer.");
@@ -1525,6 +1975,175 @@ function transactionRisk(item) {
     return "mid";
   }
   return "low";
+}
+
+function aiFiltersDto(query = {}) {
+  return {
+    keyword: query.keyword ?? "",
+    userId: query.userId ?? null,
+    conversationId: query.conversationId ?? null,
+    scene: query.scene ?? "all",
+    status: query.status ?? "all",
+    type: query.type ?? "all",
+    rating: query.rating ?? "all",
+    minDurationMs: query.minDurationMs ?? null,
+    maxDurationMs: query.maxDurationMs ?? null,
+    createdFrom: query.createdFrom ?? null,
+    createdTo: query.createdTo ?? null,
+    page: query.page,
+    pageSize: query.pageSize
+  };
+}
+
+function normalizeAiSceneFilter(value) {
+  const text = optionalLower(value, 50);
+  return text || "all";
+}
+
+function normalizeAiCallStatusFilter(value) {
+  const text = optionalLower(value, 30);
+  if (!text || text === "all") {
+    return "all";
+  }
+  if (!["success", "failed", "blocked"].includes(text)) {
+    throw new HttpError(400, "INVALID_AI_STATUS", "AI call status must be success, failed, or blocked.");
+  }
+  return text;
+}
+
+function normalizeAiConversationStatusFilter(value) {
+  const text = optionalLower(value, 30);
+  if (!text || text === "all") {
+    return "all";
+  }
+  if (!["active", "closed", "error", "review"].includes(text)) {
+    throw new HttpError(400, "INVALID_AI_CONVERSATION_STATUS", "AI conversation status is not supported.");
+  }
+  return text;
+}
+
+function normalizeAiFeedbackStatusFilter(value) {
+  const text = optionalLower(value, 30);
+  if (!text || text === "all") {
+    return "all";
+  }
+  if (["resolved", "done", "closed", "已处理", "已复盘"].includes(text)) {
+    return "resolved";
+  }
+  if (["pending", "processing", "open", "todo", "待处理", "处理中"].includes(text)) {
+    return "pending";
+  }
+  throw new HttpError(400, "INVALID_AI_FEEDBACK_STATUS", "AI feedback status is not supported.");
+}
+
+function normalizeAiFeedbackRatingFilter(value) {
+  const text = optionalLower(value, 30);
+  if (!text || text === "all") {
+    return "all";
+  }
+  const map = new Map([
+    ["有用", "useful"],
+    ["无用", "useless"],
+    ["错误", "wrong"],
+    ["不安全", "unsafe"]
+  ]);
+  const mapped = map.get(text) ?? text;
+  if (!["useful", "useless", "wrong", "unsafe"].includes(mapped)) {
+    throw new HttpError(400, "INVALID_AI_FEEDBACK_RATING", "AI feedback rating is not supported.");
+  }
+  return mapped;
+}
+
+function normalizeAiExceptionTypeFilter(value) {
+  const text = optionalLower(value, 30);
+  if (!text || text === "all") {
+    return "all";
+  }
+  if (!["timeout", "failed", "sensitive_hit", "unauthorized", "high_risk"].includes(text)) {
+    throw new HttpError(400, "INVALID_AI_ERROR_TYPE", "AI exception type is not supported.");
+  }
+  return text;
+}
+
+function aiSceneText(scene) {
+  const map = new Map([
+    ["chat", "通用问答"],
+    ["rules", "规则问答"],
+    ["request_filter", "需求筛选"],
+    ["request_draft", "发布草稿"],
+    ["order_summary", "订单摘要"],
+    ["dispute_summary", "纠纷摘要"],
+    ["help", "帮助咨询"]
+  ]);
+  return map.get(scene) ?? scene ?? "AI 场景";
+}
+
+function aiCallStatusText(status) {
+  const map = new Map([
+    ["success", "成功"],
+    ["failed", "失败"],
+    ["blocked", "已拦截"]
+  ]);
+  return map.get(status) ?? "未知";
+}
+
+function aiConversationStatusText(status) {
+  const map = new Map([
+    ["active", "进行中"],
+    ["closed", "已关闭"],
+    ["error", "异常"],
+    ["review", "需复核"]
+  ]);
+  return map.get(status) ?? "未知";
+}
+
+function aiFeedbackRatingText(rating) {
+  const map = new Map([
+    ["useful", "有用"],
+    ["useless", "无用"],
+    ["wrong", "错误"],
+    ["unsafe", "不安全"]
+  ]);
+  return map.get(rating) ?? "反馈";
+}
+
+function aiExceptionText(type) {
+  const map = new Map([
+    ["timeout", "超时"],
+    ["failed", "失败"],
+    ["sensitive_hit", "敏感词命中"],
+    ["unauthorized", "越权尝试"],
+    ["high_risk", "高风险请求"]
+  ]);
+  return map.get(type) ?? "异常调用";
+}
+
+function aiSafetyBoundaries() {
+  return {
+    aiCan: ["回答规则问题", "整理会话摘要", "辅助筛选需求", "生成发布草稿"],
+    aiCannot: ["自动接单", "确认订单", "执行结算", "退款退币", "裁决纠纷", "封禁用户"],
+    auditRequired: ["AI 配置变更", "反馈处理", "高风险拦截规则调整"]
+  };
+}
+
+function redactSensitiveText(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  let text = String(value);
+  const replacements = [
+    [/(password|密码|口令)\s*[:=：]\s*([^\s，,;；]+)/gi, "$1=***"],
+    [/(api[_-]?key|secret|token|密钥|令牌)\s*[:=：]\s*([A-Za-z0-9._~+/=-]{6,})/gi, "$1=***"],
+    [/\b1[3-9]\d{9}\b/g, (match) => `${match.slice(0, 3)}****${match.slice(-4)}`],
+    [/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, (match) => {
+      const [name, host] = match.split("@");
+      return `${name.slice(0, 2)}***@${host}`;
+    }]
+  ];
+  for (const [pattern, replacement] of replacements) {
+    text = text.replace(pattern, replacement);
+  }
+  return text;
 }
 
 function ensureStoreMethod(store, method, code) {

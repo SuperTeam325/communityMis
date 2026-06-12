@@ -20,6 +20,7 @@ export function createMysqlAuthStore(options = {}) {
   const managedTags = new Map();
   const riskContents = new Map();
   const aiFeedbackExtras = new Map();
+  let aiConfigOverlay = normalizeAiConfig(options.seedAiConfig ?? options.aiConfig);
   let systemSettings = normalizeSystemSettings(options.seedSystemSettings ?? options.systemSettings);
   let nextManagedTagId = 69000;
   let nextRiskContentId = 71000;
@@ -88,11 +89,18 @@ export function createMysqlAuthStore(options = {}) {
     createAiConversation,
     findAiConversationById,
     listAiConversationsForUserId,
+    listAdminAiConversations,
     createAiMessage,
     findAiMessageById,
     listAiMessagesForConversationId,
     createAiCallLog,
+    listAdminAiCallLogs,
+    listAdminAiErrors,
     createAiFeedback,
+    listAdminAiFeedback,
+    resolveAiFeedback,
+    getAiConfig,
+    updateAiConfig,
     createSession,
     findSession,
     revokeSession
@@ -3334,6 +3342,72 @@ FROM (
     };
   }
 
+  async function listAdminAiConversations(query = {}) {
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(100, positiveInteger(query.pageSize, 20));
+    const offset = (page - 1) * pageSize;
+    const where = adminAiConversationWhere(query);
+    const sql = `
+SELECT JSON_OBJECT(
+  'items', COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
+    'conversationId', q.\`conversation_id\`,
+    'userId', q.\`user_id\`,
+    'roleType', q.\`role_type\`,
+    'scene', q.\`scene\`,
+    'status', q.\`status\`,
+    'createdAt', q.\`created_at\`,
+    'updatedAt', q.\`updated_at\`,
+    'preview', q.\`preview\`,
+    'messageCount', q.\`message_count\`,
+    'sensitiveHitCount', q.\`sensitive_hit_count\`,
+    'user', q.\`user_json\`
+  )), JSON_ARRAY()),
+  'total', (
+    SELECT COUNT(*)
+    FROM \`ai_conversation\` c
+    LEFT JOIN \`user\` u ON u.\`user_id\` = c.\`user_id\`
+    ${where.clause}
+  )
+)
+FROM (
+  SELECT
+    c.\`conversation_id\`,
+    c.\`user_id\`,
+    c.\`role_type\`,
+    c.\`scene\`,
+    c.\`status\`,
+    DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`updated_at\`,
+    (SELECT m.\`content\` FROM \`ai_message\` m WHERE m.\`conversation_id\` = c.\`conversation_id\` ORDER BY m.\`created_at\` DESC, m.\`message_id\` DESC LIMIT 1) AS \`preview\`,
+    (SELECT COUNT(*) FROM \`ai_message\` m WHERE m.\`conversation_id\` = c.\`conversation_id\`) AS \`message_count\`,
+    (SELECT COUNT(*) FROM \`ai_message\` m WHERE m.\`conversation_id\` = c.\`conversation_id\` AND m.\`sensitive_hit\` = 1) AS \`sensitive_hit_count\`,
+    IF(u.\`user_id\` IS NULL, NULL, ${userJsonObjectSql("u")}) AS \`user_json\`
+  FROM \`ai_conversation\` c
+  LEFT JOIN \`user\` u ON u.\`user_id\` = c.\`user_id\`
+  ${where.clause}
+  ORDER BY c.\`updated_at\` DESC, c.\`conversation_id\` DESC
+  LIMIT ${pageSize} OFFSET ${offset}
+) q;
+`;
+    const result = await mysqlJson(sql, { optional: true });
+    const conversations = Array.isArray(result?.items)
+      ? result.items.map((item) => ({
+        ...normalizeAiConversation(item),
+        preview: normalizeOptionalString(item.preview) ?? "",
+        messageCount: Number(item.messageCount ?? 0),
+        sensitiveHitCount: Number(item.sensitiveHitCount ?? 0),
+        user: item.user ? withProfileExtras(normalizeUser(item.user)) : null
+      }))
+      : [];
+    return {
+      conversations,
+      total: Number(result?.total ?? 0),
+      summary: aiConversationSummary(conversations),
+      page,
+      pageSize
+    };
+  }
+
   async function createAiMessage(input) {
     const sql = `
 INSERT INTO \`ai_message\` (
@@ -3420,6 +3494,96 @@ LIMIT 1;
     return normalizeAiCallLog(await mysqlJson(sql));
   }
 
+  async function listAdminAiCallLogs(query = {}) {
+    const result = await adminAiCallLogsResult(query, { errorsOnly: false });
+    return {
+      callLogs: result.items,
+      total: result.total,
+      summary: aiCallLogSummary(result.items),
+      page: result.page,
+      pageSize: result.pageSize
+    };
+  }
+
+  async function listAdminAiErrors(query = {}) {
+    const result = await adminAiCallLogsResult(query, { errorsOnly: true });
+    return {
+      errors: result.items,
+      total: result.total,
+      summary: aiErrorSummary(result.items),
+      page: result.page,
+      pageSize: result.pageSize
+    };
+  }
+
+  async function adminAiCallLogsResult(query = {}, options = {}) {
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(100, positiveInteger(query.pageSize, 20));
+    const offset = (page - 1) * pageSize;
+    const where = adminAiCallLogWhere(query, options);
+    const sql = `
+SELECT JSON_OBJECT(
+  'items', COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
+    'callId', q.\`call_id\`,
+    'conversationId', q.\`conversation_id\`,
+    'userId', q.\`user_id\`,
+    'scene', q.\`scene\`,
+    'requestTokens', q.\`request_tokens\`,
+    'responseTokens', q.\`response_tokens\`,
+    'durationMs', q.\`duration_ms\`,
+    'status', q.\`status\`,
+    'errorMessage', q.\`error_message\`,
+    'createdAt', q.\`created_at\`,
+    'exceptionType', q.\`exception_type\`,
+    'riskLevel', q.\`risk_level\`,
+    'reason', q.\`reason\`,
+    'user', q.\`user_json\`,
+    'conversation', q.\`conversation_json\`
+  )), JSON_ARRAY()),
+  'total', (
+    SELECT COUNT(*)
+    FROM \`ai_call_log\` l
+    LEFT JOIN \`user\` u ON u.\`user_id\` = l.\`user_id\`
+    LEFT JOIN \`ai_conversation\` c ON c.\`conversation_id\` = l.\`conversation_id\`
+    ${where.clause}
+  )
+)
+FROM (
+  SELECT
+    l.*,
+    DATE_FORMAT(l.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    ${aiExceptionCaseSql("l")} AS \`exception_type\`,
+    ${aiExceptionRiskCaseSql(aiExceptionCaseSql("l"))} AS \`risk_level\`,
+    COALESCE(l.\`error_message\`, (SELECT m.\`content\` FROM \`ai_message\` m WHERE m.\`conversation_id\` = l.\`conversation_id\` ORDER BY m.\`created_at\` DESC, m.\`message_id\` DESC LIMIT 1)) AS \`reason\`,
+    IF(u.\`user_id\` IS NULL, NULL, ${userJsonObjectSql("u")}) AS \`user_json\`,
+    IF(c.\`conversation_id\` IS NULL, NULL, ${aiConversationJsonObjectSql("c")}) AS \`conversation_json\`
+  FROM \`ai_call_log\` l
+  LEFT JOIN \`user\` u ON u.\`user_id\` = l.\`user_id\`
+  LEFT JOIN \`ai_conversation\` c ON c.\`conversation_id\` = l.\`conversation_id\`
+  ${where.clause}
+  ORDER BY l.\`created_at\` DESC, l.\`call_id\` DESC
+  LIMIT ${pageSize} OFFSET ${offset}
+) q;
+`;
+    const result = await mysqlJson(sql, { optional: true });
+    const items = Array.isArray(result?.items)
+      ? result.items.map((item) => ({
+        ...normalizeAiCallLog(item),
+        exceptionType: normalizeOptionalString(item.exceptionType) ?? "none",
+        riskLevel: normalizeOptionalString(item.riskLevel) ?? "low",
+        reason: normalizeOptionalString(item.reason),
+        user: item.user ? withProfileExtras(normalizeUser(item.user)) : null,
+        conversation: normalizeAiConversation(item.conversation)
+      }))
+      : [];
+    return {
+      items,
+      total: Number(result?.total ?? 0),
+      page,
+      pageSize
+    };
+  }
+
   async function createAiFeedback(input) {
     const messageId = Number(input.messageId ?? input.message_id);
     const userId = Number(input.userId ?? input.user_id);
@@ -3458,6 +3622,143 @@ LIMIT 1;
     const feedback = normalizeAiFeedback(await mysqlJson(sql));
     aiFeedbackExtras.set(extraKey, feedback);
     return feedback;
+  }
+
+  async function listAdminAiFeedback(query = {}) {
+    const page = positiveInteger(query.page, 1);
+    const pageSize = Math.min(100, positiveInteger(query.pageSize, 20));
+    const offset = (page - 1) * pageSize;
+    const where = adminAiFeedbackWhere(query);
+    const sql = `
+SELECT JSON_OBJECT(
+  'items', COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
+    'feedbackId', q.\`feedback_id\`,
+    'messageId', q.\`message_id\`,
+    'userId', q.\`user_id\`,
+    'rating', q.\`rating\`,
+    'comment', q.\`comment\`,
+    'status', q.\`runtime_status\`,
+    'resolution', q.\`runtime_resolution\`,
+    'resolvedBy', q.\`runtime_resolved_by\`,
+    'resolvedAt', q.\`runtime_resolved_at\`,
+    'createdAt', q.\`created_at\`,
+    'user', q.\`user_json\`,
+    'message', q.\`message_json\`,
+    'conversation', q.\`conversation_json\`
+  )), JSON_ARRAY()),
+  'total', (
+    SELECT COUNT(*)
+    FROM \`ai_feedback\` f
+    JOIN \`ai_message\` m ON m.\`message_id\` = f.\`message_id\`
+    JOIN \`ai_conversation\` c ON c.\`conversation_id\` = m.\`conversation_id\`
+    JOIN \`user\` u ON u.\`user_id\` = f.\`user_id\`
+    ${where.clause}
+  )
+)
+FROM (
+  SELECT
+    f.*,
+    DATE_FORMAT(f.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    IF(u.\`user_id\` IS NULL, NULL, ${userJsonObjectSql("u")}) AS \`user_json\`,
+    ${aiMessageJsonObjectSql("m")} AS \`message_json\`,
+    ${aiConversationJsonObjectSql("c")} AS \`conversation_json\`,
+    NULL AS \`runtime_status\`,
+    NULL AS \`runtime_resolution\`,
+    NULL AS \`runtime_resolved_by\`,
+    NULL AS \`runtime_resolved_at\`
+  FROM \`ai_feedback\` f
+  JOIN \`ai_message\` m ON m.\`message_id\` = f.\`message_id\`
+  JOIN \`ai_conversation\` c ON c.\`conversation_id\` = m.\`conversation_id\`
+  JOIN \`user\` u ON u.\`user_id\` = f.\`user_id\`
+  ${where.clause}
+  ORDER BY f.\`created_at\` DESC, f.\`feedback_id\` DESC
+  LIMIT ${pageSize} OFFSET ${offset}
+) q;
+`;
+    const result = await mysqlJson(sql, { optional: true });
+    const resolvedFilter = normalizeFeedbackResolvedFilter(query.status ?? query.resolved);
+    const items = (Array.isArray(result?.items) ? result.items.map((item) => normalizeAdminAiFeedback(item, aiFeedbackExtras)) : [])
+      .filter((item) => resolvedFilter === "all" || (resolvedFilter === "resolved" ? item.resolved : !item.resolved));
+    return {
+      feedback: items,
+      total: resolvedFilter === "all" ? Number(result?.total ?? 0) : items.length,
+      summary: aiFeedbackSummary(items),
+      page,
+      pageSize
+    };
+  }
+
+  async function resolveAiFeedback(feedbackId, input = {}) {
+    const id = Number(feedbackId);
+    const current = await mysqlJson(`
+SELECT JSON_OBJECT(
+  'feedbackId', f.\`feedback_id\`,
+  'messageId', f.\`message_id\`,
+  'userId', f.\`user_id\`,
+  'rating', f.\`rating\`,
+  'comment', f.\`comment\`,
+  'createdAt', DATE_FORMAT(f.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+)
+FROM \`ai_feedback\` f
+WHERE f.\`feedback_id\` = ${id}
+LIMIT 1;
+`, { optional: true });
+    if (!current) {
+      const error = new Error("AI feedback was not found.");
+      error.code = "AI_FEEDBACK_NOT_FOUND";
+      throw error;
+    }
+    const feedback = normalizeAiFeedback({
+      ...current,
+      status: "resolved",
+      resolution: normalizeOptionalString(input.resolution ?? input.note) ?? "已处理",
+      resolvedBy: input.actorId,
+      resolvedAt: input.resolvedAt ?? new Date().toISOString()
+    });
+    aiFeedbackExtras.set(`${feedback.messageId}:${feedback.userId}`, feedback);
+    return feedback;
+  }
+
+  async function getAiConfig() {
+    const sql = `
+SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
+  'key', \`config_key\`,
+  'value', \`config_value\`,
+  'updatedAt', DATE_FORMAT(\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+)), JSON_ARRAY())
+FROM \`ai_config\`
+WHERE \`config_key\` LIKE 'ai.%';
+`;
+    const rows = await mysqlJson(sql, { optional: true });
+    return mergeAiConfig(aiConfigOverlay, aiConfigFromRows(rows));
+  }
+
+  async function updateAiConfig(input = {}) {
+    const next = mergeAiConfig(await getAiConfig(), input);
+    const actorId = input.actorId === undefined || input.actorId === null ? null : Number(input.actorId);
+    const rows = [
+      ["ai.enabled", next.enabled, "是否启用 AI 助手入口"],
+      ["ai.rate_limit_per_hour", next.rateLimitPerHour, "单用户每小时 AI 调用上限"],
+      ["ai.context_messages", next.contextMessages, "会话上下文消息条数"],
+      ["ai.context_token_limit", next.contextTokenLimit, "会话上下文 token 上限"],
+      ["ai.log_retention_days", next.logRetentionDays, "AI 会话和调用日志保留天数"],
+      ["ai.safety_threshold", next.safetyThreshold, "安全拦截阈值"],
+      ["ai.block_high_risk", next.blockHighRisk, "是否拦截高风险请求"],
+      ["ai.model.default", next.model, "本地开发默认 AI 模型占位"]
+    ];
+    const values = rows.map(([key, value, description]) => `(${sqlString(key)}, CAST(${sqlString(JSON.stringify(value))} AS JSON), 'global', ${sqlString(description)}, ${actorId === null ? "NULL" : actorId})`).join(",\n");
+    await mysqlJson(`
+INSERT INTO \`ai_config\` (\`config_key\`, \`config_value\`, \`scope\`, \`description\`, \`updated_by\`)
+VALUES
+${values}
+ON DUPLICATE KEY UPDATE
+  \`config_value\` = VALUES(\`config_value\`),
+  \`description\` = VALUES(\`description\`),
+  \`updated_by\` = VALUES(\`updated_by\`);
+SELECT JSON_OBJECT('ok', true);
+`);
+    aiConfigOverlay = next;
+    return next;
   }
 
   async function findAuditLogById(auditId) {
@@ -4165,6 +4466,10 @@ function normalizeAiFeedback(input) {
     userId: Number(input.userId ?? input.user_id),
     rating: normalizeAiFeedbackRating(input.rating),
     comment: normalizeOptionalString(input.comment),
+    status: normalizeAiFeedbackStatus(input.status),
+    resolution: normalizeOptionalString(input.resolution),
+    resolvedBy: input.resolvedBy === undefined || input.resolvedBy === null ? null : Number(input.resolvedBy ?? input.resolved_by),
+    resolvedAt: input.resolvedAt ?? input.resolved_at ?? null,
     createdAt: input.createdAt ?? input.created_at ?? null
   };
 }
@@ -4739,6 +5044,313 @@ function normalizeAiCallStatus(value) {
 function normalizeAiFeedbackRating(value) {
   const text = String(value ?? "useful").trim().toLowerCase();
   return ["useful", "useless", "wrong", "unsafe"].includes(text) ? text : "useful";
+}
+
+function normalizeAiFeedbackStatus(value) {
+  const text = String(value ?? "pending").trim().toLowerCase();
+  return ["pending", "processing", "resolved"].includes(text) ? text : "pending";
+}
+
+function normalizeAdminAiFeedback(item, feedbackExtras) {
+  const feedback = normalizeAiFeedback(item);
+  const extra = feedbackExtras.get(`${feedback.messageId}:${feedback.userId}`) ?? null;
+  const merged = extra ? { ...feedback, ...extra } : feedback;
+  return {
+    ...merged,
+    resolved: merged.status === "resolved" || Boolean(merged.resolvedAt),
+    user: item.user ? normalizeUser(item.user) : null,
+    message: normalizeAiMessage(item.message),
+    conversation: normalizeAiConversation(item.conversation)
+  };
+}
+
+function normalizeFeedbackResolvedFilter(value) {
+  const text = String(value ?? "all").trim().toLowerCase();
+  if (["resolved", "done", "closed", "已处理", "已复盘"].includes(text)) {
+    return "resolved";
+  }
+  if (["pending", "open", "todo", "待处理", "处理中"].includes(text)) {
+    return "pending";
+  }
+  return "all";
+}
+
+function adminAiConversationWhere(query = {}) {
+  const clauses = [];
+  const userId = optionalPositiveNumber(query.userId);
+  const conversationId = optionalPositiveNumber(query.conversationId);
+  const scene = normalizeOptionalString(query.scene);
+  const status = normalizeOptionalString(query.status);
+  const keyword = normalizeOptionalString(query.keyword ?? query.q);
+  if (userId !== null) {
+    clauses.push(`c.\`user_id\` = ${userId}`);
+  }
+  if (conversationId !== null) {
+    clauses.push(`c.\`conversation_id\` = ${conversationId}`);
+  }
+  if (scene && scene !== "all") {
+    clauses.push(`c.\`scene\` = ${sqlString(scene)}`);
+  }
+  if (status && status !== "all") {
+    clauses.push(`c.\`status\` = ${sqlString(status)}`);
+  }
+  appendDateRangeClauses(clauses, "c.`updated_at`", query);
+  if (keyword) {
+    clauses.push(`(
+      LOWER(CAST(c.\`conversation_id\` AS CHAR)) LIKE ${sqlLike(keyword)}
+      OR LOWER(c.\`scene\`) LIKE ${sqlLike(keyword)}
+      OR LOWER(COALESCE(u.\`username\`, '')) LIKE ${sqlLike(keyword)}
+      OR EXISTS (
+        SELECT 1 FROM \`ai_message\` km
+        WHERE km.\`conversation_id\` = c.\`conversation_id\`
+          AND LOWER(km.\`content\`) LIKE ${sqlLike(keyword)}
+      )
+    )`);
+  }
+  return { clause: clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "" };
+}
+
+function adminAiCallLogWhere(query = {}, options = {}) {
+  const clauses = [];
+  const userId = optionalPositiveNumber(query.userId);
+  const conversationId = optionalPositiveNumber(query.conversationId);
+  const scene = normalizeOptionalString(query.scene);
+  const status = normalizeOptionalString(query.status);
+  const keyword = normalizeOptionalString(query.keyword ?? query.q);
+  const minDuration = optionalNumber(query.minDurationMs);
+  const maxDuration = optionalNumber(query.maxDurationMs);
+  const type = normalizeOptionalString(query.type ?? query.errorType);
+  if (userId !== null) {
+    clauses.push(`l.\`user_id\` = ${userId}`);
+  }
+  if (conversationId !== null) {
+    clauses.push(`l.\`conversation_id\` = ${conversationId}`);
+  }
+  if (scene && scene !== "all") {
+    clauses.push(`l.\`scene\` = ${sqlString(scene)}`);
+  }
+  if (status && status !== "all") {
+    clauses.push(`l.\`status\` = ${sqlString(status)}`);
+  }
+  if (minDuration !== null) {
+    clauses.push(`l.\`duration_ms\` >= ${minDuration}`);
+  }
+  if (maxDuration !== null) {
+    clauses.push(`l.\`duration_ms\` <= ${maxDuration}`);
+  }
+  appendDateRangeClauses(clauses, "l.`created_at`", query);
+  if (options.errorsOnly) {
+    clauses.push(`(${aiExceptionCaseSql("l")} <> 'none')`);
+  }
+  if (type && type !== "all") {
+    clauses.push(`${aiExceptionCaseSql("l")} = ${sqlString(type)}`);
+  }
+  if (keyword) {
+    clauses.push(`(
+      LOWER(CAST(l.\`call_id\` AS CHAR)) LIKE ${sqlLike(keyword)}
+      OR LOWER(CAST(l.\`conversation_id\` AS CHAR)) LIKE ${sqlLike(keyword)}
+      OR LOWER(l.\`scene\`) LIKE ${sqlLike(keyword)}
+      OR LOWER(l.\`status\`) LIKE ${sqlLike(keyword)}
+      OR LOWER(COALESCE(l.\`error_message\`, '')) LIKE ${sqlLike(keyword)}
+      OR LOWER(COALESCE(u.\`username\`, '')) LIKE ${sqlLike(keyword)}
+    )`);
+  }
+  return { clause: clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "" };
+}
+
+function adminAiFeedbackWhere(query = {}) {
+  const clauses = [];
+  const userId = optionalPositiveNumber(query.userId);
+  const conversationId = optionalPositiveNumber(query.conversationId);
+  const scene = normalizeOptionalString(query.scene);
+  const rating = normalizeOptionalString(query.rating ?? query.type);
+  const keyword = normalizeOptionalString(query.keyword ?? query.q);
+  if (userId !== null) {
+    clauses.push(`f.\`user_id\` = ${userId}`);
+  }
+  if (conversationId !== null) {
+    clauses.push(`c.\`conversation_id\` = ${conversationId}`);
+  }
+  if (scene && scene !== "all") {
+    clauses.push(`c.\`scene\` = ${sqlString(scene)}`);
+  }
+  if (rating && rating !== "all") {
+    clauses.push(`f.\`rating\` = ${sqlString(normalizeAiFeedbackRating(rating))}`);
+  }
+  appendDateRangeClauses(clauses, "f.`created_at`", query);
+  if (keyword) {
+    clauses.push(`(
+      LOWER(CAST(f.\`feedback_id\` AS CHAR)) LIKE ${sqlLike(keyword)}
+      OR LOWER(COALESCE(f.\`comment\`, '')) LIKE ${sqlLike(keyword)}
+      OR LOWER(m.\`content\`) LIKE ${sqlLike(keyword)}
+      OR LOWER(COALESCE(u.\`username\`, '')) LIKE ${sqlLike(keyword)}
+    )`);
+  }
+  return { clause: clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "" };
+}
+
+function appendDateRangeClauses(clauses, column, query = {}) {
+  const from = normalizeOptionalString(query.createdFrom ?? query.from);
+  const to = normalizeOptionalString(query.createdTo ?? query.to);
+  if (from) {
+    clauses.push(`${column} >= ${sqlString(from)}`);
+  }
+  if (to) {
+    clauses.push(`${column} <= DATE_ADD(${sqlString(to)}, INTERVAL 1 DAY)`);
+  }
+}
+
+function optionalPositiveNumber(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function optionalNumber(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function aiExceptionCaseSql(alias) {
+  return `CASE
+    WHEN ${alias}.\`duration_ms\` >= 3000 OR LOWER(COALESCE(${alias}.\`error_message\`, '')) LIKE '%timeout%' OR COALESCE(${alias}.\`error_message\`, '') LIKE '%超时%' THEN 'timeout'
+    WHEN EXISTS (SELECT 1 FROM \`ai_message\` em WHERE em.\`conversation_id\` = ${alias}.\`conversation_id\` AND em.\`sensitive_hit\` = 1) OR COALESCE(${alias}.\`error_message\`, '') LIKE '%敏感词%' THEN 'sensitive_hit'
+    WHEN LOWER(COALESCE(${alias}.\`error_message\`, '')) LIKE '%unauthorized%' OR LOWER(COALESCE(${alias}.\`error_message\`, '')) LIKE '%forbidden%' OR COALESCE(${alias}.\`error_message\`, '') LIKE '%越权%' OR COALESCE(${alias}.\`error_message\`, '') LIKE '%权限%' THEN 'unauthorized'
+    WHEN ${alias}.\`status\` = 'blocked' OR COALESCE(${alias}.\`error_message\`, '') LIKE '%高风险%' OR COALESCE(${alias}.\`error_message\`, '') LIKE '%拦截%' THEN 'high_risk'
+    WHEN ${alias}.\`status\` = 'failed' THEN 'failed'
+    ELSE 'none'
+  END`;
+}
+
+function aiExceptionRiskCaseSql(typeExpression) {
+  return `CASE
+    WHEN (${typeExpression}) IN ('unauthorized', 'high_risk', 'sensitive_hit') THEN 'high'
+    WHEN (${typeExpression}) IN ('timeout', 'failed') THEN 'medium'
+    ELSE 'low'
+  END`;
+}
+
+function aiConversationSummary(items) {
+  const list = Array.isArray(items) ? items : [];
+  return {
+    total: list.length,
+    activeCount: list.filter((item) => item.status === "active").length,
+    reviewCount: list.filter((item) => item.status === "review").length,
+    sensitiveHitCount: list.reduce((sum, item) => sum + Number(item.sensitiveHitCount ?? 0), 0)
+  };
+}
+
+function aiCallLogSummary(items) {
+  const list = Array.isArray(items) ? items : [];
+  const success = list.filter((item) => item.status === "success").length;
+  const totalDuration = list.reduce((sum, item) => sum + Number(item.durationMs ?? 0), 0);
+  return {
+    total: list.length,
+    successCount: success,
+    failedCount: list.filter((item) => item.status === "failed").length,
+    blockedCount: list.filter((item) => item.status === "blocked").length,
+    avgDurationMs: list.length > 0 ? Math.round(totalDuration / list.length) : 0,
+    successRate: list.length > 0 ? Math.round((success / list.length) * 1000) / 10 : 0
+  };
+}
+
+function aiErrorSummary(items) {
+  const list = Array.isArray(items) ? items : [];
+  return {
+    total: list.length,
+    timeoutCount: list.filter((item) => item.exceptionType === "timeout").length,
+    failedCount: list.filter((item) => item.exceptionType === "failed").length,
+    sensitiveHitCount: list.filter((item) => item.exceptionType === "sensitive_hit").length,
+    unauthorizedCount: list.filter((item) => item.exceptionType === "unauthorized").length,
+    highRiskCount: list.filter((item) => item.exceptionType === "high_risk").length
+  };
+}
+
+function aiFeedbackSummary(items) {
+  const list = Array.isArray(items) ? items : [];
+  return {
+    total: list.length,
+    usefulCount: list.filter((item) => item.rating === "useful").length,
+    negativeCount: list.filter((item) => ["useless", "wrong", "unsafe"].includes(item.rating)).length,
+    unsafeCount: list.filter((item) => item.rating === "unsafe").length,
+    pendingCount: list.filter((item) => !item.resolved).length,
+    resolvedCount: list.filter((item) => item.resolved).length
+  };
+}
+
+function aiConfigFromRows(rows) {
+  const output = {};
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const key = row.key ?? row.config_key;
+    const value = row.value ?? row.config_value;
+    if (key === "ai.enabled") {
+      output.enabled = Boolean(value);
+    } else if (key === "ai.rate_limit_per_hour") {
+      output.rateLimitPerHour = Number(value);
+    } else if (key === "ai.context_messages") {
+      output.contextMessages = Number(value);
+    } else if (key === "ai.context_token_limit") {
+      output.contextTokenLimit = Number(value);
+    } else if (key === "ai.log_retention_days") {
+      output.logRetentionDays = Number(value);
+    } else if (key === "ai.safety_threshold") {
+      output.safetyThreshold = Number(value);
+    } else if (key === "ai.block_high_risk") {
+      output.blockHighRisk = Boolean(value);
+    } else if (key === "ai.model.default") {
+      output.model = String(value ?? "");
+    }
+    if (row.updatedAt) {
+      output.updatedAt = row.updatedAt;
+    }
+  }
+  return output;
+}
+
+function normalizeAiConfig(input = {}) {
+  const base = {
+    enabled: true,
+    rateLimitPerHour: 60,
+    contextMessages: 12,
+    contextTokenLimit: 4000,
+    logRetentionDays: 180,
+    safetyThreshold: 80,
+    blockHighRisk: true,
+    model: "local-rule-assistant",
+    updatedAt: "2026-06-01T09:00:00.000Z"
+  };
+  return mergeAiConfig(base, input);
+}
+
+function mergeAiConfig(current, patch = {}) {
+  const numberPatch = (keys, min, max, fallback) => {
+    const key = keys.find((item) => hasOwn(patch, item));
+    if (!key) {
+      return fallback;
+    }
+    const value = Number(patch[key]);
+    return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+  };
+  const booleanPatchValue = (keys, fallback) => {
+    const key = keys.find((item) => hasOwn(patch, item));
+    return key ? Boolean(patch[key]) : Boolean(fallback);
+  };
+  return {
+    enabled: booleanPatchValue(["enabled", "aiEnabled"], current.enabled),
+    rateLimitPerHour: numberPatch(["rateLimitPerHour", "frequencyLimit", "rate_limit_per_hour"], 1, 1000, Number(current.rateLimitPerHour ?? 60)),
+    contextMessages: numberPatch(["contextMessages", "contextLength", "context_messages"], 1, 100, Number(current.contextMessages ?? 12)),
+    contextTokenLimit: numberPatch(["contextTokenLimit", "contextTokens", "context_token_limit"], 500, 64000, Number(current.contextTokenLimit ?? 4000)),
+    logRetentionDays: numberPatch(["logRetentionDays", "retentionDays", "log_retention_days"], 1, 3650, Number(current.logRetentionDays ?? 180)),
+    safetyThreshold: numberPatch(["safetyThreshold", "securityThreshold", "safety_threshold"], 1, 100, Number(current.safetyThreshold ?? 80)),
+    blockHighRisk: booleanPatchValue(["blockHighRisk", "aiHighRiskBlock"], current.blockHighRisk),
+    model: normalizeOptionalString(patch.model) ?? current.model ?? "local-rule-assistant",
+    updatedAt: patch.updatedAt ?? new Date().toISOString()
+  };
 }
 
 function riskScoreFromHits(hits) {
