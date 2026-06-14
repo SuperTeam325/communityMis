@@ -4116,12 +4116,10 @@ LEFT JOIN \`user_profile\` up ON up.\`user_id\` = u.\`user_id\`
 LEFT JOIN \`category\` c ON c.\`category_id\` = p.\`category_id\`
 ${where}
 ORDER BY p.\`created_at\` DESC, p.\`post_id\` DESC
-LIMIT ? OFFSET ?
+LIMIT ${pageSize} OFFSET ${offset}
 `, [
       ...(viewerId === null ? [] : [viewerId, viewerId]),
       ...params,
-      pageSize,
-      offset
     ]);
     return {
       posts: rows.map(normalizeCommunityPost),
@@ -4313,8 +4311,8 @@ SELECT
 FROM \`user_collection\` uc
 ${where}
 ORDER BY uc.\`created_at\` DESC
-LIMIT ? OFFSET ?
-`, [...params, pageSize, offset]);
+LIMIT ${pageSize} OFFSET ${offset}
+`, [...params]);
     const totalRow = await pooledOne(`SELECT COUNT(*) AS total FROM \`user_collection\` uc ${where}`, params);
     return {
       collections: await Promise.all(rows.map((row) => enrichCollection(row))),
@@ -4419,8 +4417,8 @@ WHERE ((m.\`sender_id\` = ? AND m.\`receiver_id\` = ?) OR (m.\`sender_id\` = ? A
   AND ${orderClause}
   AND m.\`archived_at\` IS NULL
 ORDER BY m.\`created_at\` ASC, m.\`message_id\` ASC
-LIMIT ? OFFSET ?
-`, [...params, pageSize, offset]);
+LIMIT ${pageSize} OFFSET ${offset}
+`, [...params]);
     const totalRow = await pooledOne(`
 SELECT COUNT(*) AS total
 FROM \`message\` m

@@ -39,6 +39,7 @@ export async function sendEmailCode(config, input, code, options = {}) {
     if (error instanceof HttpError) {
       throw error;
     }
+    console.error("SMTP sendRawMail failed:", error.message, "code:", error.code, "stack:", error.stack?.split("\n")[0] ?? "");
     const providerError = new HttpError(502, "SMTP_PROVIDER_ERROR", "SMTP provider failed to send verification code.");
     providerError.providerError = error.code ?? "SMTP_SEND_FAILED";
     throw providerError;

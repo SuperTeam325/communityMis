@@ -140,6 +140,7 @@ window.NeighborApp = {
 };
 
 markCurrentRouteLinks();
+bindRegisterSkillTags();
 
 const guardResult = await runRouteGuard();
 if (guardResult.status !== "redirected") {
@@ -366,6 +367,7 @@ function bindRegisterPageForm() {
 
   emailCodeInput?.removeAttribute("disabled");
   emailCodeButton?.removeAttribute("disabled");
+  bindRegisterSkillTags();
 
   emailInput?.addEventListener("input", () => resetCodeState(verificationState.email, "邮箱变更后需重新获取验证码。"));
 
@@ -433,6 +435,36 @@ function bindRegisterPageForm() {
       showInlineMessage(button, authErrorMessage(error, "register"), "error");
     }
   }), true);
+}
+
+function bindRegisterSkillTags() {
+  const tags = Array.from(document.querySelectorAll("#skill-tags .skill-tag"));
+  const count = document.getElementById("skill-count");
+  if (!tags.length) {
+    return;
+  }
+
+  const updateCount = () => {
+    const selectedCount = tags.filter((tag) => tag.classList.contains("selected")).length;
+    if (count) {
+      count.textContent = `已选 ${selectedCount} 项`;
+    }
+    tags.forEach((tag) => {
+      tag.setAttribute("aria-pressed", tag.classList.contains("selected") ? "true" : "false");
+    });
+  };
+
+  tags.forEach((tag) => {
+    if (tag.dataset.runtimeSkillBound === "true") {
+      return;
+    }
+    tag.dataset.runtimeSkillBound = "true";
+    tag.addEventListener("click", () => {
+      tag.classList.toggle("selected");
+      updateCount();
+    });
+  });
+  updateCount();
 }
 
 function createCodeState(button, input, note, defaultLabel) {

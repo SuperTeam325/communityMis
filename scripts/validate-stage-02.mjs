@@ -104,12 +104,13 @@ async function checkWithEphemeralMysql(migrationSql, seedSql) {
   const tmpRoot = path.join(projectRoot, "tmp");
   const dataDir = path.join(tmpRoot, `stage02-mysql-${process.pid}`);
   const dbName = "community_mis_stage02_test";
-  await resetDirectoryInside(tmpRoot, dataDir);
+  await fs.promises.mkdir(tmpRoot, { recursive: true });
+  await removeDirectoryInside(tmpRoot, dataDir);
 
   let server;
   let serverPort;
   try {
-    const init = await runCommand(mysqld, ["--no-defaults", "--initialize-insecure", `--datadir=${dataDir}`, "--console"], {
+    const init = await runCommand(mysqld, ["--no-defaults", "--initialize-insecure", "--user=root", `--datadir=${dataDir}`, "--console"], {
       timeoutMs: 120000
     });
     record(init.code === 0, "ephemeral MySQL data directory initializes");
@@ -122,6 +123,7 @@ async function checkWithEphemeralMysql(migrationSql, seedSql) {
     serverPort = port;
     server = spawn(mysqld, [
       "--no-defaults",
+      "--user=root",
       `--datadir=${dataDir}`,
       `--port=${port}`,
       "--bind-address=127.0.0.1",

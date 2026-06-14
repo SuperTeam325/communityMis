@@ -155,13 +155,14 @@ async function checkAuthApiWithEphemeralMysql() {
   const tmpRoot = path.join(projectRoot, "tmp");
   const dataDir = path.join(tmpRoot, `stage03-mysql-${process.pid}`);
   const dbName = "community_mis_stage03_test";
-  await resetDirectoryInside(tmpRoot, dataDir);
+  await fs.promises.mkdir(tmpRoot, { recursive: true });
+  await removeDirectoryInside(tmpRoot, dataDir);
 
   let serverProcess;
   let serverPort;
   let apiServer;
   try {
-    const init = await runCommand(mysqld, ["--no-defaults", "--initialize-insecure", `--datadir=${dataDir}`, "--console"], {
+    const init = await runCommand(mysqld, ["--no-defaults", "--initialize-insecure", "--user=root", `--datadir=${dataDir}`, "--console"], {
       timeoutMs: 120000
     });
     record(init.code === 0, "stage 03 MySQL data directory initializes");
@@ -173,6 +174,7 @@ async function checkAuthApiWithEphemeralMysql() {
     serverPort = await getFreePort();
     serverProcess = spawn(mysqld, [
       "--no-defaults",
+      "--user=root",
       `--datadir=${dataDir}`,
       `--port=${serverPort}`,
       "--bind-address=127.0.0.1",
