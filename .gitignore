@@ -60,6 +60,8 @@ __pycache__/
 .venv/
 venv/
 env/
+!deploy/env/
+!deploy/env/community-mis.env.example
 
 # Database and local runtime artifacts
 *.db
