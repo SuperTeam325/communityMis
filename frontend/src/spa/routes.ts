@@ -4,7 +4,7 @@ export const appRoutes: AppRoute[] = [
   { id: "entry", title: "邻帮入口", path: "/", entryPath: "/", surface: "launcher", layout: "entry" },
   { id: "login", title: "登录", path: "/login", entryPath: "/login", surface: "userAuth", layout: "auth" },
   { id: "register", title: "注册", path: "/register", entryPath: "/register", surface: "userAuth", layout: "auth" },
-  { id: "feed", title: "首页信息流", path: "/feed", entryPath: "/feed", surface: "user", layout: "userShell" },
+  { id: "feed", title: "首页信息流", path: "/feed", entryPath: "/feed", surface: "public", layout: "userShell" },
   { id: "tasks", title: "任务市场", path: "/tasks", entryPath: "/tasks", surface: "user", layout: "userShell" },
   { id: "post", title: "发布", path: "/post", entryPath: "/post", surface: "user", layout: "userShell" },
   { id: "messages", title: "消息中心", path: "/messages", entryPath: "/messages", surface: "user", layout: "userShell" },

@@ -77,10 +77,10 @@ function RouteFrame(props: PageProps) {
     </Suspense>
   );
 
-  if (route.surface === "admin") {
+  if (route.layout === "adminShell") {
     return <AdminShell route={route}>{page}</AdminShell>;
   }
-  if (route.surface === "user") {
+  if (route.layout === "userShell") {
     return <UserShell route={route}>{page}</UserShell>;
   }
   return page;
