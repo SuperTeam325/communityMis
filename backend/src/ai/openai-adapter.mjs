@@ -9,6 +9,8 @@ export function createOpenAiAdapter(config, options = {}) {
   return {
     async complete(input) {
       const runtime = input.config ?? {};
+      const fallback = normalizeFallback(input.fallback, input.scene);
+      const model = providerModel(runtime.model, config.openai.model);
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), Number(runtime.timeoutMs ?? config.openai.timeoutMs));
       try {
@@ -19,7 +21,7 @@ export function createOpenAiAdapter(config, options = {}) {
             "content-type": "application/json"
           },
           body: JSON.stringify({
-            model: runtime.model ?? config.openai.model,
+            model,
             messages: [
               {
                 role: "system",
@@ -37,14 +39,14 @@ export function createOpenAiAdapter(config, options = {}) {
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new HttpError(502, "AI_PROVIDER_ERROR", "AI provider returned an error.", {
+          return providerFailure(fallback, "AI_PROVIDER_ERROR", "AI provider returned an error.", {
             status: response.status,
             providerCode: payload.error?.code ?? null
           });
         }
         const answer = payload.choices?.[0]?.message?.content;
         if (!answer) {
-          throw new HttpError(502, "AI_PROVIDER_EMPTY_RESPONSE", "AI provider returned an empty response.");
+          return providerFailure(fallback, "AI_PROVIDER_EMPTY_RESPONSE", "AI provider returned an empty response.");
         }
         return {
           scene: input.scene,
@@ -53,11 +55,14 @@ export function createOpenAiAdapter(config, options = {}) {
           bullets: [],
           guidance: null,
           fallback: false,
-          model: runtime.model ?? config.openai.model
+          model
         };
       } catch (error) {
         if (error.name === "AbortError") {
-          throw new HttpError(504, "AI_PROVIDER_TIMEOUT", "AI provider request timed out.");
+          return providerFailure(fallback, "AI_PROVIDER_TIMEOUT", "AI provider request timed out.", undefined, 504);
+        }
+        if (fallback) {
+          return providerFallback(fallback, "AI_PROVIDER_UNAVAILABLE", "AI provider request failed.");
         }
         throw error;
       } finally {
@@ -65,6 +70,50 @@ export function createOpenAiAdapter(config, options = {}) {
       }
     }
   };
+}
+
+function providerFailure(fallback, code, message, details = undefined, status = 502) {
+  return providerFallback(fallback, code, message, details) ?? providerError(code, message, details, status);
+}
+
+function providerFallback(fallback, code, message, details = undefined) {
+  if (!fallback) {
+    return null;
+  }
+  return {
+    ...fallback,
+    providerError: {
+      code,
+      message,
+      ...(details === undefined ? {} : { details })
+    }
+  };
+}
+
+function normalizeFallback(fallback, scene) {
+  if (!fallback?.answer) {
+    return null;
+  }
+  return {
+    scene,
+    type: fallback.type ?? "rules",
+    answer: fallback.answer,
+    bullets: Array.isArray(fallback.bullets) ? fallback.bullets : [],
+    guidance: fallback.guidance ?? null,
+    fallback: true
+  };
+}
+
+function providerError(code, message, details = undefined, status = 502) {
+  throw new HttpError(status, code, message, details);
+}
+
+function providerModel(runtimeModel, configuredModel) {
+  const model = String(runtimeModel ?? "").trim();
+  if (model && model !== "local-rule-assistant") {
+    return model;
+  }
+  return configuredModel;
 }
 
 function resolveChatUrl(baseUrl) {

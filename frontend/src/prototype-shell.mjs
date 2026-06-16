@@ -8804,13 +8804,13 @@ function aiSceneLabel(scene) {
 
 async function loadCurrentProfile(session) {
   const userSession = session ?? auth.readSession("user");
-  if (!userSession?.token) {
+  const payload = await api.users.me();
+  if (!payload?.user) {
     return null;
   }
-  const payload = await api.users.me(userSession.token);
   const nextSession = {
-    ...userSession,
-    user: payload.user ?? userSession.user
+    ...(userSession ?? {}),
+    user: payload.user
   };
   auth.saveSession("user", nextSession);
   return {
