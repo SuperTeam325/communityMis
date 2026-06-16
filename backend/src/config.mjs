@@ -66,7 +66,7 @@ export function loadBackendConfig(options = {}) {
       user: env.SMTP_USER ?? null,
       pass: env.SMTP_PASS ?? null,
       from: env.SMTP_FROM ?? null,
-      secure: booleanValue(env.SMTP_SECURE, false)
+      secure: booleanValue(env.SMTP_SECURE, smtpSecureDefault(env))
     },
     openai: {
       baseUrl: env.OPENAI_BASE_URL ?? null,
@@ -207,6 +207,13 @@ function booleanValue(value, fallback) {
     return fallback;
   }
   return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
+}
+
+function smtpSecureDefault(env) {
+  const port = numberValue(env.SMTP_PORT, 587);
+  // Port 465 is the IANA-registered SMTPS port — always SSL.
+  // Port 587 and 25 use STARTTLS (plaintext upgrade).
+  return port === 465;
 }
 
 function normalizeRegistrationVerification(value) {

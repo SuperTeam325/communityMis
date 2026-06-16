@@ -7717,7 +7717,7 @@ function freezeTimelineHtml(timeline) {
 
 async function hydrateMessagesRoute(session) {
   const userSession = session ?? auth.readSession("user");
-  if (!userSession?.token) {
+  if (!hasUserSession(userSession)) {
     return;
   }
   installMessageControls(userSession);
@@ -7725,8 +7725,8 @@ async function hydrateMessagesRoute(session) {
   renderMessageNotificationState("loading", "正在加载通知。");
   try {
     const [messagePayload, notificationPayload] = await Promise.all([
-      api.messages.list(userSession.token, messageApiParams(readMessageQuery())),
-      api.notifications.list(userSession.token, { pageSize: 10 })
+      api.messages.list(sessionToken(userSession), messageApiParams(readMessageQuery())),
+      api.notifications.list(sessionToken(userSession), { pageSize: 10 })
     ]);
     renderMessageConversations(messagePayload, userSession);
     renderMessageNotifications(notificationPayload, userSession);
@@ -7857,7 +7857,7 @@ function updateMessageQuery(patch, userSession) {
 
 async function hydrateNotificationsRoute(session) {
   const userSession = session ?? auth.readSession("user");
-  if (!userSession?.token) {
+  if (!hasUserSession(userSession)) {
     return;
   }
   installNotificationControls(userSession);
@@ -7884,7 +7884,7 @@ function installNotificationControls(userSession) {
     event.stopImmediatePropagation();
     const restore = setLoading(markAll, "处理中...");
     try {
-      await api.notifications.readAll(userSession.token);
+      await api.notifications.readAll(sessionToken(userSession));
       await loadNotifications(readNotificationQuery(), userSession);
     } catch (error) {
       showInlineMessage(markAll, notificationErrorMessage(error), "error");
@@ -7898,7 +7898,7 @@ async function loadNotifications(state, userSession) {
   applyNotificationControls(state);
   renderNotificationState("loading", "正在加载通知。");
   try {
-    const payload = await api.notifications.list(userSession.token, notificationApiParams(state));
+    const payload = await api.notifications.list(sessionToken(userSession), notificationApiParams(state));
     renderNotificationSummary(payload);
     renderNotifications(payload, state, userSession);
   } catch (error) {
@@ -8067,11 +8067,11 @@ function bindNotificationCard(card, userSession) {
 }
 
 async function markNotificationRead(notificationId, userSession, card = null) {
-  if (!notificationId || !userSession?.token) {
+  if (!notificationId || !hasUserSession(userSession)) {
     return null;
   }
   try {
-    const payload = await api.notifications.read(userSession.token, notificationId);
+    const payload = await api.notifications.read(sessionToken(userSession), notificationId);
     if (card) {
       markNotificationCardRead(card);
     }
@@ -8234,7 +8234,7 @@ function conversationItemHtml(item) {
 }
 
 async function openMessageThread(userSession, { userId, orderId = null }) {
-  if (!userSession?.token || !userId) {
+  if (!hasUserSession(userSession) || !userId) {
     return;
   }
   const chatView = document.getElementById("chat-view");
@@ -8257,9 +8257,9 @@ async function openMessageThread(userSession, { userId, orderId = null }) {
   history.replaceState({}, "", `${window.location.pathname}?${params}`);
 
   try {
-    const payload = await api.messages.thread(userSession.token, { userId, orderId, pageSize: 50 });
+    const payload = await api.messages.thread(sessionToken(userSession), { userId, orderId, pageSize: 50 });
     renderMessageThread(payload, userSession);
-    await api.messages.readThread(userSession.token, { userId, orderId });
+    await api.messages.readThread(sessionToken(userSession), { userId, orderId });
     document.querySelector(`.conv-item[data-message-user-id="${CSS.escape(String(userId))}"]`)?.classList.remove("unread");
   } catch (error) {
     if (messages) {
@@ -8337,7 +8337,7 @@ async function sendActiveMessage(userSession, attachments = []) {
   const button = document.getElementById("send-btn");
   const restore = button ? setLoading(button, "发送中...") : null;
   try {
-    await api.messages.send(userSession.token, {
+    await api.messages.send(sessionToken(userSession), {
       receiverId: userId,
       orderId,
       content,
@@ -8348,7 +8348,7 @@ async function sendActiveMessage(userSession, attachments = []) {
       input.style.height = "";
     }
     await openMessageThread(userSession, { userId, orderId });
-    const payload = await api.messages.list(userSession.token, messageApiParams(readMessageQuery()));
+    const payload = await api.messages.list(sessionToken(userSession), messageApiParams(readMessageQuery()));
     renderMessageConversations(payload, userSession);
   } catch (error) {
     showInlineMessage(button ?? input, notificationErrorMessage(error), "error");

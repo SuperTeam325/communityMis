@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { loadEnvFile } from "./load-env.mjs";
+
+loadEnvFile();
 
 const backendPort = process.env.BACKEND_PORT ?? "3001";
 const frontendPort = process.env.FRONTEND_PORT ?? "5173";
