@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createBackendServer } from "../../backend/src/app.mjs";
 import { loadBackendConfig } from "../../backend/src/config.mjs";
+import { createOpenAiAdapter } from "../../backend/src/ai/openai-adapter.mjs";
 import { createMemoryAuthStore } from "../../backend/src/auth/store.mjs";
 import { hashVerificationCode } from "../../backend/src/verification/routes.mjs";
 import { sendEmailCode } from "../../backend/src/verification/providers.mjs";
@@ -412,6 +413,78 @@ describe("upload validation", () => {
     expect(uploaded.status).toBe(400);
     expect(uploaded.body.error.code).toBe("FILE_SIGNATURE_MISMATCH");
     fs.rmSync(uploadRoot, { recursive: true, force: true });
+  });
+});
+
+describe("AI assistant resilience", () => {
+  test("falls back to local rules when the provider rejects the configured request", async () => {
+    const fetchImpl = vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      expect(body.model).toBe("provider-model");
+      return new Response(JSON.stringify({ error: { code: "model_not_found" } }), {
+        status: 400,
+        headers: { "content-type": "application/json" }
+      });
+    });
+    const adapter = createOpenAiAdapter({
+      openai: {
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "unit-key",
+        model: "provider-model",
+        timeoutMs: 1000
+      }
+    }, { fetchImpl });
+
+    const result = await adapter.complete({
+      prompt: "如何发起纠纷？",
+      scene: "rules",
+      config: { model: "local-rule-assistant", timeoutMs: 3000 },
+      fallback: {
+        answer: "本地规则答案",
+        bullets: ["只能由订单参与方发起纠纷。"],
+        guidance: "请从订单详情进入纠纷流程。"
+      }
+    });
+
+    expect(result).toMatchObject({
+      answer: "本地规则答案",
+      fallback: true,
+      providerError: {
+        code: "AI_PROVIDER_ERROR",
+        details: { status: 400, providerCode: "model_not_found" }
+      }
+    });
+  });
+
+  test("accepts chat messages array payloads", async () => {
+    const server = createBackendServer({
+      authStore: createMemoryAuthStore(),
+      sessionSecret: "unit-ai-chat-secret",
+      config: testConfig()
+    });
+    const baseUrl = await listen(server);
+    const jar = new Map();
+
+    const login = await cookieRequest(baseUrl, jar, "/api/auth/login", {
+      method: "POST",
+      body: { username: "user_a", password: "user123456" }
+    });
+    expect(login.status).toBe(200);
+
+    const chat = await cookieRequest(baseUrl, jar, "/api/ai/chat", {
+      method: "POST",
+      body: {
+        scene: "rules",
+        messages: [
+          { role: "assistant", content: "你好，我是 AI 助手。" },
+          { role: "user", content: "如何发起纠纷？" }
+        ]
+      }
+    });
+
+    expect(chat.status).toBe(200);
+    expect(chat.body.type).toBe("rules");
+    expect(chat.body.answer).toContain("纠纷");
   });
 });
 

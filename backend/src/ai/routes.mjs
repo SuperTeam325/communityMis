@@ -181,7 +181,7 @@ async function ensureAiAvailable(store) {
 }
 
 async function chatPayload(store, context, body, conversation, aiAdapter) {
-  const prompt = optionalText(body.message ?? body.prompt ?? body.content, 2000);
+  const prompt = chatPrompt(body);
   if (!prompt) {
     throw new HttpError(400, "AI_MESSAGE_REQUIRED", "AI message is required.");
   }
@@ -249,8 +249,27 @@ async function chatPayload(store, context, body, conversation, aiAdapter) {
     answer: result.answer,
     bullets: result.bullets ?? [],
     guidance: result.guidance ?? null,
-    fallback: Boolean(result.fallback)
+    fallback: Boolean(result.fallback),
+    providerError: result.providerError ?? null
   };
+}
+
+function chatPrompt(body = {}) {
+  const direct = optionalText(body.message ?? body.prompt ?? body.content, 2000);
+  if (direct) {
+    return direct;
+  }
+  if (!Array.isArray(body.messages)) {
+    return null;
+  }
+  const latest = [...body.messages].reverse().find((item) => {
+    if (!item || typeof item !== "object") {
+      return false;
+    }
+    const role = String(item.role ?? "user").toLowerCase();
+    return role === "user" && optionalText(item.content, 2000);
+  });
+  return latest ? optionalText(latest.content, 2000) : null;
 }
 
 async function requestFilterPayload(store, context, body, conversation, existingUserMessage = null) {

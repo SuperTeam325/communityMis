@@ -1432,7 +1432,7 @@ function communityPostTextarea() {
 }
 
 async function uploadCommunityPostImages(userSession, anchor) {
-  if (!userSession?.token) {
+  if (!hasUserSession(userSession)) {
     navigateTo(`/login?redirect=${encodeURIComponent("/post")}`);
     return;
   }
@@ -1870,7 +1870,7 @@ function bindFeedAcceptButtons(userSession) {
       if (!requestId) {
         return;
       }
-      if (!userSession?.token) {
+      if (!hasUserSession(userSession)) {
         navigateTo(`/login?redirect=${encodeURIComponent(`/posts/${requestId}`)}`);
         return;
       }
@@ -1929,7 +1929,7 @@ function renderFeedState(kind, message, options = {}) {
 
 async function hydrateFeedNotificationDot(userSession) {
   const dot = document.querySelector(".feed-header .icon-btn .dot");
-  if (!dot || !userSession?.token) {
+  if (!dot || !hasUserSession(userSession)) {
     dot?.setAttribute("hidden", "");
     return;
   }
@@ -2456,7 +2456,7 @@ function applyRequestDetail(item, userSession = null, comments = []) {
   `;
   installRequestDetailCommentActions(item, comments, userSession);
   document.getElementById("accept-request")?.addEventListener("click", async () => {
-    if (!userSession?.token) {
+    if (!hasUserSession(userSession)) {
       navigateTo(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
       return;
     }
@@ -2494,7 +2494,7 @@ function installCommunityPostDetailActions(post, comments, userSession) {
   }, true);
   document.getElementById("share-btn")?.addEventListener("click", () => copyCurrentLink("帖子链接已复制。"), true);
   document.getElementById("like-btn")?.addEventListener("click", interceptSubmit(async () => {
-    if (!userSession?.token) {
+    if (!hasUserSession(userSession)) {
       navigateTo(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
       return;
     }
@@ -2506,7 +2506,7 @@ function installCommunityPostDetailActions(post, comments, userSession) {
     updateCommunityPostActionState(payload.post);
   }), true);
   document.getElementById("collect-post-btn")?.addEventListener("click", interceptSubmit(async () => {
-    if (!userSession?.token) {
+    if (!hasUserSession(userSession)) {
       navigateTo(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
       return;
     }
@@ -2605,7 +2605,7 @@ function bindCommentComposer(onSubmit, userSession) {
   const freshButton = button.cloneNode(true);
   button.replaceWith(freshButton);
   const submit = async () => {
-    if (!userSession?.token) {
+    if (!hasUserSession(userSession)) {
       navigateTo(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
       return;
     }
@@ -2643,7 +2643,7 @@ function bindCommentComposer(onSubmit, userSession) {
 function bindCommentLikeButtons({ userSession, like, unlike }) {
   document.querySelectorAll("[data-comment-like]").forEach((button) => {
     button.addEventListener("click", interceptSubmit(async () => {
-      if (!userSession?.token) {
+      if (!hasUserSession(userSession)) {
         navigateTo(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
         return;
       }
@@ -2693,7 +2693,7 @@ function assetUrl(asset) {
 
 async function hydrateOrdersRoute(session) {
   const userSession = session ?? auth.readSession("user");
-  if (!userSession?.token) {
+  if (!hasUserSession(userSession)) {
     return;
   }
   installOrderListControls(userSession);
@@ -2954,7 +2954,7 @@ function orderRoleFromPanel(panel) {
 async function hydrateOrderDetailRoute(session) {
   const orderId = routeOrderId();
   const userSession = session ?? auth.readSession("user");
-  if (!orderId || !userSession?.token) {
+  if (!orderId || !hasUserSession(userSession)) {
     return;
   }
   renderOrderDetailLoading();
@@ -3061,7 +3061,7 @@ function applyOrderDetail(order, userSession) {
 }
 
 async function loadOrderAiSummary(button, userSession, orderId) {
-  if (!userSession?.token || !orderId) {
+  if (!hasUserSession(userSession) || !orderId) {
     return;
   }
   const content = document.getElementById("order-ai-summary-content");
@@ -3146,7 +3146,7 @@ function orderDetailConfirmActionHtml(order) {
 
 async function confirmOrderFromButton(button, userSession, onConfirmed) {
   const orderId = button?.dataset.orderConfirm;
-  if (!orderId || !userSession?.token) {
+  if (!orderId || !hasUserSession(userSession)) {
     return;
   }
   const restore = setLoading(button, "确认中...");
@@ -3169,7 +3169,7 @@ function orderConfirmText(order) {
 async function hydrateDisputeCreateRoute(session) {
   const userSession = session ?? auth.readSession("user");
   const orderId = disputeCreateOrderId();
-  if (!userSession?.token) {
+  if (!hasUserSession(userSession)) {
     navigateTo(`/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`);
     return;
   }
@@ -3363,7 +3363,7 @@ function renderDisputeCreateSuccess(dispute) {
 async function hydrateJuryVotingRoute(session) {
   const userSession = session ?? auth.readSession("user");
   const disputeId = juryVotingDisputeId();
-  if (!userSession?.token) {
+  if (!hasUserSession(userSession)) {
     return;
   }
   if (!disputeId) {
@@ -3617,7 +3617,7 @@ function installJuryVoteHandlers(dispute, userSession) {
 async function hydrateDisputeDetailRoute(session) {
   const userSession = session ?? auth.readSession("user");
   const disputeId = routeDisputeId();
-  if (!disputeId || !userSession?.token) {
+  if (!disputeId || !hasUserSession(userSession)) {
     return;
   }
   renderDisputeDetailLoading();
@@ -3720,7 +3720,7 @@ function applyDisputeDetail(dispute, userSession) {
 }
 
 async function loadDisputeAiSummary(button, userSession, disputeId) {
-  if (!userSession?.token || !disputeId) {
+  if (!hasUserSession(userSession) || !disputeId) {
     return;
   }
   const content = document.getElementById("dispute-ai-summary-content");
@@ -3870,7 +3870,7 @@ function installEvidenceSubmit(dispute, userSession) {
 async function hydrateReviewRoute(session) {
   const userSession = session ?? auth.readSession("user");
   const orderId = reviewOrderId();
-  if (!userSession?.token) {
+  if (!hasUserSession(userSession)) {
     return;
   }
   if (!orderId) {
@@ -8487,7 +8487,7 @@ function notificationIconHtml(type, size = "21") {
 
 async function hydrateAiAssistantRoute(session) {
   const userSession = session ?? auth.readSession("user");
-  if (!userSession?.token) {
+  if (!hasUserSession(userSession)) {
     return;
   }
   const chatArea = document.getElementById("chat-area");
@@ -8695,7 +8695,7 @@ function bindAiRuntimeActions(userSession) {
 
 async function hydrateAiResultsRoute(session) {
   const userSession = session ?? auth.readSession("user");
-  if (!userSession?.token) {
+  if (!hasUserSession(userSession)) {
     return;
   }
   const params = new URLSearchParams(window.location.search);
@@ -9446,7 +9446,7 @@ function installPublicProfileActions(payload, userSession) {
   if (followButton) {
     renderFollowButton(followButton, viewer?.isFollowing);
     followButton.addEventListener("click", interceptSubmit(async () => {
-      if (!userSession?.token) {
+      if (!hasUserSession(userSession)) {
         navigateTo(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
         return;
       }
@@ -9473,7 +9473,7 @@ function installPublicProfileActions(payload, userSession) {
   }
 
   document.getElementById("contact-open")?.addEventListener("click", interceptSubmit(async () => {
-    if (!userSession?.token) {
+    if (!hasUserSession(userSession)) {
       navigateTo(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
       return;
     }
