@@ -21,21 +21,7 @@ export function createOpenAiAdapter(config, options = {}) {
             authorization: `Bearer ${providerConfig.apiKey}`,
             "content-type": "application/json"
           },
-          body: JSON.stringify(compactObject({
-            model,
-            messages: [
-              {
-                role: "system",
-                content: systemPrompt(input.scene)
-              },
-              {
-                role: "user",
-                content: String(input.prompt ?? "")
-              }
-            ],
-            temperature: Number(runtime.temperature ?? 0.3),
-            max_tokens: Number(runtime.maxTokens ?? 1024)
-          })),
+          body: JSON.stringify(chatRequestBody(input, runtime, model)),
           signal: controller.signal
         });
         const payload = await response.json().catch(() => ({}));
@@ -69,8 +55,68 @@ export function createOpenAiAdapter(config, options = {}) {
       } finally {
         clearTimeout(timeout);
       }
+    },
+
+    async *stream(input) {
+      const runtime = input.config ?? {};
+      const model = providerModel(runtime.model, providerConfig.model);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), Number(runtime.timeoutMs ?? providerConfig.timeoutMs));
+      try {
+        const response = await fetchImpl(resolveChatUrl(providerConfig.baseUrl), {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${providerConfig.apiKey}`,
+            "content-type": "application/json",
+            accept: "text/event-stream"
+          },
+          body: JSON.stringify(chatRequestBody(input, runtime, model, { stream: true })),
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          providerError("AI_PROVIDER_ERROR", "AI provider returned an error.", {
+            status: response.status,
+            providerCode: payload.error?.code ?? null
+          });
+        }
+
+        yield { type: "start", model };
+        for await (const payload of parseServerSentEvents(response.body)) {
+          const content = payload.choices?.map((choice) => choice.delta?.content ?? choice.message?.content ?? "").join("") ?? "";
+          if (content) {
+            yield { type: "delta", content, model };
+          }
+        }
+      } catch (error) {
+        if (error.name === "AbortError") {
+          providerError("AI_PROVIDER_TIMEOUT", "AI provider request timed out.", undefined, 504);
+        }
+        throw error;
+      } finally {
+        clearTimeout(timeout);
+      }
     }
   };
+}
+
+function chatRequestBody(input, runtime, model, options = {}) {
+  return compactObject({
+    model,
+    messages: [
+      {
+        role: "system",
+        content: systemPrompt(input.scene)
+      },
+      {
+        role: "user",
+        content: String(input.prompt ?? "")
+      }
+    ],
+    temperature: Number(runtime.temperature ?? 0.3),
+    max_tokens: Number(runtime.maxTokens ?? 1024),
+    stream: options.stream ? true : undefined
+  });
 }
 
 function normalizeProviderConfig(openai = {}) {
@@ -141,6 +187,68 @@ function resolveChatUrl(baseUrl) {
     url.pathname = `${url.pathname.replace(/\/+$/, "")}/chat/completions`;
   }
   return url;
+}
+
+async function* parseServerSentEvents(body) {
+  if (!body) {
+    return;
+  }
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for await (const chunk of responseChunks(body)) {
+    buffer += decoder.decode(chunk, { stream: true }).replace(/\r\n/g, "\n");
+    let index = buffer.indexOf("\n\n");
+    while (index >= 0) {
+      const frame = buffer.slice(0, index);
+      buffer = buffer.slice(index + 2);
+      const payload = parseSseFrame(frame);
+      if (payload) {
+        yield payload;
+      }
+      index = buffer.indexOf("\n\n");
+    }
+  }
+  buffer += decoder.decode();
+  const payload = parseSseFrame(buffer.replace(/\r\n/g, "\n"));
+  if (payload) {
+    yield payload;
+  }
+}
+
+async function* responseChunks(body) {
+  if (typeof body.getReader === "function") {
+    const reader = body.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          return;
+        }
+        if (value) {
+          yield value;
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    return;
+  }
+  for await (const chunk of body) {
+    yield chunk;
+  }
+}
+
+function parseSseFrame(frame) {
+  const data = String(frame ?? "")
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart())
+    .join("\n")
+    .trim();
+  if (!data || data === "[DONE]") {
+    return null;
+  }
+  return JSON.parse(data);
 }
 
 function systemPrompt(scene) {

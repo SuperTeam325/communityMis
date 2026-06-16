@@ -490,6 +490,46 @@ describe("AI assistant resilience", () => {
     });
   });
 
+  test("streams OpenAI-compatible provider chunks", async () => {
+    const fetchImpl = vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      expect(body.model).toBe("deepseek-v4-pro");
+      expect(body.stream).toBe(true);
+      return new Response([
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Deep\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Seek\"}}]}\n\n",
+        "data: [DONE]\n\n"
+      ].join(""), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" }
+      });
+    });
+    const adapter = createOpenAiAdapter({
+      openai: {
+        baseUrl: "https://api.deepseek.com",
+        apiKey: "unit-key",
+        model: "deepseek-v4-pro",
+        timeoutMs: 1000
+      }
+    }, { fetchImpl });
+
+    const events = [];
+    for await (const event of adapter.stream({
+      prompt: "如何发起纠纷？",
+      scene: "rules",
+      config: { model: "local-rule-assistant" },
+      fallback: { answer: "本地规则答案" }
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "start", model: "deepseek-v4-pro" },
+      { type: "delta", content: "Deep", model: "deepseek-v4-pro" },
+      { type: "delta", content: "Seek", model: "deepseek-v4-pro" }
+    ]);
+  });
+
   test("accepts chat messages array payloads", async () => {
     const server = createBackendServer({
       authStore: createMemoryAuthStore(),
@@ -556,6 +596,46 @@ describe("AI assistant resilience", () => {
       code: "AI_PROVIDER_ERROR",
       details: { status: 502, providerCode: "bad_gateway" }
     });
+  });
+
+  test("streams chat responses as NDJSON and persists the final AI message", async () => {
+    const store = createMemoryAuthStore();
+    const server = createBackendServer({
+      authStore: store,
+      sessionSecret: "unit-ai-chat-stream-secret",
+      config: testConfig(),
+      aiAdapter: {
+        async *stream() {
+          yield { type: "start", model: "unit-stream-model" };
+          yield { type: "delta", content: "流式 " };
+          yield { type: "delta", content: "回答" };
+        }
+      }
+    });
+    const baseUrl = await listen(server);
+    const jar = new Map();
+
+    const login = await cookieRequest(baseUrl, jar, "/api/auth/login", {
+      method: "POST",
+      body: { username: "user_a", password: "user123456" }
+    });
+    expect(login.status).toBe(200);
+
+    const stream = await cookieStreamRequest(baseUrl, jar, "/api/ai/chat/stream", {
+      method: "POST",
+      body: {
+        scene: "rules",
+        messages: [{ role: "user", content: "如何发起纠纷？" }]
+      }
+    });
+
+    expect(stream.status).toBe(200);
+    expect(stream.contentType).toContain("application/x-ndjson");
+    expect(stream.events.map((event) => event.type)).toEqual(["start", "delta", "delta", "done"]);
+    expect(stream.events.filter((event) => event.type === "delta").map((event) => event.content).join("")).toBe("流式 回答");
+    const done = stream.events.at(-1);
+    expect(done.payload.answer).toBe("流式 回答");
+    expect(done.payload.message.content).toBe("流式 回答");
   });
 });
 
@@ -632,6 +712,30 @@ async function cookieRequest(baseUrl, jar, requestPath, options = {}, behavior =
   return {
     status: response.status,
     body: await response.json()
+  };
+}
+
+async function cookieStreamRequest(baseUrl, jar, requestPath, options = {}, behavior = {}) {
+  const headers = new Headers(options.headers ?? {});
+  headers.set("accept", "application/x-ndjson");
+  const cookie = Array.from(jar.entries()).map(([key, value]) => `${key}=${value}`).join("; ");
+  if (cookie) headers.set("cookie", cookie);
+  if (options.body !== undefined && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
+  if (behavior.csrf !== false && jar.has("csrf_token") && ["POST", "PUT", "PATCH", "DELETE"].includes(String(options.method ?? "GET").toUpperCase())) {
+    headers.set("x-csrf-token", decodeURIComponent(jar.get("csrf_token")));
+  }
+  const response = await fetch(`${baseUrl}${requestPath}`, {
+    method: options.method ?? "GET",
+    headers,
+    body: options.rawBody ?? (options.body === undefined ? undefined : JSON.stringify(options.body))
+  });
+  const text = await response.text();
+  return {
+    status: response.status,
+    contentType: response.headers.get("content-type") ?? "",
+    events: text.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
   };
 }
 

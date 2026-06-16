@@ -1708,7 +1708,7 @@ function applyFeedControls(state) {
     if (!categoryCode && filterAttr === undefined) return;
     const active = categoryCode
       ? categoryCode === state.category
-      : filterAttr === state.filter && !state.category;
+      : filterAttr === state.filter && (!state.category || TASK_FILTERS.get(state.filter)?.category === state.category);
     button.classList.toggle("active", active);
   });
 }
@@ -1739,7 +1739,7 @@ function renderFeedCategories(categories, state, userSession) {
 
   tabs.innerHTML = `
     ${staticFilters.map(([filter, label]) => {
-      const active = filter === state.filter && !state.category;
+      const active = filter === state.filter && (!state.category || TASK_FILTERS.get(state.filter)?.category === state.category);
       return `<button class="chip${active ? " active" : ""}" data-filter="${escapeHtml(filter)}">${escapeHtml(label)}</button>`;
     }).join("")}
     ${categoryButtons.join("")}

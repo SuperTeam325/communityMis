@@ -29,6 +29,99 @@
   function esc(s) { return String(s).replace(/[&<>"]/g, c => ESCAPE_MAP[c]); }
   function attr(s) { return esc(s).replace(/'/g, '&#39;'); }
 
+  const MODAL_ASSET_BASE = (function () {
+    const script = document.currentScript;
+    if (script?.src) return new URL('.', script.src).toString();
+    return new URL('/ui/js/', window.location.origin).toString();
+  })();
+  let richTextRenderer = null;
+  let richTextPlainText = null;
+  let richTextRendererPromise = null;
+
+  function renderAssistantContent(content) {
+    const render = richTextRenderer || renderBasicRichText;
+    return render(content) || '';
+  }
+
+  function ensureRichTextRenderer() {
+    if (richTextRenderer) return Promise.resolve(richTextRenderer);
+    if (!richTextRendererPromise) {
+      richTextRendererPromise = import(new URL('ai-rich-text.mjs', MODAL_ASSET_BASE).toString())
+        .then(module => {
+          richTextRenderer = typeof module.renderAiRichText === 'function' ? module.renderAiRichText : renderBasicRichText;
+          richTextPlainText = typeof module.aiRichTextToPlainText === 'function' ? module.aiRichTextToPlainText : richTextToPlainText;
+          return richTextRenderer;
+        })
+        .catch(() => {
+          richTextRenderer = renderBasicRichText;
+          richTextPlainText = richTextToPlainText;
+          return richTextRenderer;
+        });
+    }
+    return richTextRendererPromise;
+  }
+
+  function renderBasicRichText(content) {
+    const text = String(content || '').replace(/\r\n?/g, '\n').trim();
+    if (!text) return '';
+    if (/^```[\s\S]*```$/.test(text)) {
+      return '<pre class="ai-code-block"><code>' + esc(text.replace(/^```[^\n]*\n?|\n?```$/g, '')) + '</code></pre>';
+    }
+    if (/^\$\$[\s\S]*\$\$$/.test(text)) {
+      return '<div class="ai-math-block">' + renderBasicMath(text.replace(/^\$\$|\$\$$/g, '').trim()) + '</div>';
+    }
+    return text.split(/\n{2,}/).map(block => renderBasicBlock(block)).join('');
+  }
+
+  function renderBasicBlock(block) {
+    const lines = block.split('\n');
+    const heading = lines.length === 1 ? lines[0].match(/^(#{1,3})\s+(.+)$/) : null;
+    if (heading) {
+      const level = heading[1].length + 2;
+      return '<h' + level + ' class="ai-rich-heading">' + renderBasicInline(heading[2]) + '</h' + level + '>';
+    }
+    if (lines.every(line => /^\s*(?:[-*+]|\d+[.)])\s+/.test(line))) {
+      const ordered = lines.every(line => /^\s*\d+[.)]\s+/.test(line));
+      const tag = ordered ? 'ol' : 'ul';
+      return '<' + tag + ' class="ai-rich-list">' + lines.map(line => '<li>' + renderBasicInline(line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '')) + '</li>').join('') + '</' + tag + '>';
+    }
+    return '<p>' + lines.map(renderBasicInline).join('<br>') + '</p>';
+  }
+
+  function renderBasicInline(value) {
+    return esc(value)
+      .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/\\\(([^]+?)\\\)/g, function (_match, math) { return '<span class="ai-math-inline">' + renderBasicMath(math) + '</span>'; })
+      .replace(/\$([^$\n]+)\$/g, function (_match, math) { return '<span class="ai-math-inline">' + renderBasicMath(math) + '</span>'; });
+  }
+
+  function renderBasicMath(value) {
+    return esc(value)
+      .replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '<span class="ai-frac"><span>$1</span><span>$2</span></span>')
+      .replace(/\\sqrt\{([^{}]+)\}/g, '<span class="ai-sqrt">$1</span>')
+      .replace(/([A-Za-z0-9)\]}])\^([A-Za-z0-9+-]+)/g, '$1<sup>$2</sup>')
+      .replace(/([A-Za-z0-9)\]}])_([A-Za-z0-9+-]+)/g, '$1<sub>$2</sub>');
+  }
+
+  function richTextToPlainText(value) {
+    return String(value || '')
+      .replace(/\r\n?/g, '\n')
+      .replace(/```([\s\S]*?)```/g, function (_match, code) { return code.replace(/^[^\n]*\n?/, '').trim(); })
+      .replace(/\$\$([\s\S]*?)\$\$/g, '$1')
+      .replace(/^(#{1,3})\s+/gm, '')
+      .replace(/^\s*(?:[-*+]|\d+[.)])\s+/gm, '- ')
+      .replace(/`([^`\n]+)`/g, '$1')
+      .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+      .replace(/__([^_\n]+)__/g, '$1')
+      .replace(/\*([^*\n]+)\*/g, '$1')
+      .replace(/_([^_\n]+)_/g, '$1')
+      .replace(/\\\((.*?)\\\)/g, '$1')
+      .replace(/\$([^$\n]+)\$/g, '$1')
+      .replace(/\[([^\]\n]+)\]\([^)]+\)/g, '$1')
+      .trim();
+  }
+
   const icons = {
     close: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
     sparkle: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
@@ -243,6 +336,69 @@
         color: #fff;
         border-top-right-radius: 4px;
       }
+      .ai-rich-content {
+        display: grid; gap: 8px;
+      }
+      .ai-rich-content p,
+      .ai-rich-content ul,
+      .ai-rich-content ol,
+      .ai-rich-content pre,
+      .ai-rich-content h3,
+      .ai-rich-content h4,
+      .ai-rich-content h5 {
+        margin: 0;
+      }
+      .ai-rich-content .ai-rich-heading {
+        font-size: 15px; line-height: 1.4; color: var(--fg, #0f172a);
+      }
+      .ai-rich-content .ai-rich-list {
+        padding-left: 20px;
+      }
+      .ai-rich-content code {
+        padding: 2px 5px; border-radius: 6px;
+        background: var(--border-light, #e2e8f0);
+        font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+        font-size: 0.92em;
+      }
+      .ai-rich-content .ai-code-block {
+        max-width: 100%; overflow: auto;
+        padding: 10px; border-radius: var(--radius-md, 8px);
+        border: 1px solid var(--border-light, #e2e8f0);
+        background: var(--bg, #f8fafc);
+      }
+      .ai-rich-content .ai-code-block code {
+        padding: 0; background: transparent;
+      }
+      .ai-rich-content .ai-math-inline,
+      .ai-rich-content .ai-math-block {
+        font-family: "Cambria Math", "Times New Roman", serif;
+      }
+      .ai-rich-content .ai-math-inline {
+        display: inline-flex; align-items: center; padding: 0 4px;
+      }
+      .ai-rich-content .ai-math-block {
+        overflow-x: auto; padding: 10px 12px; text-align: center;
+        border: 1px solid var(--border-light, #e2e8f0);
+        border-radius: var(--radius-md, 8px);
+        background: var(--bg, #f8fafc);
+        font-size: 1.08em;
+      }
+      .ai-rich-content .ai-frac {
+        display: inline-grid; grid-template-rows: auto auto;
+        vertical-align: middle; text-align: center; line-height: 1.1;
+      }
+      .ai-rich-content .ai-frac span:first-child {
+        border-bottom: 1px solid currentColor; padding: 0 3px 1px;
+      }
+      .ai-rich-content .ai-frac span:last-child {
+        padding: 1px 3px 0;
+      }
+      .ai-rich-content .ai-sqrt {
+        border-top: 1px solid currentColor; padding-left: 4px;
+      }
+      .ai-rich-content .ai-sqrt::before {
+        content: "√"; margin-right: 2px;
+      }
 
       /* Message actions */
       .ai-modal-msg-actions {
@@ -426,6 +582,7 @@
     if (initialized) return;
     initialized = true;
     injectStyles();
+    ensureRichTextRenderer();
 
     const sceneChips = ['all', 'filter', 'publish', 'rules', 'summary'].map(s =>
       `<button class="ai-modal-scene-chip" data-scene="${s}">${icons[s === 'all' ? 'sun' : s === 'filter' ? 'search' : s === 'publish' ? 'edit' : s === 'rules' ? 'copy' : 'dollar']} ${SCENE_LABELS[s]}</button>`
@@ -553,7 +710,7 @@
     const messageId = resp.messageId || resp.message?.messageId || '';
     let html = `<div class="ai-modal-msg assistant" ${messageId ? `data-ai-message-id="${attr(messageId)}"` : ''}>
       <div class="ai-modal-msg-avatar">${icons.sparkle.replace('width="16"','width="14"').replace('height="16"','height="14"')}</div>
-      <div><div class="ai-modal-msg-bubble"><p>${esc(resp.text)}</p>`;
+      <div><div class="ai-modal-msg-bubble" data-ai-raw="${attr(resp.text || '')}"><div class="ai-rich-content">${renderAssistantContent(resp.text)}</div>`;
 
     if (resp.type === 'filter') {
       const prompt = resp.prompt || resp.criteria?.prompt || '';
@@ -598,6 +755,44 @@
         <button class="ai-modal-msg-action-btn" data-ai-modal-action="feedback" data-rating="useless">${icons.thumbsDown} 没用</button>` : ''}
       </div></div></div>`;
     return html;
+  }
+
+  function createAssistantShell() {
+    const el = document.createElement('div');
+    el.className = 'ai-modal-msg assistant';
+    el.innerHTML = `<div class="ai-modal-msg-avatar">${icons.sparkle.replace('width="16"','width="14"').replace('height="16"','height="14"')}</div>
+      <div><div class="ai-modal-msg-bubble" data-ai-raw=""><div class="ai-rich-content">正在生成...</div></div></div>`;
+    chatArea.appendChild(el);
+    chatArea.scrollTop = chatArea.scrollHeight;
+    return el;
+  }
+
+  function updateAssistantShell(el, content) {
+    const target = el?.querySelector('.ai-rich-content');
+    if (!target) return;
+    const bubble = el?.querySelector('.ai-modal-msg-bubble');
+    if (bubble) bubble.dataset.aiRaw = content || '';
+    target.innerHTML = renderAssistantContent(content || '正在生成...');
+    ensureRichTextRenderer().then(render => {
+      target.innerHTML = render(content || '正在生成...') || '';
+    });
+    chatArea.scrollTop = chatArea.scrollHeight;
+  }
+
+  function replaceAssistantShell(el, resp) {
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = buildAIResponseHTML(resp);
+    const next = wrapper.firstElementChild;
+    if (el && next) {
+      el.replaceWith(next);
+      const content = next.querySelector('.ai-rich-content');
+      ensureRichTextRenderer().then(render => {
+        if (content) content.innerHTML = render(resp.text) || '';
+      });
+    } else if (next) {
+      chatArea.appendChild(next);
+    }
+    chatArea.scrollTop = chatArea.scrollHeight;
   }
 
   function aiCriteriaTags(criteria) {
@@ -665,10 +860,27 @@
   }
 
   async function copyModalMessage(button) {
-    const text = button.closest('.ai-modal-msg')?.querySelector('.ai-modal-msg-bubble')?.textContent.trim() || '';
-    await navigator.clipboard?.writeText(text);
+    const bubble = button.closest('.ai-modal-msg')?.querySelector('.ai-modal-msg-bubble');
+    const raw = bubble?.dataset.aiRaw || bubble?.textContent.trim() || '';
+    await copyRichText(raw, bubble);
     button.textContent = '✓ 已复制';
     setTimeout(() => { button.innerHTML = icons.copy + ' 复制'; }, 2000);
+  }
+
+  async function copyRichText(raw, bubble) {
+    const render = await ensureRichTextRenderer();
+    const html = `<article class="ai-rich-content">${render(raw)}</article>`;
+    const plain = (richTextPlainText || richTextToPlainText)(raw) || bubble?.textContent.trim() || '';
+    if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([plain], { type: 'text/plain' })
+        })
+      ]);
+      return;
+    }
+    await navigator.clipboard?.writeText(plain);
   }
 
   function showTyping() {
@@ -699,26 +911,57 @@
     inputEl.style.height = '';
     chatArea.scrollTop = chatArea.scrollHeight;
 
-    showTyping();
-    requestAiChat(query)
+    const assistantShell = createAssistantShell();
+    const previousConversationId = currentConversationId;
+    let streamed = '';
+    requestAiChatStream(query, chunk => {
+      streamed += chunk;
+      updateAssistantShell(assistantShell, streamed);
+    })
       .then(resp => {
-        hideTyping();
-        chatArea.insertAdjacentHTML('beforeend', buildAIResponseHTML(resp));
-        chatArea.scrollTop = chatArea.scrollHeight;
+        replaceAssistantShell(assistantShell, resp);
       })
-      .catch(error => {
-        hideTyping();
-        chatArea.insertAdjacentHTML('beforeend', buildAIResponseHTML({
-          text: error.message || 'AI 服务暂不可用，请稍后再试。',
-          type: 'default',
-          response: ''
-        }));
-        chatArea.scrollTop = chatArea.scrollHeight;
+      .catch(() => {
+        currentConversationId = previousConversationId;
+        return requestAiChat(query)
+          .then(resp => replaceAssistantShell(assistantShell, resp))
+          .catch(error => {
+            replaceAssistantShell(assistantShell, {
+              text: error.message || 'AI 服务暂不可用，请稍后再试。',
+              type: 'default',
+              response: ''
+            });
+          });
       })
       .finally(() => {
         isProcessing = false;
         sendBtn.disabled = false;
       });
+  }
+
+  async function requestAiChatStream(query, onDelta) {
+    const payload = {
+      message: query,
+      scene: currentScene,
+      conversationId: currentConversationId
+    };
+    let finalPayload = null;
+    let streamed = '';
+    const data = await requestStreamJson('/api/ai/chat/stream', payload, event => {
+      if (event.type === 'start') {
+        currentConversationId = event.conversation?.conversationId || currentConversationId;
+      }
+      if (event.type === 'delta' && typeof event.content === 'string') {
+        streamed += event.content;
+        onDelta(event.content);
+      }
+      if (event.type === 'done') {
+        finalPayload = event.payload || event;
+        currentConversationId = finalPayload.conversation?.conversationId || currentConversationId;
+      }
+    });
+    const hasFinalData = finalPayload || (data && Object.keys(data).length > 0);
+    return normalizeAiChatResponse(hasFinalData || { answer: streamed }, query);
   }
 
   async function requestAiChat(query) {
@@ -776,6 +1019,70 @@
       throw new Error(aiErrorMessage(payload, response.status));
     }
     return payload;
+  }
+
+  async function requestStreamJson(path, body, onEvent) {
+    const headers = { 'content-type': 'application/json', accept: 'application/x-ndjson' };
+    const csrfToken = readCookie('csrf_token');
+    if (csrfToken) {
+      headers['x-csrf-token'] = csrfToken;
+    }
+    const response = await fetch(resolveApiUrl(path), {
+      method: 'POST',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify(body)
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(aiErrorMessage(payload, response.status));
+    }
+    if (!response.body?.getReader) {
+      throw new Error('当前浏览器不支持流式响应。');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let donePayload = null;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let index = buffer.indexOf('\n');
+        while (index >= 0) {
+          const line = buffer.slice(0, index).trim();
+          buffer = buffer.slice(index + 1);
+          if (line) {
+            const event = JSON.parse(line);
+            if (event.type === 'error') {
+              throw new Error(aiErrorMessage({ error: event.error }, response.status));
+            }
+            onEvent?.(event);
+            if (event.type === 'done') {
+              donePayload = event.payload || event;
+            }
+          }
+          index = buffer.indexOf('\n');
+        }
+      }
+      buffer += decoder.decode();
+      const line = buffer.trim();
+      if (line) {
+        const event = JSON.parse(line);
+        if (event.type === 'error') {
+          throw new Error(aiErrorMessage({ error: event.error }, response.status));
+        }
+        onEvent?.(event);
+        if (event.type === 'done') {
+          donePayload = event.payload || event;
+        }
+      }
+      return donePayload || {};
+    } finally {
+      reader.releaseLock();
+    }
   }
 
   function normalizeAiChatResponse(payload, prompt) {

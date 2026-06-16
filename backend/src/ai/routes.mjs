@@ -77,6 +77,26 @@ export async function handleAiRoutes({ request, response, url, authService, aiAd
     return true;
   }
 
+  if (url.pathname === "/api/ai/chat/stream") {
+    allowOnly(request, response, ["POST"]);
+    const context = await requireUser(request, authService);
+    const body = await readJsonBody(request, { maxBytes: AI_BODY_MAX_BYTES });
+    const prompt = chatPrompt(body);
+    if (!prompt) {
+      throw new HttpError(400, "AI_MESSAGE_REQUIRED", "AI message is required.");
+    }
+    const scene = normalizeScene(body.scene ?? inferScene(prompt ?? ""));
+    await streamAiChatResponse(response, authService.store, {
+      userId: context.user.userId,
+      scene,
+      conversationId: parseOptionalId(body.conversationId),
+      body,
+      context,
+      aiAdapter
+    });
+    return true;
+  }
+
   if (url.pathname === "/api/ai/conversations") {
     allowOnly(request, response, ["GET"]);
     const context = await requireUser(request, authService);
@@ -464,7 +484,7 @@ async function withAiCallLog(store, options) {
   });
   try {
     const payload = await options.operation(conversation);
-    await createAiCallLogSafe(store, {
+    await recordAiCallLog(store, {
       conversationId: conversation.conversationId,
       userId: options.userId,
       scene: payload.scene ?? options.scene,
@@ -476,7 +496,7 @@ async function withAiCallLog(store, options) {
     });
     return payload;
   } catch (error) {
-    await createAiCallLogSafe(store, {
+    await recordAiCallLog(store, {
       conversationId: conversation?.conversationId ?? null,
       userId: options.userId,
       scene: options.scene,
@@ -487,6 +507,257 @@ async function withAiCallLog(store, options) {
       errorMessage: error?.message ?? "AI service failed."
     });
     throw error;
+  }
+}
+
+async function streamAiChatResponse(response, store, options) {
+  ensureAiStore(store, ["createAiConversation", "createAiCallLog"]);
+  const config = typeof store.getAiConfig === "function" ? await store.getAiConfig() : null;
+  ensureAiSceneEnabled(config, options.scene);
+  await enforceRateLimit(store, {
+    scope: "ai:user:minute",
+    identity: rateLimitIdentity(options.userId),
+    limit: Number(config?.rateLimitPerMinute ?? 20),
+    windowSeconds: 60
+  });
+  await enforceRateLimit(store, {
+    scope: "ai:user:hour",
+    identity: rateLimitIdentity(options.userId),
+    limit: Number(config?.rateLimitPerHour ?? 60),
+    windowSeconds: 60 * 60
+  });
+  await enforceRateLimit(store, {
+    scope: "ai:user:day",
+    identity: rateLimitIdentity(options.userId),
+    limit: Number(config?.rateLimitPerDay ?? 200),
+    windowSeconds: 60 * 60 * 24
+  });
+
+  const started = Date.now();
+  const conversation = await ensureConversation(store, {
+    conversationId: options.conversationId,
+    userId: options.userId,
+    scene: options.scene
+  });
+
+  response.writeHead(200, {
+    ...pendingHeaders(response),
+    "content-type": "application/x-ndjson; charset=utf-8",
+    "cache-control": "no-store, no-transform",
+    "x-accel-buffering": "no"
+  });
+
+  const emit = (event) => {
+    response.write(`${JSON.stringify(event)}\n`);
+  };
+
+  emit({
+    type: "start",
+    conversation: aiConversationDto(conversation)
+  });
+
+  try {
+    const payload = await streamChatPayload(store, options.context, options.body, conversation, options.aiAdapter, emit);
+    emit({ type: "done", payload });
+    await recordAiCallLog(store, {
+      conversationId: conversation.conversationId,
+      userId: options.userId,
+      scene: payload.scene ?? options.scene,
+      status: payload.type === "blocked" ? "blocked" : "success",
+      durationMs: Date.now() - started,
+      requestTokens: estimateTokens(JSON.stringify(payload.criteria ?? payload.summary ?? "")),
+      responseTokens: estimateTokens(payload.answer ?? JSON.stringify(payload.summary ?? payload.draft ?? "")),
+      errorMessage: payload.type === "blocked" ? payload.answer : null
+    });
+  } catch (error) {
+    const errorPayload = {
+      code: error?.code ?? "INTERNAL_ERROR",
+      message: error?.message ?? "The server encountered an unexpected error.",
+      ...(error?.details === undefined ? {} : { details: error.details })
+    };
+    if (!response.writableEnded) {
+      emit({ type: "error", error: errorPayload });
+    }
+    await recordAiCallLog(store, {
+      conversationId: conversation?.conversationId ?? null,
+      userId: options.userId,
+      scene: options.scene,
+      status: "failed",
+      durationMs: Date.now() - started,
+      requestTokens: 0,
+      responseTokens: 0,
+      errorMessage: error?.message ?? "AI service failed."
+    });
+  } finally {
+    response.end();
+  }
+}
+
+async function streamChatPayload(store, context, body, conversation, aiAdapter, emit) {
+  const prompt = chatPrompt(body);
+  if (!prompt) {
+    throw new HttpError(400, "AI_MESSAGE_REQUIRED", "AI message is required.");
+  }
+  const scene = normalizeScene(body.scene ?? inferScene(prompt));
+  const inputMessage = await createAiMessageSafe(store, {
+    conversationId: conversation.conversationId,
+    senderType: "user",
+    content: prompt,
+    businessType: optionalText(body.businessType, 50),
+    businessId: parseOptionalId(body.businessId)
+  });
+
+  const highRisk = detectHighRiskIntent(prompt);
+  if (highRisk) {
+    const result = highRiskResponse(highRisk);
+    await emitTextChunks(result.answer, emit);
+    const message = await createAiMessageSafe(store, {
+      conversationId: conversation.conversationId,
+      senderType: "ai",
+      content: result.answer,
+      businessType: "safety",
+      businessId: null,
+      sensitiveHit: true
+    });
+    return {
+      conversation: aiConversationDto(conversation),
+      userMessage: aiMessageDto(inputMessage),
+      message: aiMessageDto(message),
+      ...result
+    };
+  }
+
+  if (scene === "request_filter" || /找|筛选|推荐|需求|任务/.test(prompt)) {
+    const result = await requestFilterPayload(store, context, {
+      prompt,
+      conversationId: conversation.conversationId,
+      skipUserMessage: true
+    }, conversation, inputMessage);
+    await emitTextChunks(result.answer, emit);
+    return result;
+  }
+
+  if (scene === "request_draft" || /草稿|帮我写|完善|发布/.test(prompt)) {
+    const result = await requestDraftPayload(store, context, {
+      prompt,
+      conversationId: conversation.conversationId,
+      skipUserMessage: true
+    }, conversation);
+    await emitTextChunks(result.answer, emit);
+    return result;
+  }
+
+  let result = ruleAnswer(prompt);
+  if (aiAdapter && typeof aiAdapter.stream === "function") {
+    try {
+      result = await streamModelAnswer(aiAdapter, {
+        prompt,
+        scene,
+        user: context.user,
+        fallback: result,
+        config: typeof store.getAiConfig === "function" ? await store.getAiConfig() : null
+      }, emit);
+    } catch (error) {
+      result = aiProviderFallback(result, error);
+      await emitTextChunks(result.answer, emit);
+    }
+  } else if (aiAdapter && typeof aiAdapter.complete === "function") {
+    const config = typeof store.getAiConfig === "function" ? await store.getAiConfig() : null;
+    try {
+      result = await aiAdapter.complete({ prompt, scene, user: context.user, fallback: result, config });
+    } catch (error) {
+      result = aiProviderFallback(result, error);
+    }
+    await emitTextChunks(result.answer, emit);
+  } else {
+    await emitTextChunks(result.answer, emit);
+  }
+
+  const message = await createAiMessageSafe(store, {
+    conversationId: conversation.conversationId,
+    senderType: "ai",
+    content: result.answer,
+    businessType: "rules",
+    businessId: null
+  });
+  return {
+    conversation: aiConversationDto(conversation),
+    userMessage: aiMessageDto(inputMessage),
+    message: aiMessageDto(message),
+    scene: "rules",
+    type: "rules",
+    answer: result.answer,
+    bullets: result.bullets ?? [],
+    guidance: result.guidance ?? null,
+    fallback: Boolean(result.fallback),
+    providerError: result.providerError ?? null
+  };
+}
+
+async function streamModelAnswer(aiAdapter, input, emit) {
+  let answer = "";
+  let started = false;
+  let model = null;
+  try {
+    for await (const event of aiAdapter.stream(input)) {
+      if (event.type === "start") {
+        started = true;
+        model = event.model ?? model;
+        continue;
+      }
+      if (event.type === "delta") {
+        started = true;
+        model = event.model ?? model;
+        answer += String(event.content ?? "");
+        emit({ type: "delta", content: String(event.content ?? "") });
+      }
+    }
+  } catch (error) {
+    if (!answer) {
+      throw error;
+    }
+    return {
+      scene: input.scene,
+      type: "model",
+      answer,
+      bullets: [],
+      guidance: null,
+      fallback: false,
+      model,
+      providerError: {
+        code: error?.code ?? "AI_PROVIDER_STREAM_INTERRUPTED",
+        message: error?.message ?? "AI provider stream was interrupted.",
+        ...(error?.details === undefined ? {} : { details: error.details })
+      }
+    };
+  }
+  if (!started || !answer) {
+    const fallback = input.fallback ?? ruleAnswer(input.prompt);
+    await emitTextChunks(fallback.answer, emit);
+    return {
+      ...fallback,
+      fallback: true
+    };
+  }
+  return {
+    scene: input.scene,
+    type: "model",
+    answer,
+    bullets: [],
+    guidance: null,
+    fallback: false,
+    model
+  };
+}
+
+async function emitTextChunks(text, emit) {
+  const value = String(text ?? "");
+  if (!value) {
+    return;
+  }
+  const chunks = value.match(/.{1,24}/gs) ?? [value];
+  for (const chunk of chunks) {
+    emit({ type: "delta", content: chunk });
   }
 }
 
@@ -818,6 +1089,10 @@ async function createAiCallLogSafe(store, input) {
   }
 }
 
+async function recordAiCallLog(store, input) {
+  await createAiCallLogSafe(store, input);
+}
+
 function highRiskResponse(intent) {
   const answer = `我不能替你执行「${intent.label}」这类高风险操作。\n${intent.guide}\n我可以帮你说明操作路径、前置条件和需要核对的信息。`;
   return {
@@ -1142,4 +1417,10 @@ function allowOnly(request, response, methods) {
     methodNotAllowed(response, methods);
     throw new HttpError(0, "HANDLED", "Response was already handled.");
   }
+}
+
+function pendingHeaders(response) {
+  return response.pendingHeaders && typeof response.pendingHeaders === "object"
+    ? response.pendingHeaders
+    : {};
 }
