@@ -281,7 +281,7 @@ export function ProfilePage({ api }: { api: ApiClient }) {
           <div className="settings-list" style={SETTINGS_LIST_STYLE}>
             <SettingsItem icon="✏" iconBg="var(--accent-subtle)" iconColor="var(--accent)" title="编辑资料" desc="修改头像、昵称、个人简介" href="/settings" />
             <SettingsItem icon="📋" iconBg="var(--secondary-light)" iconColor="var(--secondary)" title="我的订单" desc="发布和接单的全部记录" href="/orders" />
-            <SettingsItem icon="⭐" iconBg="oklch(94% 0.04 82)" iconColor="oklch(65% 0.18 82)" title="信用详情" desc="评分分布、评价记录和信誉等级" href="/credit" />
+            <SettingsItem icon="⭐" iconBg="oklch(94% 0.04 82)" iconColor="oklch(65% 0.18 82)" title="信用详情" desc="评分分布、评价记录和信誉等级" href={`/users/${userId}/credit`} />
             <SettingsItem icon="⚙" iconBg="var(--border-light)" iconColor="var(--muted)" title="设置" desc="通知、隐私、通用偏好" href="/settings" />
             <div className="divider" style={DIVIDER_STYLE}></div>
             {(user?.role === "admin" || user?.role === "super_admin") && (
@@ -515,8 +515,7 @@ export function UserPublicPage({ api }: { api: ApiClient }) {
 
 /* ===== Enhanced Credit page ===== */
 export function CreditPage({ api }: { api: ApiClient }) {
-  const { params } = useQueryParams();
-  const id = params.get("userId") || "";
+  const { id } = useParams<{ id?: string }>();
   const state = useAsync(() => id ? api.users.credit(id) : api.users.me(), [api, id]);
   const credit = (state.data?.credit ?? state.data) as Record<string, unknown> | null;
   const reviews = asArray<Record<string, unknown>>(id ? state.data : credit, "reviews");

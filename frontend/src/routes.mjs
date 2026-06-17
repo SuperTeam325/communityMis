@@ -45,7 +45,10 @@ export const routes = [
   }),
   route("notifications", "通知中心", "screens/notifications.html", "/notifications", "user", "userShell"),
   route("settings", "设置", "screens/settings.html", "/settings", "user", "userShell"),
-  route("credit", "信用详情", "screens/credit.html", "/credit", "user", "userShell"),
+  route("credit", "信用详情", "screens/credit.html", "/users/:id/credit", "user", "userShell", {
+    demoPath: "/users/demo/credit",
+    match: /^\/users\/[^/]+\/credit$/
+  }),
   route("wallet", "时间币钱包", "screens/wallet.html", "/wallet", "user", "userShell"),
   route("wallet-freeze", "冻结明细", "screens/wallet-freeze.html", "/wallet/freeze", "user", "userShell"),
   route("orders", "我的订单", "screens/orders.html", "/orders", "user", "userShell"),
