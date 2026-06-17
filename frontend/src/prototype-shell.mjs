@@ -4351,7 +4351,7 @@ function renderReviewReadonly(order, reviewState) {
       ${review?.comment ? `<p style="margin-top:var(--space-md);">${escapeHtml(review.comment)}</p>` : ""}
       <div style="margin-top:var(--space-xl);display:flex;gap:var(--space-sm);justify-content:center;flex-wrap:wrap;">
         <a class="btn btn--primary" href="/orders">返回我的订单</a>
-        <a class="btn btn--secondary" href="/credit?userId=${encodeURIComponent(reviewState.targetId ?? "")}">查看信用详情</a>
+        <a class="btn btn--secondary" href="/users/${encodeURIComponent(reviewState.targetId ?? "")}/credit">查看信用详情</a>
       </div>
     </div>
   `;
@@ -4369,7 +4369,7 @@ function renderReviewSuccess(order, target, review) {
       <p>你对${escapeHtml(displayName(target))}给出了 ${escapeHtml(review?.rating ?? "")} 星评价。信用详情和公开主页评分已更新。</p>
       <div style="margin-top:var(--space-xl);display:flex;gap:var(--space-sm);justify-content:center;flex-wrap:wrap;">
         <a class="btn btn--primary" href="/orders">返回我的订单</a>
-        <a class="btn btn--secondary" href="/credit?userId=${encodeURIComponent(target.userId)}">查看信用详情</a>
+        <a class="btn btn--secondary" href="/users/${encodeURIComponent(target.userId)}/credit">查看信用详情</a>
         <a class="btn btn--ghost" href="/users/${encodeURIComponent(target.userId)}">公开主页</a>
       </div>
     </div>
