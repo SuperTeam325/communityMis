@@ -1161,6 +1161,15 @@
     return document.cookie.split(';').map(part => part.trim()).find(part => part.startsWith(prefix))?.slice(prefix.length) || '';
   }
 
+  document.addEventListener('click', function (event) {
+    const trigger = event.target.closest('[data-ai-modal-scene]');
+    if (!trigger) {
+      return;
+    }
+    event.preventDefault();
+    openModal(trigger.dataset.aiModalScene || 'all');
+  });
+
   // Expose to window
   window.openAIModal = openModal;
   window.closeAIModal = closeModal;
