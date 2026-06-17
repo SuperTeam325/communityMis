@@ -1671,15 +1671,18 @@ function updateFeedQuery(patch, userSession) {
   if (next.filter && next.filter !== "all") {
     params.set("filter", next.filter);
   }
-  if (filter?.category) {
-    params.set("category", filter.category);
-  } else if (next.category) {
+  // 动态分类（filter===all）或显式指定分类时才写入 category/tag，
+  // 静态 filter 的分类/标签由 feedApiParams 运行时从 TASK_FILTERS 派生，
+  // 不应写入 URL，否则 state.category 非空会导致静态 chip 高亮失效
+  if (next.category) {
     params.set("category", next.category);
+  } else if (next.filter === "all" && filter?.category) {
+    params.set("category", filter.category);
   }
-  if (filter?.tag) {
-    params.set("tag", filter.tag);
-  } else if (next.tag) {
+  if (next.tag) {
     params.set("tag", next.tag);
+  } else if (next.filter === "all" && filter?.tag) {
+    params.set("tag", filter.tag);
   }
   if (next.status && next.status !== "open") {
     params.set("status", next.status);
