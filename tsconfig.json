@@ -18,5 +18,5 @@
     "jsx": "react-jsx",
     "types": ["vite/client", "vitest/globals"]
   },
-  "include": ["frontend/src/spa", "frontend/src/routes.mjs", "vite.config.ts", "tests"]
+  "include": ["frontend/src/spa", "vite.config.ts", "tests"]
 }

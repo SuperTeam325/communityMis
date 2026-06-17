@@ -77,6 +77,7 @@ test("published task stays authenticated and appears in feed", async ({ page }) 
   await page.locator(".publish-tabs button[data-tab='task']").click();
   await page.locator("#task-title").fill(title);
   await page.locator("#task-description").fill("这是一次浏览器端发布任务验证，用于确认 Cookie 登录态不会被误判为未登录。");
+  await page.getByLabel("类别").selectOption({ label: "家政维修" });
   await page.locator("#task-hours").fill("1");
   await page.locator("#task-coins").fill("5");
   await page.locator("#task-location").fill("测试社区");
@@ -99,15 +100,14 @@ test("messages and notifications hydrate with cookie session", async ({ page }) 
   await expect(page).toHaveURL(/\/feed$/);
 
   await page.goto(`${frontendBaseUrl}/messages`);
-  await expect(page.locator("#tab-chat .runtime-placeholder")).toHaveCount(0);
-  await expect(page.locator("#tab-system .runtime-placeholder")).toHaveCount(0);
-  await expect(page.locator("#tab-chat .conv-item", { hasText: "小王维修" })).toHaveCount(1);
-  await page.locator("#msg-tabs button[data-tab='system']").click();
-  await expect(page.locator("#tab-system .notif-item", { hasText: "需求已被接单" })).toHaveCount(1);
+  await expect(page.locator("html")).toHaveAttribute("data-route-id", "messages");
+  await expect(page.getByRole("heading", { name: "消息中心" })).toBeVisible();
+  await expect(page.locator(".conversation-card", { hasText: "小王维修" })).toHaveCount(1);
+  await expect(page.locator(".conversation-card", { hasText: "需求已被接单" })).toHaveCount(1);
 
   await page.goto(`${frontendBaseUrl}/notifications`);
-  await expect(page.locator("#notif-list .runtime-placeholder")).toHaveCount(0);
-  await expect(page.locator("#notif-list .notif-card[data-notification-id]", { hasText: "需求已被接单" })).toHaveCount(1);
+  await expect(page.locator("html")).toHaveAttribute("data-route-id", "notifications");
+  await expect(page.locator(".notif-card", { hasText: "需求已被接单" })).toHaveCount(1);
 });
 
 test("core business API flow works with cookie and CSRF browser model", async () => {

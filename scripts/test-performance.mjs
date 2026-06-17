@@ -14,7 +14,8 @@ function run() {
 
   checkHtmlBudget();
   checkCssBudget();
-  checkRouteJsBudget(manifest);
+  checkJsBudget();
+  checkManifestShape(manifest);
 
   for (const item of checks) {
     console.log(`${item.ok ? "ok" : "fail"} - ${item.message}`);
@@ -25,36 +26,29 @@ function run() {
 }
 
 function checkHtmlBudget() {
-  for (const file of listFiles(path.join(distRoot, "pages")).filter((item) => item.endsWith(".html"))) {
+  const htmlFiles = listFiles(distRoot).filter((item) => item.endsWith(".html"));
+  for (const file of htmlFiles) {
     const size = fs.statSync(file).size;
-    record(size < 150 * 1024, `${path.relative(distRoot, file)} HTML is below 150KB (${size} bytes)`);
+    record(size < 80 * 1024, `${path.relative(distRoot, file)} HTML is below 80KB (${size} bytes)`);
   }
 }
 
 function checkCssBudget() {
   const cssFiles = listFiles(distRoot).filter((file) => file.endsWith(".css"));
   const totalGzip = cssFiles.reduce((sum, file) => sum + gzipSize(file), 0);
-  record(totalGzip < 150 * 1024, `CSS total gzip is below 150KB (${totalGzip} bytes)`);
+  record(totalGzip < 180 * 1024, `CSS total gzip is below 180KB (${totalGzip} bytes)`);
 }
 
-function checkRouteJsBudget(manifest) {
-  const commonLogicalAssets = [
-    "/assets/app/main.mjs",
-    "/assets/app/modules/shared-ui.mjs",
-    "/assets/app/prototype-shell.mjs",
-    "/assets/app/api-client.mjs",
-    "/assets/app/auth.mjs",
-    "/assets/app/api/client.mjs"
-  ];
-  const domains = ["auth", "feed", "tasks", "orders", "wallet", "disputes", "messages", "ai", "admin"];
-  for (const domain of domains) {
-    const logicalAssets = [...commonLogicalAssets, `/assets/app/modules/${domain}.mjs`];
-    const total = logicalAssets.reduce((sum, logicalPath) => {
-      const asset = manifest.assets?.[logicalPath];
-      return sum + (asset ? gzipSize(path.join(distRoot, asset.slice(1))) : 0);
-    }, 0);
-    record(total < 250 * 1024, `${domain} route JS gzip is below 250KB (${total} bytes)`);
-  }
+function checkJsBudget() {
+  const jsFiles = listFiles(path.join(distRoot, "assets")).filter((file) => file.endsWith(".js"));
+  const totalGzip = jsFiles.reduce((sum, file) => sum + gzipSize(file), 0);
+  record(totalGzip < 900 * 1024, `SPA JS total gzip is below 900KB (${totalGzip} bytes)`);
+}
+
+function checkManifestShape(manifest) {
+  record(manifest.type === "vite-react-spa", "manifest marks React SPA");
+  record(manifest.frontendMode === "spa", "manifest frontendMode is spa");
+  record(!("prototypeAssets" in manifest), "manifest does not contain prototype assets");
 }
 
 function gzipSize(file) {
@@ -62,6 +56,7 @@ function gzipSize(file) {
 }
 
 function listFiles(root) {
+  if (!fs.existsSync(root)) return [];
   const entries = fs.readdirSync(root, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {

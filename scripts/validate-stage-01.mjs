@@ -3,7 +3,7 @@ import http from "node:http";
 import path from "node:path";
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createFrontendServer } from "../frontend/server.mjs";
-import { responsiveViewports, routePath, routes } from "../frontend/src/routes.mjs";
+import { appRoutes as routes, responsiveViewports, routePath } from "../frontend/src/spa/route-data.mjs";
 
 const projectRoot = process.cwd();
 const checks = [];
@@ -28,7 +28,7 @@ async function run() {
 function checkFileLayout() {
   for (const requiredPath of [
     "frontend/server.mjs",
-    "frontend/src/routes.mjs",
+    "frontend/src/spa/route-data.mjs",
     "frontend/src/spa/App.tsx",
     "frontend/src/spa/routes.ts",
     "frontend/src/spa/main.tsx",
@@ -72,8 +72,8 @@ function checkRouteCoverage() {
   record(spaRoutes.includes('path: "/jury/disputes/:id"'), "SPA route metadata includes jury dispute voting deep link");
   record(appSource.includes("NavLink") && appSource.includes("Link"), "SPA shell uses React Router navigation primitives");
 
-  record(new Set(routes.map((item) => item.id)).size === routes.length, "legacy route ids are unique");
-  record(new Set(routes.map((item) => item.source)).size === routes.length, "legacy route sources are unique");
+  record(new Set(routes.map((item) => item.id)).size === routes.length, "SPA route ids are unique");
+  record(routes.every((item) => !("source" in item)), "SPA route metadata has no prototype source field");
   record(responsiveViewports.some((item) => item.width === 390), "mobile validation viewport is registered");
   record(responsiveViewports.some((item) => item.width === 820), "tablet validation viewport is registered");
   record(responsiveViewports.some((item) => item.width === 1440), "desktop validation viewport is registered");

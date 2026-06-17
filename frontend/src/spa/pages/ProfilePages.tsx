@@ -331,10 +331,10 @@ function MiniCard({ data, type }: { data: Record<string, unknown>; type: string 
     : text(data.targetType, "unknown")
   );
   const href =
-    type === "post" ? "/community-posts/" + encodeURIComponent(text(data.postId))
+    type === "post" ? "/posts/" + encodeURIComponent(text(data.postId))
     : type === "request" ? "/posts/" + encodeURIComponent(text(data.requestId))
     : type === "order" ? "/orders/" + encodeURIComponent(text(data.orderId))
-    : type === "collection" ? String((data as any).target?.href ?? ("/" + (data.targetType === "community_post" ? "community-posts/" : "posts/") + encodeURIComponent(String(data.targetId))))
+    : type === "collection" ? collectionHref(data)
     : "#";
 
   return (
@@ -362,6 +362,14 @@ function MiniCard({ data, type }: { data: Record<string, unknown>; type: string 
       </div>
     </Link>
   );
+}
+
+function collectionHref(data: Record<string, unknown>): string {
+  const target = (data as any).target as Record<string, unknown> | undefined;
+  const href = String(target?.href ?? "");
+  if (href.startsWith("/posts/") || href.startsWith("/orders/") || href.startsWith("/users/")) return href;
+  const targetId = encodeURIComponent(String(data.targetId ?? ""));
+  return data.targetType === "community_post" ? `/posts/${targetId}` : `/posts/${targetId}`;
 }
 
 function TabPanel({ loading, error, empty, children }: {
