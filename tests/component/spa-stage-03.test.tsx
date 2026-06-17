@@ -3,6 +3,8 @@ import React from "react";
 import { describe, expect, test, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { App } from "../../frontend/src/spa/App";
+import { AuthProvider } from "../../frontend/src/spa/auth";
 import { FeedPage } from "../../frontend/src/spa/pages/FeedPage";
 import { OrderDetailPage, ReviewPage } from "../../frontend/src/spa/pages/OrdersPages";
 import { PostPage, RequestDetailPage, TasksPage } from "../../frontend/src/spa/pages/RequestsPages";
@@ -110,6 +112,57 @@ describe("stage 03 user flow surfaces", () => {
     fireEvent.click(screen.getByRole("button", { name: "确认完成" }));
     await waitFor(() => expect(api.orders.confirm).toHaveBeenCalledWith("4001"));
   });
+
+  test("profile avatar resolves through api base and refreshes after upload", async () => {
+    const api = apiStub();
+    api.files.url = vi.fn((fileId: string) => `http://api.test/api/files/${fileId}`);
+    window.history.replaceState({}, "", "/profile");
+    (api.auth.me as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: {
+        userId: 1001,
+        username: "user_a",
+        displayName: "user_a",
+        role: "user",
+        avatarFileId: "avatar-1",
+        avatarUrl: "/api/files/avatar-1"
+      }
+    });
+    (api.users.me as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: {
+        userId: 1001,
+        username: "user_a",
+        displayName: "user_a",
+        role: "user",
+        avatarFileId: "avatar-1",
+        avatarUrl: "/api/files/avatar-1"
+      },
+      wallet: { balance: 10 },
+      credit: { averageRating: 4.8, reviewCount: 2 }
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/profile"]}>
+        <AuthProvider api={api as any}>
+          <App api={api as any} config={createRuntimeConfig()} />
+        </AuthProvider>
+      </MemoryRouter>
+    );
+
+    await screen.findAllByText("user_a");
+    await waitFor(() => {
+      expect(document.querySelector(".nav-avatar img")?.getAttribute("src")).toBe("http://api.test/api/files/avatar-1");
+      expect(document.querySelector(".avatar-wrap img")?.getAttribute("src")).toBe("http://api.test/api/files/avatar-1");
+    });
+
+    fireEvent.change(document.querySelector('.upload-box input[type="file"]') as HTMLInputElement, {
+      target: { files: [new File(["avatar"], "avatar.png", { type: "image/png" })] }
+    });
+
+    await waitFor(() => expect(api.files.upload).toHaveBeenCalled());
+    await waitFor(() => expect(api.users.avatar).toHaveBeenCalledWith("f1"));
+    await waitFor(() => expect(api.auth.me).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(api.users.me).toHaveBeenCalledTimes(2));
+  });
 });
 
 function apiStub() {
@@ -152,6 +205,9 @@ function apiStub() {
       detail: vi.fn().mockResolvedValue({ request }),
       accept: vi.fn().mockResolvedValue({ order })
     },
+    communityPosts: {
+      list: vi.fn().mockResolvedValue({ posts: [] })
+    },
     requestComments: {
       list: vi.fn().mockResolvedValue({ comments: [] }),
       create: vi.fn().mockResolvedValue({ comment: { commentId: 1 } })
@@ -175,6 +231,29 @@ function apiStub() {
       me: vi.fn().mockResolvedValue({ settings: { notifications: {}, privacy: {}, preferences: {} } }),
       updateMe: vi.fn().mockResolvedValue({ ok: true })
     },
-    auth: { logout: vi.fn().mockResolvedValue({ ok: true }) }
+    auth: {
+      logout: vi.fn().mockResolvedValue({ ok: true }),
+      me: vi.fn().mockResolvedValue({
+        user: {
+          userId: 1001,
+          username: "user_a",
+          displayName: "user_a",
+          role: "user",
+          avatarFileId: "avatar-1",
+          avatarUrl: "/api/files/avatar-1"
+        }
+      })
+    }
   } as any;
+}
+
+function createRuntimeConfig() {
+  return {
+    apiBaseUrl: "http://api.test",
+    appEnv: "test",
+    buildVersion: "test",
+    sentryDsn: "",
+    sentryTracesSampleRate: 0,
+    sentryIngestOrigin: ""
+  };
 }

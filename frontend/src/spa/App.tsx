@@ -1,6 +1,7 @@
 import React, { Suspense } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import type { ApiClient } from "./api";
+import { avatarImageUrl } from "./avatar";
 import { useAuth } from "./auth";
 import { setMonitoringUser } from "./monitoring";
 import { adminNav, appRoutes, routeById, userNav } from "./routes";
@@ -89,7 +90,7 @@ function RouteFrame(props: PageProps) {
     return <AdminShell route={route}>{page}</AdminShell>;
   }
   if (route.layout === "userShell") {
-    return <UserShell route={route}>{page}</UserShell>;
+    return <UserShell api={props.api} route={route}>{page}</UserShell>;
   }
   return page;
 }
@@ -143,8 +144,9 @@ function PageSwitch(props: PageProps) {
   }
 }
 
-function UserShell({ route, children }: { route: AppRoute; children: React.ReactNode }) {
+function UserShell({ api, route, children }: { api: ApiClient; route: AppRoute; children: React.ReactNode }) {
   const auth = useAuth();
+  const avatarUrl = avatarImageUrl(auth.session?.user, api);
   return (
     <div className="app-shell user-shell">
       <header className="top-nav">
@@ -153,7 +155,7 @@ function UserShell({ route, children }: { route: AppRoute; children: React.React
         <div className="nav-right">
           <Link className="ai-fab-link" to="/ai/assistant">AI</Link>
           <Link className="nav-avatar" to="/profile">
-            {auth.session?.user.avatarUrl ? <img src={auth.session?.user.avatarUrl} alt="" /> : <span className="nav-avatar-placeholder">{(auth.session?.user.displayName ?? auth.session?.user.username ?? "").slice(0, 1)}</span>}
+            {avatarUrl ? <img src={avatarUrl} alt="" /> : <span className="nav-avatar-placeholder">{(auth.session?.user.displayName ?? auth.session?.user.username ?? "").slice(0, 1)}</span>}
             <span>{auth.session?.user.displayName ?? auth.session?.user.username}</span>
           </Link>
         </div>

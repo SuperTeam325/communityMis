@@ -1,6 +1,7 @@
 import React from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { ApiClient } from "../api";
+import { avatarImageUrl } from "../avatar";
 import { useAuth } from "../auth";
 import { FileUpload, Field, PageHeader, StateView, asArray, text, useAsync, useMutationTracker, useQueryParams } from "./shared";
 
@@ -47,6 +48,11 @@ const AVATAR_XL_STYLE: React.CSSProperties = {
   background: "linear-gradient(135deg, var(--accent), var(--accent-hover))",
   width: 80, height: 80, borderRadius: "50%", display: "flex", alignItems: "center",
   justifyContent: "center", color: "#fff", fontSize: 28, fontWeight: 700, margin: "0 auto"
+};
+
+const AVATAR_IMG_STYLE: React.CSSProperties = {
+  width: 80, height: 80, borderRadius: "50%", display: "block", objectFit: "cover",
+  margin: "0 auto", background: "var(--border-light)"
 };
 
 const NAME_STYLE: React.CSSProperties = {
@@ -172,6 +178,7 @@ export function ProfilePage({ api }: { api: ApiClient }) {
   const credit = userData?.credit as Record<string, unknown> | null;
 
   const userId = String(user?.userId ?? "");
+  const avatarUrl = avatarImageUrl(user, api);
 
   const postsState = useAsync(() => api.communityPosts.list({ authorId: userId, pageSize: 50 }), [api, userId]);
   const requestsState = useAsync(() => api.requests.list({ publisherId: userId, pageSize: 50 }), [api, userId]);
@@ -191,11 +198,16 @@ export function ProfilePage({ api }: { api: ApiClient }) {
       <StateView loading={loading} error={error} empty={!user}>
         <section className="profile-header-bg" style={PROFILE_HEADER_STYLE}>
           <div className="avatar-wrap" style={AVATAR_WRAP_STYLE}>
-            <div className="avatar xl" style={AVATAR_XL_STYLE}>{text(user?.displayName ?? user?.username).slice(0, 1)}</div>
+            {avatarUrl
+              ? <img className="avatar xl" style={AVATAR_IMG_STYLE} src={avatarUrl} alt="" />
+              : <div className="avatar xl" style={AVATAR_XL_STYLE}>{text(user?.displayName ?? user?.username).slice(0, 1)}</div>}
             <FileUpload purpose="avatar" businessType="user" visibility="public" onUploaded={async (formData) => {
               const result = await api.files.upload(formData);
               const fileId = text((result.file as Record<string, unknown>)?.fileId ?? result.fileId, "");
-              if (fileId) await api.users.avatar(fileId);
+              if (fileId) {
+                await api.users.avatar(fileId);
+                await auth.refresh("user");
+              }
               userState.reload();
             }} />
           </div>
@@ -459,6 +471,7 @@ export function UserPublicPage({ api }: { api: ApiClient }) {
   const credit = (state.data?.credit ?? {}) as Record<string, unknown>;
   const isSelf = Boolean(viewer.isSelf);
   const [following, setFollowing] = React.useState(Boolean(viewer.isFollowing));
+  const avatarUrl = avatarImageUrl(user, api);
 
   return (
     <>
@@ -480,7 +493,9 @@ export function UserPublicPage({ api }: { api: ApiClient }) {
       } />
       <StateView loading={state.loading} error={state.error} empty={!user}>
         <section className="profile-header-bg" style={PROFILE_HEADER_STYLE}>
-          <div className="avatar xl" style={AVATAR_XL_STYLE}>{text(user?.displayName ?? user?.username).slice(0, 1)}</div>
+          {avatarUrl
+            ? <img className="avatar xl" style={AVATAR_IMG_STYLE} src={avatarUrl} alt="" />
+            : <div className="avatar xl" style={AVATAR_XL_STYLE}>{text(user?.displayName ?? user?.username).slice(0, 1)}</div>}
           <h2 style={NAME_STYLE}>{text(user?.displayName ?? user?.username)}</h2>
           <p style={BIO_STYLE}>{text(user?.bio, "暂无简介")}</p>
           {!!user?.skillTags && asArray<string>(user.skillTags, "").length > 0 && (
@@ -619,4 +634,3 @@ export function HelpPage() {
     </>
   );
 }
-

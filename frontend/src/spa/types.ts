@@ -28,6 +28,7 @@ export type SessionUser = {
   username: string;
   displayName?: string | null;
   role: "user" | "admin" | "super_admin" | string;
+  avatarFileId?: string | null;
   avatarUrl?: string | null;
   creditScore?: number | null;
   skillTags?: string[];
