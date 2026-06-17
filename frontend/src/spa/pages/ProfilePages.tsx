@@ -1,8 +1,8 @@
 import React from "react";
-import { useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import type { ApiClient } from "../api";
 import { useAuth } from "../auth";
-import { FileUpload, Field, PageHeader, StateView, asArray, text, useAsync } from "./shared";
+import { FileUpload, Field, PageHeader, StateView, asArray, text, useAsync, useMutationTracker, useQueryParams } from "./shared";
 
 /* ===== Helper ===== */
 function timeAgo(dateStr: unknown): string {
@@ -162,6 +162,7 @@ const MINI_CARD_STYLE: React.CSSProperties = {
 /* ===== ProfilePage component ===== */
 export function ProfilePage({ api }: { api: ApiClient }) {
   const auth = useAuth();
+  const navigate = useNavigate();
   const [tab, setTab] = React.useState<ProfileTab>("posts");
 
   const userState = useAsync(() => api.users.me(), [api]);
@@ -195,7 +196,7 @@ export function ProfilePage({ api }: { api: ApiClient }) {
               const result = await api.files.upload(formData);
               const fileId = text((result.file as Record<string, unknown>)?.fileId ?? result.fileId, "");
               if (fileId) await api.users.avatar(fileId);
-              window.location.reload();
+              userState.reload();
             }} />
           </div>
           <h2 className="profile-name" style={NAME_STYLE}>{text(user?.displayName ?? user?.username)}</h2>
@@ -269,14 +270,14 @@ export function ProfilePage({ api }: { api: ApiClient }) {
               {collections.map((col: Record<string, unknown>) => <MiniCard key={text(col.targetId)} data={col} type="collection" />)}
             </TabPanel>
           )}
-          <div className="wallet-card" style={WALLET_CARD_STYLE} onClick={() => window.location.href = "/wallet"}>
+          <Link className="wallet-card" style={{ ...WALLET_CARD_STYLE, display: "block", textDecoration: "none" }} to="/wallet">
             <div style={WALLET_LABEL_STYLE}>我的钱包</div>
             <div style={WALLET_BALANCE_STYLE}>{text(wallet?.balance, "0.00")}</div>
             <div style={WALLET_FROZEN_STYLE}>冻结金额: {text(wallet?.frozenBalance, "0.00")}</div>
             <div style={WALLET_ACTIONS_STYLE}>
-              <button style={WALLET_BTN_STYLE} onClick={(e) => { e.stopPropagation(); window.location.href = "/wallet"; }}>查看钱包</button>
+              <span style={WALLET_BTN_STYLE}>查看钱包</span>
             </div>
-          </div>
+          </Link>
           <div className="settings-list" style={SETTINGS_LIST_STYLE}>
             <SettingsItem icon="✏" iconBg="var(--accent-subtle)" iconColor="var(--accent)" title="编辑资料" desc="修改头像、昵称、个人简介" href="/settings" />
             <SettingsItem icon="📋" iconBg="var(--secondary-light)" iconColor="var(--secondary)" title="我的订单" desc="发布和接单的全部记录" href="/orders" />
@@ -286,7 +287,7 @@ export function ProfilePage({ api }: { api: ApiClient }) {
             {(user?.role === "admin" || user?.role === "super_admin") && (
               <SettingsItem icon="🛡" iconBg="var(--fg)" iconColor="var(--accent-light)" title="管理后台" desc="用户管理、争议处理、平台统计" href="/admin/dashboard" />
             )}
-            <button className="settings-item" onClick={() => auth.logout().then(() => window.location.href = "/login")}
+            <button className="settings-item" onClick={() => auth.logout().then(() => navigate("/login", { replace: true }))}
               style={LOGOUT_BTN_STYLE}>
               <div style={{ ...SETTINGS_ICON_BASE, background: "var(--danger-light)", color: "var(--danger)" }}>{"🚪"}</div>
               <div style={SETTINGS_TEXT_STYLE}>
@@ -308,14 +309,14 @@ function SettingsItem({ icon, iconBg, iconColor, title, desc, href }: {
   icon: string; iconBg: string; iconColor: string; title: string; desc: string; href: string;
 }) {
   return (
-    <a href={href} className="settings-item" style={SETTINGS_ITEM_STYLE}>
+    <Link to={href} className="settings-item" style={SETTINGS_ITEM_STYLE}>
       <div style={{ ...SETTINGS_ICON_BASE, background: iconBg, color: iconColor }}>{icon}</div>
       <div style={SETTINGS_TEXT_STYLE}>
         <div style={SETTINGS_TITLE_STYLE}>{title}</div>
         <div style={SETTINGS_DESC_STYLE}>{desc}</div>
       </div>
       <span style={CHEVRON_STYLE}>{"›"}</span>
-    </a>
+    </Link>
   );
 }
 
@@ -337,7 +338,7 @@ function MiniCard({ data, type }: { data: Record<string, unknown>; type: string 
     : "#";
 
   return (
-    <article className="mini-card" style={MINI_CARD_STYLE} onClick={() => window.location.href = href}>
+    <Link className="mini-card" style={{ ...MINI_CARD_STYLE, display: "block", textDecoration: "none", color: "inherit" }} to={href}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "var(--space-sm)" }}>
         <span style={{ fontSize: 15, fontWeight: 700, flex: 1, color: "var(--fg)" }}>{title}</span>
         <span className={type === "post" ? "badge badge--success" : "reward-badge"}
@@ -359,7 +360,7 @@ function MiniCard({ data, type }: { data: Record<string, unknown>; type: string 
         )}
         <span style={{ marginLeft: "auto" }}>{timeAgo(data.createdAt)}</span>
       </div>
-    </article>
+    </Link>
   );
 }
 
@@ -378,6 +379,7 @@ function TabPanel({ loading, error, empty, children }: {
 /* ===== Enhanced Settings page ===== */
 export function SettingsPage({ api }: { api: ApiClient }) {
   const state = useAsync(() => api.settings.me(), [api]);
+  const mutation = useMutationTracker();
   const settings = (state.data?.settings ?? {}) as Record<string, unknown>;
   const notif = (settings.notifications ?? {}) as Record<string, unknown>;
   const priv = (settings.privacy ?? {}) as Record<string, unknown>;
@@ -389,7 +391,7 @@ export function SettingsPage({ api }: { api: ApiClient }) {
         <form className="panel form-grid" onSubmit={async (event) => {
           event.preventDefault();
           const form = new FormData(event.currentTarget);
-          await api.settings.updateMe({
+          await mutation.run(() => api.settings.updateMe({
             notifications: {
               newMessages: form.get("notif_messages") === "on",
               interactions: form.get("notif_interactions") === "on",
@@ -406,8 +408,7 @@ export function SettingsPage({ api }: { api: ApiClient }) {
               language: form.get("pref_language"),
               darkMode: form.get("pref_dark_mode")
             }
-          });
-          window.location.reload();
+          }), () => state.reload());
         }}>
           <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>通知提醒</h3>
           <label className="check-row"><input type="checkbox" name="notif_messages" defaultChecked={Boolean(notif.newMessages ?? true)} /> 新消息提醒</label>
@@ -440,7 +441,8 @@ export function SettingsPage({ api }: { api: ApiClient }) {
               <option value="dark">深色</option>
             </select>
           </Field>
-          <button className="btn btn--primary">保存设置</button>
+          {mutation.error ? <p className="field-error" role="alert">{mutation.error}</p> : null}
+          <button className="btn btn--primary" disabled={mutation.busy}>{mutation.busy ? "保存中..." : "保存设置"}</button>
         </form>
       </StateView>
     </>
@@ -501,7 +503,7 @@ export function UserPublicPage({ api }: { api: ApiClient }) {
                   await api.users.follow(id);
                   setFollowing(true);
                 }}>{following ? "已关注" : "关注"}</button>
-                <a className="btn btn--secondary" href={"/messages?userId=" + encodeURIComponent(id)}>联系用户</a>
+                <Link className="btn btn--secondary" to={"/messages?userId=" + encodeURIComponent(id)}>联系用户</Link>
               </>
             )}
           </div>
@@ -513,7 +515,8 @@ export function UserPublicPage({ api }: { api: ApiClient }) {
 
 /* ===== Enhanced Credit page ===== */
 export function CreditPage({ api }: { api: ApiClient }) {
-  const id = new URLSearchParams(window.location.search).get("userId") || "";
+  const { params } = useQueryParams();
+  const id = params.get("userId") || "";
   const state = useAsync(() => id ? api.users.credit(id) : api.users.me(), [api, id]);
   const credit = (state.data?.credit ?? state.data) as Record<string, unknown> | null;
   const reviews = asArray<Record<string, unknown>>(id ? state.data : credit, "reviews");

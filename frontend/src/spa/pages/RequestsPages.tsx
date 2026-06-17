@@ -1,7 +1,7 @@
 import React from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { ApiClient } from "../api";
-import { FileUpload, Field, PageHeader, StateView, asArray, friendlyError, text, useAsync } from "./shared";
+import { FileUpload, Field, PageHeader, StateView, asArray, friendlyError, text, useAsync, useMutationTracker } from "./shared";
 
 export function TasksPage({ api }: { api: ApiClient }) {
   const state = useAsync(() => api.requests.list({ page: 1, pageSize: 20 }), [api]);
@@ -80,6 +80,8 @@ export function RequestDetailPage({ api }: { api: ApiClient }) {
   const request = (detail.data?.request ?? detail.data) as Record<string, unknown> | null;
   const comments = asArray<Record<string, unknown>>(commentsState.data, "comments");
   const [error, setError] = React.useState("");
+  const acceptMutation = useMutationTracker();
+  const commentMutation = useMutationTracker();
   return (
     <>
       <PageHeader title="帖子详情" />
@@ -88,10 +90,10 @@ export function RequestDetailPage({ api }: { api: ApiClient }) {
           <h2>{text(request?.title)}</h2>
           <p>{text(request?.description || request?.content)}</p>
           <div className="action-row">
-            <button className="btn btn--primary" onClick={() => api.requests.accept(id).then(() => window.location.reload()).catch((reason) => setError(friendlyError(reason)))}>接单</button>
+            <button className="btn btn--primary" disabled={acceptMutation.busy} onClick={() => acceptMutation.run(() => api.requests.accept(id), () => detail.reload()).catch((reason) => setError(friendlyError(reason)))}>{acceptMutation.busy ? "接单中..." : "接单"}</button>
             <Link className="btn btn--secondary" to={`/users/${text(request?.publisherId ?? request?.userId)}`}>联系用户</Link>
           </div>
-          {error ? <p className="field-error">{error}</p> : null}
+          {error || acceptMutation.error ? <p className="field-error">{error || acceptMutation.error}</p> : null}
         </article>
       </StateView>
       <section className="panel">
@@ -101,12 +103,19 @@ export function RequestDetailPage({ api }: { api: ApiClient }) {
         </StateView>
         <form className="inline-form" onSubmit={async (event) => {
           event.preventDefault();
-          const form = new FormData(event.currentTarget);
-          await api.requestComments.create(id, { content: form.get("content") });
-          window.location.reload();
+          const formElement = event.currentTarget;
+          const form = new FormData(formElement);
+          await commentMutation.run(
+            () => api.requestComments.create(id, { content: form.get("content") }),
+            () => {
+              formElement.reset();
+              commentsState.reload();
+            }
+          );
         }}>
           <input name="content" placeholder="写评论" required />
-          <button className="btn btn--primary">发送</button>
+          <button className="btn btn--primary" disabled={commentMutation.busy}>{commentMutation.busy ? "发送中..." : "发送"}</button>
+          {commentMutation.error ? <span className="field-error" role="alert">{commentMutation.error}</span> : null}
         </form>
       </section>
     </>

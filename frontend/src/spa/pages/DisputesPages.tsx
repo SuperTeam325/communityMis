@@ -1,9 +1,10 @@
 import React from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { ApiClient } from "../api";
-import { FileUpload, Field, PageHeader, StateView, asArray, friendlyError, text, useAsync } from "./shared";
+import { FileUpload, Field, PageHeader, StateView, asArray, friendlyError, text, useAsync, useMutationTracker } from "./shared";
 
 export function DisputeCreatePage({ api }: { api: ApiClient }) {
+  const navigate = useNavigate();
   const [fileIds, setFileIds] = React.useState<string[]>([]);
   const [error, setError] = React.useState("");
   return (
@@ -18,7 +19,7 @@ export function DisputeCreatePage({ api }: { api: ApiClient }) {
             description: form.get("description"),
             attachments: fileIds.map((fileId) => ({ fileId }))
           });
-          window.location.href = "/orders";
+          navigate("/orders", { replace: true });
         } catch (reason) {
           setError(friendlyError(reason));
         }
@@ -98,6 +99,7 @@ export function JuryVotingPage({ api }: { api: ApiClient }) {
   const disputeId = id || params.get("dispute") || params.get("disputeId") || params.get("id") || "";
   const state = useAsync(() => api.jury.dispute(disputeId), [api, disputeId]);
   const dispute = (state.data?.dispute ?? state.data) as Record<string, unknown> | null;
+  const voteMutation = useMutationTracker();
   return (
     <>
       <PageHeader title="陪审投票" />
@@ -107,9 +109,10 @@ export function JuryVotingPage({ api }: { api: ApiClient }) {
           <p>{text(dispute?.description)}</p>
           <div className="action-row">
             {["support_initiator", "support_respondent", "abstain"].map((result) => (
-              <button key={result} className="btn btn--secondary" onClick={() => api.jury.vote(disputeId, { result, reason: "前端投票" }).then(() => window.location.reload())}>{result}</button>
+              <button key={result} className="btn btn--secondary" disabled={voteMutation.busy} onClick={() => voteMutation.run(() => api.jury.vote(disputeId, { result, reason: "前端投票" }), () => state.reload()).catch(() => {})}>{result}</button>
             ))}
           </div>
+          {voteMutation.error ? <p className="field-error" role="alert">{voteMutation.error}</p> : null}
         </article>
       </StateView>
     </>

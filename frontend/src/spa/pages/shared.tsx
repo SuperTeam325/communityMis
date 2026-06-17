@@ -1,15 +1,17 @@
 import React from "react";
 import { ApiError } from "../api";
 
-export function useAsync<T>(loader: () => Promise<T>, deps: React.DependencyList = []) {
+export function useAsync<T>(loader: (signal?: AbortSignal) => Promise<T>, deps: React.DependencyList = []) {
   const [data, setData] = React.useState<T | null>(null);
   const [error, setError] = React.useState<Error | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [version, setVersion] = React.useState(0);
 
   React.useEffect(() => {
+    const controller = new AbortController();
     let cancelled = false;
     setLoading(true);
-    loader()
+    loader(controller.signal)
       .then((value) => {
         if (!cancelled) {
           setData(value);
@@ -17,17 +19,18 @@ export function useAsync<T>(loader: () => Promise<T>, deps: React.DependencyList
         }
       })
       .catch((reason) => {
-        if (!cancelled) setError(reason instanceof Error ? reason : new Error(String(reason)));
+        if (!cancelled && !isAbortError(reason)) setError(reason instanceof Error ? reason : new Error(String(reason)));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, deps);
+  }, [...deps, version]);
 
-  return { data, error, loading, setData };
+  return { data, error, loading, setData, reload: () => setVersion((value) => value + 1) };
 }
 
 export function StateView({ loading, error, empty, children }: {
@@ -133,4 +136,51 @@ export function asArray<T = Record<string, unknown>>(value: unknown, key: string
 export function text(value: unknown, fallback = "-"): string {
   if (value === undefined || value === null || value === "") return fallback;
   return String(value);
+}
+
+export function useQueryParams() {
+  const [params, setParams] = React.useState(() => new URLSearchParams(window.location.search));
+
+  React.useEffect(() => {
+    const onPopState = () => setParams(new URLSearchParams(window.location.search));
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  const updateParams = React.useCallback((next: URLSearchParams | ((current: URLSearchParams) => URLSearchParams), options: { replace?: boolean } = {}) => {
+    const resolved = typeof next === "function" ? next(new URLSearchParams(window.location.search)) : next;
+    const query = resolved.toString();
+    const url = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
+    window.history[options.replace ? "replaceState" : "pushState"]({}, "", url);
+    setParams(new URLSearchParams(resolved));
+  }, []);
+
+  return { params, setParams: updateParams };
+}
+
+export function useMutationTracker() {
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string>("");
+
+  const run = React.useCallback(async <T,>(mutation: () => Promise<T>, onSuccess?: (value: T) => void | Promise<void>) => {
+    setBusy(true);
+    setError("");
+    try {
+      const value = await mutation();
+      await onSuccess?.(value);
+      return value;
+    } catch (reason) {
+      const message = friendlyError(reason);
+      setError(message);
+      throw reason;
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  return { busy, error, setError, run };
+}
+
+export function isAbortError(error: unknown) {
+  return Boolean(error && typeof error === "object" && "name" in error && (error as { name?: string }).name === "AbortError");
 }

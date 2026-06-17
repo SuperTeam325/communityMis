@@ -1,6 +1,6 @@
 import React from "react";
 import type { ApiClient } from "../api";
-import { DataTable, Field, PageHeader, StateView, asArray, text, useAsync } from "./shared";
+import { DataTable, Field, PageHeader, StateView, asArray, text, useAsync, useMutationTracker } from "./shared";
 
 export function MessagesPage({ api }: { api: ApiClient }) {
   const state = useAsync(() => api.messages.list({ pageSize: 30 }), [api]);
@@ -10,7 +10,7 @@ export function MessagesPage({ api }: { api: ApiClient }) {
       <PageHeader title="消息中心" />
       <section className="panel">
         <h2>发送私信</h2>
-        <MessageForm api={api} />
+        <MessageForm api={api} onSent={state.reload} />
       </section>
       <StateView loading={state.loading} error={state.error} empty={rows.length === 0}>
         <DataTable columns={["时间", "发件人", "收件人", "内容", "状态"]} rows={rows.map((item) => [
@@ -25,17 +25,25 @@ export function MessagesPage({ api }: { api: ApiClient }) {
   );
 }
 
-function MessageForm({ api }: { api: ApiClient }) {
+function MessageForm({ api, onSent }: { api: ApiClient; onSent: () => void }) {
+  const mutation = useMutationTracker();
   return (
     <form className="inline-form" onSubmit={async (event) => {
       event.preventDefault();
-      const form = new FormData(event.currentTarget);
-      await api.messages.send({ receiverId: Number(form.get("receiverId")), content: form.get("content") });
-      window.location.reload();
+      const formElement = event.currentTarget;
+      const form = new FormData(formElement);
+      await mutation.run(
+        () => api.messages.send({ receiverId: Number(form.get("receiverId")), content: form.get("content") }),
+        () => {
+          formElement.reset();
+          onSent();
+        }
+      );
     }}>
       <input name="receiverId" placeholder="用户 ID" inputMode="numeric" required />
       <input name="content" placeholder="消息内容" required />
-      <button className="btn btn--primary">发送</button>
+      <button className="btn btn--primary" disabled={mutation.busy}>{mutation.busy ? "发送中..." : "发送"}</button>
+      {mutation.error ? <span className="field-error" role="alert">{mutation.error}</span> : null}
     </form>
   );
 }
@@ -43,6 +51,7 @@ function MessageForm({ api }: { api: ApiClient }) {
 export function NotificationsPage({ api }: { api: ApiClient }) {
   const state = useAsync(() => api.notifications.list({ page: 1, pageSize: 30 }), [api]);
   const settingsState = useAsync(() => api.settings.me(), [api]);
+  const readAllMutation = useMutationTracker();
   const rows = asArray<Record<string, unknown>>(state.data, "notifications");
   const summaries = (state.data?.summaries ?? {}) as Record<string, number>;
   const settings = (settingsState.data?.settings ?? {}) as Record<string, unknown>;
@@ -76,9 +85,10 @@ export function NotificationsPage({ api }: { api: ApiClient }) {
 
   return (
     <>
-      <PageHeader title="通知中心" action={<button className="btn btn--secondary" onClick={() => api.notifications.readAll().then(() => window.location.reload())}>全部已读</button>} />
+      <PageHeader title="通知中心" action={<button className="btn btn--secondary" disabled={readAllMutation.busy} onClick={() => readAllMutation.run(() => api.notifications.readAll(), () => state.reload())}>{readAllMutation.busy ? "处理中..." : "全部已读"}</button>} />
 
       <StateView loading={state.loading || settingsState.loading} error={state.error || settingsState.error} empty={rows.length === 0}>
+        {readAllMutation.error ? <p className="field-error" role="alert">{readAllMutation.error}</p> : null}
         <div className="notif-shell">
           <section className="summary-grid" aria-label="通知概览">
             <div className="summary-card"><strong>{summaries.unread ?? 0}</strong><span>未读通知</span></div>

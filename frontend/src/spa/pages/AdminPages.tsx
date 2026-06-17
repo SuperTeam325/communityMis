@@ -1,7 +1,7 @@
 import React from "react";
 import type { ApiClient } from "../api";
 import type { AppRoute } from "../types";
-import { Badge, DataTable, Field, PageHeader, StateView, asArray, friendlyError, text, useAsync } from "./shared";
+import { Badge, DataTable, Field, PageHeader, StateView, asArray, friendlyError, text, useAsync, useMutationTracker } from "./shared";
 
 export function AdminDashboardPage({ api }: { api: ApiClient }) {
   const state = useAsync(() => api.admin.dashboard(), [api]);
@@ -49,6 +49,8 @@ export function AdminSystemPage({ api }: { api: ApiClient }) {
   const backups = asArray<Record<string, unknown>>(state.data?.backups, "backups");
   const audits = asArray<Record<string, unknown>>(state.data?.audit, "auditLogs");
   const [error, setError] = React.useState("");
+  const saveMutation = useMutationTracker();
+  const backupMutation = useMutationTracker();
   return (
     <>
       <PageHeader title="系统设置" />
@@ -58,15 +60,15 @@ export function AdminSystemPage({ api }: { api: ApiClient }) {
           <form className="form-grid" onSubmit={async (event) => {
             event.preventDefault();
             const form = new FormData(event.currentTarget);
-            await api.admin.updateSystem({
+            await saveMutation.run(() => api.admin.updateSystem({
               maintenanceMode: form.get("maintenanceMode") === "on",
               announcement: form.get("announcement")
-            });
-            window.location.reload();
+            }), () => state.reload());
           }}>
             <label className="check-row"><input type="checkbox" name="maintenanceMode" defaultChecked={Boolean(settings.maintenanceMode)} /> 维护模式</label>
             <Field label="公告"><textarea name="announcement" rows={3} defaultValue={text(settings.announcement, "")} /></Field>
-            <button className="btn btn--primary">保存系统设置</button>
+            {saveMutation.error ? <p className="field-error" role="alert">{saveMutation.error}</p> : null}
+            <button className="btn btn--primary" disabled={saveMutation.busy}>{saveMutation.busy ? "保存中..." : "保存系统设置"}</button>
           </form>
         </section>
         <section className="panel">
@@ -74,20 +76,19 @@ export function AdminSystemPage({ api }: { api: ApiClient }) {
             <h2>系统配置快照</h2>
             <button className="btn btn--primary" onClick={async () => {
               try {
-                await api.admin.createBackup({ confirmText: "立即备份", reason: "manual-snapshot" });
-                window.location.reload();
+                await backupMutation.run(() => api.admin.createBackup({ confirmText: "立即备份", reason: "manual-snapshot" }), () => state.reload());
               } catch (reason) {
                 setError(friendlyError(reason));
               }
-            }}>生成快照</button>
+            }} disabled={backupMutation.busy}>{backupMutation.busy ? "生成中..." : "生成快照"}</button>
           </div>
-          {error ? <p className="field-error">{error}</p> : null}
+          {error || backupMutation.error ? <p className="field-error">{error || backupMutation.error}</p> : null}
           <DataTable columns={["快照", "状态", "大小", "时间", "操作"]} rows={backups.map((item) => [
             text(item.label ?? item.backupId),
             <Badge key="status" tone={text(item.status) === "ready" ? "success" : "warning"}>{text(item.status)}</Badge>,
             text(item.sizeBytes),
             text(item.createdAt),
-            <BackupActions key="actions" api={api} item={item} />
+            <BackupActions key="actions" api={api} item={item} onDone={state.reload} />
           ])} />
         </section>
         <section className="panel">
@@ -104,24 +105,24 @@ export function AdminSystemPage({ api }: { api: ApiClient }) {
   );
 }
 
-function BackupActions({ api, item }: { api: ApiClient; item: Record<string, unknown> }) {
+function BackupActions({ api, item, onDone }: { api: ApiClient; item: Record<string, unknown>; onDone: () => void }) {
   const id = text(item.backupId, "");
+  const mutation = useMutationTracker();
   return (
     <div className="action-row">
       <button className="btn btn--secondary btn--sm" onClick={async () => {
         const confirmText = window.prompt("输入 恢复备份 以确认配置快照恢复");
         if (confirmText === "恢复备份") {
-          await api.admin.restoreBackup(id, { confirmText, reason: "manual-restore" });
-          window.location.reload();
+          await mutation.run(() => api.admin.restoreBackup(id, { confirmText, reason: "manual-restore" }), onDone);
         }
-      }}>恢复快照</button>
+      }} disabled={mutation.busy}>恢复快照</button>
       <button className="btn btn--secondary btn--sm" onClick={async () => {
         const confirmText = window.prompt("输入 删除备份 以确认删除配置快照");
         if (confirmText === "删除备份") {
-          await api.admin.deleteBackup(id, { confirmText, reason: "manual-delete" });
-          window.location.reload();
+          await mutation.run(() => api.admin.deleteBackup(id, { confirmText, reason: "manual-delete" }), onDone);
         }
-      }}>删除</button>
+      }} disabled={mutation.busy}>删除</button>
+      {mutation.error ? <span className="field-error">{mutation.error}</span> : null}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import React from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { ApiClient } from "../api";
-import { Field, PageHeader, StateView, asArray, friendlyError, text, useAsync } from "./shared";
+import { Field, PageHeader, StateView, asArray, friendlyError, text, useAsync, useMutationTracker } from "./shared";
 
 export function OrdersPage({ api }: { api: ApiClient }) {
   const state = useAsync(() => api.orders.list({ page: 1, pageSize: 20 }), [api]);
@@ -25,7 +25,7 @@ export function OrderDetailPage({ api }: { api: ApiClient }) {
   const { id = "" } = useParams();
   const state = useAsync(() => api.orders.detail(id), [api, id]);
   const order = (state.data?.order ?? state.data) as Record<string, unknown> | null;
-  const [error, setError] = React.useState("");
+  const confirmMutation = useMutationTracker();
   return (
     <>
       <PageHeader title="订单详情" />
@@ -34,11 +34,11 @@ export function OrderDetailPage({ api }: { api: ApiClient }) {
           <h2>订单 #{text(order?.orderId ?? id)}</h2>
           <p>{text(order?.statusText ?? order?.status)}</p>
           <div className="action-row">
-            <button className="btn btn--primary" onClick={() => api.orders.confirm(id).then(() => window.location.reload()).catch((reason) => setError(friendlyError(reason)))}>确认完成</button>
+            <button className="btn btn--primary" disabled={confirmMutation.busy} onClick={() => confirmMutation.run(() => api.orders.confirm(id), () => state.reload()).catch(() => {})}>{confirmMutation.busy ? "确认中..." : "确认完成"}</button>
             <Link className="btn btn--secondary" to="/reviews/new">评价</Link>
             <Link className="btn btn--secondary" to="/disputes/new">发起纠纷</Link>
           </div>
-          {error ? <p className="field-error">{error}</p> : null}
+          {confirmMutation.error ? <p className="field-error">{confirmMutation.error}</p> : null}
         </article>
       </StateView>
     </>

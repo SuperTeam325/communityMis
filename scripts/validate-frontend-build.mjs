@@ -65,6 +65,7 @@ function checkAssets() {
   for (const key of ["apiBaseUrl", "appEnv", "buildVersion", "sentryDsn", "sentryTracesSampleRate"]) {
     record(Object.prototype.hasOwnProperty.call(config, key), `runtime config contains ${key}`);
   }
+  checkNoBusinessReloads();
 }
 
 async function checkProductionServer() {
@@ -184,6 +185,21 @@ function checkSecurityHeaders(response, label) {
   record(!csp.includes("script-src 'self' 'unsafe-inline'"), `${label} CSP keeps inline scripts disabled`);
   record(csp.includes("style-src 'self' 'unsafe-inline'"), `${label} CSP allows original HTML inline styles`);
   record(csp.includes("connect-src 'self' https://api.example.test https://example.ingest.sentry.io"), `${label} CSP allows API and Sentry connect-src`);
+}
+
+function checkNoBusinessReloads() {
+  const files = [
+    "frontend/src/spa/pages/AdminPages.tsx",
+    "frontend/src/spa/pages/MessagesPages.tsx",
+    "frontend/src/spa/pages/OrdersPages.tsx",
+    "frontend/src/spa/pages/RequestsPages.tsx",
+    "frontend/src/spa/pages/DisputesPages.tsx",
+    "frontend/src/spa/pages/ProfilePages.tsx"
+  ];
+  const content = files.map((file) => fs.readFileSync(path.join(projectRoot, file), "utf8")).join("\n");
+  record(!content.includes("window.location.reload()"), "SPA pages do not use business reloads");
+  record(!content.includes("window.location.href ="), "SPA pages do not use business href redirects");
+  record(!content.includes("new URLSearchParams(window.location.search)"), "SPA pages centralize query parsing");
 }
 
 function listFiles(root) {
