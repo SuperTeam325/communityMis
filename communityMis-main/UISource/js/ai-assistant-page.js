@@ -80,14 +80,14 @@
     return `
       <div class="ai-msg ${role}">
         <div class="msg-avatar">${role === "user" ? userIcon : gearIcon}</div>
-        <div><div class="msg-bubble">${escapeHtml(content).replace(/\n/g, "<br>")}</div></div>
+        <div class="msg-content"><div class="msg-bubble">${escapeHtml(content).replace(/\n/g, "<br>")}</div></div>
       </div>`;
   }
 
   function buildAIResponseHTML(response) {
     let html = `<div class="ai-msg assistant">
       <div class="msg-avatar">${gearIcon}</div>
-      <div>
+      <div class="msg-content">
         <div class="msg-bubble">
           <p>${escapeHtml(response.text)}</p>`;
 

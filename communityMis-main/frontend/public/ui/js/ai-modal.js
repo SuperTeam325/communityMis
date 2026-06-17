@@ -6,7 +6,6 @@
 
   let overlay, sheet, chatArea, inputEl, sendBtn, isProcessing = false;
   let currentScene = 'all';
-  let currentConversationId = null;
   let initialized = false;
 
   const SCENE_LABELS = {
@@ -27,7 +26,6 @@
 
   const ESCAPE_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
   function esc(s) { return String(s).replace(/[&<>"]/g, c => ESCAPE_MAP[c]); }
-  function attr(s) { return esc(s).replace(/'/g, '&#39;'); }
 
   const icons = {
     close: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
@@ -215,6 +213,7 @@
       /* Messages */
       .ai-modal-msg {
         display: flex; gap: 10px; margin-bottom: 20px;
+        max-width: 100%;
         animation: fadeInUp 0.35s ease;
       }
       .ai-modal-msg.assistant { align-items: flex-start; }
@@ -233,11 +232,24 @@
         background: var(--border-light, #e2e8f0);
         color: var(--muted, #64748b);
       }
+      .ai-modal-msg-content {
+        display: flex; flex-direction: column;
+        align-items: flex-start;
+        max-width: min(520px, calc(100% - 38px));
+        min-width: 0;
+      }
+      .ai-modal-msg.user .ai-modal-msg-content {
+        align-items: flex-end;
+      }
       .ai-modal-msg-bubble {
+        display: inline-block;
+        width: auto;
+        max-width: 100%;
         padding: 12px 16px; border-radius: var(--radius-lg, 12px);
         font-size: 14px; line-height: 1.7;
-        max-width: min(520px, calc(100% - 48px));
-        word-wrap: break-word;
+        overflow-wrap: break-word;
+        word-break: normal;
+        white-space: pre-wrap;
       }
       .ai-modal-msg.assistant .ai-modal-msg-bubble {
         background: var(--surface, #fff);
@@ -253,7 +265,8 @@
 
       /* Message actions */
       .ai-modal-msg-actions {
-        display: flex; gap: 8px; margin-top: 6px; padding-left: 38px;
+        display: flex; gap: 8px; margin-top: 6px;
+        flex-wrap: wrap;
       }
       .ai-modal-msg-action-btn {
         display: inline-flex; align-items: center; gap: 4px;
@@ -473,7 +486,7 @@
         </div>
         <p class="ai-modal-disclaimer">AI 回答仅供参考，不能替代平台规则和人工判断。<br>关键操作（接单、结算、纠纷裁决等）仍需你在页面中确认。</p>
         <div class="ai-modal-input-bar">
-          <textarea id="ai-modal-input" rows="1" placeholder="输入你的问题…"></textarea>
+          <textarea id="ai-modal-input" rows="1" placeholder="输入你的问题…" oninput="this.style.height='';this.style.height=Math.min(this.scrollHeight,100)+'px';"></textarea>
           <button class="ai-modal-send-btn" id="ai-modal-send" aria-label="发送">${icons.send}</button>
         </div>
       </div>
@@ -493,11 +506,9 @@
     document.getElementById('ai-modal-new').addEventListener('click', resetChat);
 
     sendBtn.addEventListener('click', sendMessage);
-    inputEl.addEventListener('input', resizeModalInput);
     inputEl.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
     });
-    chatArea.addEventListener('click', handleChatAction);
 
     document.querySelectorAll('#ai-modal-scene-bar .ai-modal-scene-chip').forEach(chip => {
       chip.addEventListener('click', function () {
@@ -509,6 +520,12 @@
       });
     });
 
+    document.querySelectorAll('#ai-modal-chat .sq-btn').forEach(btn => {
+      btn.addEventListener('click', function () {
+        inputEl.value = this.dataset.question;
+        sendMessage();
+      });
+    });
   }
 
   function closeModal() {
@@ -529,7 +546,6 @@
   }
 
   function resetChat() {
-    currentConversationId = null;
     const suggestedQs = [
       { q: '我想找一个信用高、今天发布的电脑维修需求', icon: 'search', bg: 'var(--secondary-light, #e0e7ff)', color: 'var(--secondary, #4f46e5)' },
       { q: '如何发起纠纷？需要什么条件？', icon: 'alert', bg: 'var(--warning-light, #fef3c7)', color: 'var(--warning, #d97706)' },
@@ -546,135 +562,80 @@
       <div class="suggested-qs"><div class="sq-label">试试问我</div><div class="sq-grid">${suggestedQs}</div></div>
     </div>`;
 
+    chatArea.querySelectorAll('.sq-btn').forEach(btn => {
+      btn.addEventListener('click', function () {
+        inputEl.value = this.dataset.question;
+        sendMessage();
+      });
+    });
+  }
+
+  // ── AI Response Engine ──
+  const aiResponses = {
+    '电脑维修': { text: '根据你的需求，我为你筛选了以下条件：', type: 'filter', tags: ['关键词=电脑维修', '信用分≥4.5', '发布时间=今天', '状态=待接单'], action: '查看匹配结果', resultCount: 3 },
+    '纠纷': { text: '发起纠纷需要满足以下条件，我为你整理了关键规则：', type: 'rules', rules: ['订单状态为"已完成"或"已确认"', '订单完成后 7 天内可发起', '需提供纠纷类型（服务未完成、质量不符、沟通问题等）', '需提供相关证据（聊天记录、图片等）', '纠纷发起后将冻结相关时间币，等待处理'], footer: '以上为平台规则摘要，具体操作请在"我的订单"中点击对应订单的"发起纠纷"按钮。' },
+    '冻结': { text: '你的时间币被冻结可能有以下几种原因：', type: 'rules', rules: ['正在进行中的订单——接单后对应时间币会被冻结，双方确认完成后自动释放', '纠纷处理中——纠纷订单涉及的时间币被临时冻结，等待管理员裁决', '系统风控——异常交易行为会触发临时冻结以便核查', '账户限制——如账户处于受限状态，部分功能和时间币可能被冻结'], footer: '如需查询具体冻结记录，请前往"我的钱包 → 冻结明细"查看。' },
+    '快递': { text: '我为你生成了一份任务草稿，你可以在此基础上修改：', type: 'draft', draftTitle: '代取快递并送货上门', draftBody: '需要帮忙去菜鸟驿站代取一个包裹，取件码通过私信发送。包裹不大，不需要推车。送到阳光花园 X 号楼 X 室，放在门口即可。有时间的邻居请联系，谢谢！', draftTags: ['快递代取', '轻量', '即时'], draftReward: '¥10-15' },
+    '发布': { text: '我为你生成了一份任务草稿，你可以在此基础上修改：', type: 'draft', draftTitle: '代取快递并送货上门', draftBody: '需要帮忙去菜鸟驿站代取一个包裹，取件码通过私信发送。包裹不大，不需要推车。送到阳光花园 X 号楼 X 室，放在门口即可。有时间的邻居请联系，谢谢！', draftTags: ['快递代取', '轻量', '即时'], draftReward: '¥10-15' },
+    default: { text: '好的，让我帮你梳理一下相关信息：', type: 'default', response: '我目前可以帮你解答平台规则相关问题、辅助筛选需求大厅的任务、帮忙生成发布文案草稿。\n\n你可以尝试问我：\n· 如何评价已完成订单？\n· 找一个今天发布的宠物照看需求\n· 发布一则社区活动通知应该怎么写\n· 陪审投票有什么作用？' }
+  };
+
+  function getResponse(query) {
+    const q = query.trim();
+    for (const [key, resp] of Object.entries(aiResponses)) {
+      if (q.includes(key)) return resp;
+    }
+    return aiResponses.default;
   }
 
   function buildMsgHTML(role, content) {
     return `<div class="ai-modal-msg ${role}">
       <div class="ai-modal-msg-avatar">${role === 'user' ? icons.user : icons.sparkle.replace('width="16"','width="14"').replace('height="16"','height="14"')}</div>
-      <div><div class="ai-modal-msg-bubble">${esc(content)}</div></div>
+      <div class="ai-modal-msg-content"><div class="ai-modal-msg-bubble">${esc(content)}</div></div>
     </div>`;
   }
 
   function buildAIResponseHTML(resp) {
-    const messageId = resp.messageId || resp.message?.messageId || '';
-    let html = `<div class="ai-modal-msg assistant" ${messageId ? `data-ai-message-id="${attr(messageId)}"` : ''}>
+    let html = `<div class="ai-modal-msg assistant">
       <div class="ai-modal-msg-avatar">${icons.sparkle.replace('width="16"','width="14"').replace('height="16"','height="14"')}</div>
-      <div><div class="ai-modal-msg-bubble"><p>${esc(resp.text)}</p>`;
+      <div class="ai-modal-msg-content"><div class="ai-modal-msg-bubble"><p>${esc(resp.text)}</p>`;
 
     if (resp.type === 'filter') {
-      const prompt = resp.prompt || resp.criteria?.prompt || '';
-      const tags = resp.tags || aiCriteriaTags(resp.criteria);
       html += `<div class="apply-filter-card">
-        <div class="filter-tags">${tags.map(t => `<span class="filter-tag">${esc(t)}</span>`).join('')}</div>
-        <button class="apply-filter-btn" data-ai-modal-action="results" data-prompt="${attr(prompt)}">
+        <div class="filter-tags">${resp.tags.map(t => `<span class="filter-tag">${t}</span>`).join('')}</div>
+        <button class="apply-filter-btn" onclick="window._aiModalNavigate&&window._aiModalNavigate('tasks.html')">
           ${icons.search.replace('width="14"','').replace('height="14"','')} 查看匹配结果（${resp.resultCount} 个任务）
         </button>
       </div>`;
     }
-    if ((resp.type === 'rules' || resp.type === 'blocked') && resp.rules) {
+    if (resp.type === 'rules' && resp.rules) {
       html += '<ul class="ai-rules-list">';
       resp.rules.forEach(r => { html += `<li>${esc(r)}</li>`; });
       html += '</ul>';
       if (resp.footer) html += `<p class="ai-rules-footer">${esc(resp.footer)}</p>`;
     }
     if (resp.type === 'draft') {
-      const draft = resp.draft || {};
-      const draftTitle = resp.draftTitle || draft.title || 'AI 草稿';
-      const draftBody = resp.draftBody || draft.description || '';
-      const draftTags = resp.draftTags || draft.tags || [];
-      const draftReward = resp.draftReward || draft.coinAmount || '';
       html += `<div class="draft-card">
-        <div class="draft-title">${esc(draftTitle)}</div>
-        <div class="draft-body">${esc(draftBody)}</div>
+        <div class="draft-title">${esc(resp.draftTitle)}</div>
+        <div class="draft-body">${esc(resp.draftBody)}</div>
         <div class="draft-tags">
-          ${draftTags.map(t => `<span class="filter-tag" style="background:var(--accent-subtle, rgba(99,102,241,0.08));color:var(--accent, #6366f1);">${esc(t)}</span>`).join('')}
-          ${draftReward ? `<span class="filter-tag" style="background:var(--warning-light, #fef3c7);color:var(--warning, #d97706);">悬赏 ${esc(draftReward)}</span>` : ''}
+          ${resp.draftTags.map(t => `<span class="filter-tag" style="background:var(--accent-subtle, rgba(99,102,241,0.08));color:var(--accent, #6366f1);">${t}</span>`).join('')}
+          <span class="filter-tag" style="background:var(--warning-light, #fef3c7);color:var(--warning, #d97706);">悬赏 ${esc(resp.draftReward)}</span>
         </div>
         <div class="draft-actions">
-          <button class="btn btn--primary btn--sm" data-ai-modal-action="draft" data-draft='${attr(JSON.stringify(draft))}'>确认并填入发布表单</button>
-          <button class="btn btn--ghost btn--sm" data-ai-modal-action="regenerate" data-question="帮我写一段发布代取快递任务的描述">重新生成</button>
+          <button class="btn btn--primary btn--sm" onclick="window._aiModalNavigate&&window._aiModalNavigate('post.html')">确认并填入发布表单</button>
+          <button class="btn btn--ghost btn--sm" onclick="document.getElementById('ai-modal-input').value='帮我写一段发布代取快递任务的描述';document.getElementById('ai-modal-send').click();">重新生成</button>
         </div>
       </div>`;
     }
 
     html += `</div>
       <div class="ai-modal-msg-actions">
-        <button class="ai-modal-msg-action-btn" data-ai-modal-action="copy">${icons.copy} 复制</button>
-        ${messageId ? `<button class="ai-modal-msg-action-btn" data-ai-modal-action="feedback" data-rating="useful">${icons.thumbsUp} 有用</button>
-        <button class="ai-modal-msg-action-btn" data-ai-modal-action="feedback" data-rating="useless">${icons.thumbsDown} 没用</button>` : ''}
+        <button class="ai-modal-msg-action-btn" onclick="navigator.clipboard?.writeText(this.closest('.ai-modal-msg').querySelector('.ai-modal-msg-bubble').textContent.trim());this.textContent='✓ 已复制';setTimeout(()=>this.textContent='${esc('复制')}',2000);">${icons.copy} 复制</button>
+        <button class="ai-modal-msg-action-btn" onclick="this.classList.toggle('active')">${icons.thumbsUp} 有用</button>
+        <button class="ai-modal-msg-action-btn" onclick="this.classList.toggle('active')">${icons.thumbsDown} 没用</button>
       </div></div></div>`;
     return html;
-  }
-
-  function aiCriteriaTags(criteria) {
-    if (!criteria) return [];
-    const tags = [];
-    if (criteria.category?.name || criteria.categoryName) tags.push(criteria.category?.name || criteria.categoryName);
-    if (criteria.keyword) tags.push(criteria.keyword);
-    if (criteria.minCredit) tags.push('信用 ' + criteria.minCredit + '+');
-    if (criteria.sort === 'coin_desc') tags.push('时间币优先');
-    if (criteria.sort === 'credit_desc') tags.push('信用优先');
-    return [...tags, ...(criteria.tags || [])].filter(Boolean).slice(0, 6);
-  }
-
-  function resizeModalInput() {
-    inputEl.style.height = '';
-    inputEl.style.height = Math.min(inputEl.scrollHeight, 100) + 'px';
-  }
-
-  function handleChatAction(event) {
-    const suggested = event.target.closest('.sq-btn');
-    if (suggested && chatArea.contains(suggested)) {
-      inputEl.value = suggested.dataset.question || '';
-      resizeModalInput();
-      sendMessage();
-      return;
-    }
-
-    const action = event.target.closest('[data-ai-modal-action]');
-    if (!action || !chatArea.contains(action)) {
-      return;
-    }
-
-    const type = action.dataset.aiModalAction;
-    if (type === 'navigate') {
-      navigateFromModal(action.dataset.target || '/tasks');
-      return;
-    }
-    if (type === 'results') {
-      const params = new URLSearchParams({ prompt: action.dataset.prompt || inputEl.value.trim() || '' });
-      navigateFromModal('/ai/results?' + params.toString());
-      return;
-    }
-    if (type === 'draft') {
-      navigateFromModal('/post?draft=' + encodeURIComponent(action.dataset.draft || '{}'));
-      return;
-    }
-    if (type === 'regenerate') {
-      inputEl.value = action.dataset.question || '';
-      resizeModalInput();
-      sendMessage();
-      return;
-    }
-    if (type === 'copy') {
-      copyModalMessage(action);
-      return;
-    }
-    if (type === 'feedback') {
-      sendModalFeedback(action);
-    }
-  }
-
-  function navigateFromModal(url) {
-    closeModal();
-    setTimeout(() => { window.location.href = url; }, 300);
-  }
-
-  async function copyModalMessage(button) {
-    const text = button.closest('.ai-modal-msg')?.querySelector('.ai-modal-msg-bubble')?.textContent.trim() || '';
-    await navigator.clipboard?.writeText(text);
-    button.textContent = '✓ 已复制';
-    setTimeout(() => { button.innerHTML = icons.copy + ' 复制'; }, 2000);
   }
 
   function showTyping() {
@@ -705,152 +666,17 @@
     inputEl.style.height = '';
     chatArea.scrollTop = chatArea.scrollHeight;
 
-    showTyping();
-    requestAiChat(query)
-      .then(resp => {
+    setTimeout(() => {
+      showTyping();
+      setTimeout(() => {
         hideTyping();
+        const resp = getResponse(query);
         chatArea.insertAdjacentHTML('beforeend', buildAIResponseHTML(resp));
         chatArea.scrollTop = chatArea.scrollHeight;
-      })
-      .catch(error => {
-        hideTyping();
-        chatArea.insertAdjacentHTML('beforeend', buildAIResponseHTML({
-          text: error.message || 'AI 服务暂不可用，请稍后再试。',
-          type: 'default',
-          response: ''
-        }));
-        chatArea.scrollTop = chatArea.scrollHeight;
-      })
-      .finally(() => {
         isProcessing = false;
         sendBtn.disabled = false;
-      });
-  }
-
-  async function requestAiChat(query) {
-    const payload = {
-      message: query,
-      scene: currentScene,
-      conversationId: currentConversationId
-    };
-    const data = await requestJson('/api/ai/chat', payload);
-    currentConversationId = data.conversation?.conversationId || currentConversationId;
-    return normalizeAiChatResponse(data, query);
-  }
-
-  async function sendModalFeedback(button) {
-    const messageId = button.closest('.ai-modal-msg')?.dataset.aiMessageId;
-    if (!messageId || button.dataset.pending === 'true') {
-      return;
-    }
-    button.dataset.pending = 'true';
-    const previous = button.innerHTML;
-    try {
-      await requestJson('/api/ai/messages/' + encodeURIComponent(messageId) + '/feedback', {
-        rating: button.dataset.rating || 'useful'
-      });
-      button.textContent = '已反馈';
-      button.classList.add('active');
-      button.closest('.ai-modal-msg-actions')?.querySelectorAll('[data-ai-modal-action="feedback"]').forEach(item => {
-        if (item !== button) item.disabled = true;
-      });
-    } catch (error) {
-      button.innerHTML = previous;
-      chatArea.insertAdjacentHTML('beforeend', buildAIResponseHTML({
-        text: error.message || '反馈提交失败，请稍后再试。',
-        type: 'default'
-      }));
-    } finally {
-      delete button.dataset.pending;
-    }
-  }
-
-  async function requestJson(path, body) {
-    const headers = { 'content-type': 'application/json' };
-    const csrfToken = readCookie('csrf_token');
-    if (csrfToken) {
-      headers['x-csrf-token'] = csrfToken;
-    }
-    const response = await fetch(resolveApiUrl(path), {
-      method: 'POST',
-      credentials: 'include',
-      headers,
-      body: JSON.stringify(body)
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(aiErrorMessage(payload, response.status));
-    }
-    return payload;
-  }
-
-  function normalizeAiChatResponse(payload, prompt) {
-    const type = payload.type || 'default';
-    const text = payload.answer || payload.message?.content || 'AI 已返回结果。';
-    if (type === 'filter') {
-      return {
-        text,
-        type,
-        messageId: payload.message?.messageId,
-        prompt,
-        criteria: payload.criteria,
-        tags: aiCriteriaTags(payload.criteria),
-        resultCount: payload.resultCount ?? (payload.recommendations || []).length
-      };
-    }
-    if (type === 'draft') {
-      return {
-        text,
-        type,
-        messageId: payload.message?.messageId,
-        draft: payload.draft,
-        draftTitle: payload.draft?.title,
-        draftBody: payload.draft?.description,
-        draftTags: payload.draft?.tags || [],
-        draftReward: payload.draft?.coinAmount
-      };
-    }
-    if (type === 'rules' || type === 'blocked') {
-      return {
-        text,
-        type,
-        messageId: payload.message?.messageId,
-        rules: payload.bullets || [],
-        footer: payload.guidance || null
-      };
-    }
-    return {
-      text,
-      type: 'default',
-      messageId: payload.message?.messageId
-    };
-  }
-
-  function aiErrorMessage(payload, status) {
-    const code = payload?.error?.code;
-    if (status === 401 || (status === 403 && code === 'CSRF_TOKEN_INVALID')) {
-      return '登录状态已过期，请重新登录后使用 AI 助手。';
-    }
-    if (code === 'AI_UNAVAILABLE') {
-      return 'AI 助手已被管理员暂时关闭。';
-    }
-    if (code === 'RATE_LIMIT_EXCEEDED') {
-      return 'AI 调用过于频繁，请稍后再试。';
-    }
-    return payload?.error?.message || 'AI 服务请求失败。';
-  }
-
-  function resolveApiUrl(path) {
-    const base = window.__NEIGHBOR_CONFIG__?.apiBaseUrl || window.__API_BASE_URL__;
-    if (!base) {
-      throw new Error('API 地址未配置。');
-    }
-    return new URL(path, base).toString();
-  }
-
-  function readCookie(name) {
-    const prefix = encodeURIComponent(name) + '=';
-    return document.cookie.split(';').map(part => part.trim()).find(part => part.startsWith(prefix))?.slice(prefix.length) || '';
+      }, 1000 + Math.random() * 700);
+    }, 250);
   }
 
   // Expose to window

@@ -308,6 +308,7 @@
       /* Messages */
       .ai-modal-msg {
         display: flex; gap: 10px; margin-bottom: 20px;
+        max-width: 100%;
         animation: fadeInUp 0.35s ease;
       }
       .ai-modal-msg.assistant { align-items: flex-start; }
@@ -326,11 +327,24 @@
         background: var(--border-light, #e2e8f0);
         color: var(--muted, #64748b);
       }
+      .ai-modal-msg-content {
+        display: flex; flex-direction: column;
+        align-items: flex-start;
+        max-width: min(520px, calc(100% - 38px));
+        min-width: 0;
+      }
+      .ai-modal-msg.user .ai-modal-msg-content {
+        align-items: flex-end;
+      }
       .ai-modal-msg-bubble {
+        display: inline-block;
+        width: auto;
+        max-width: 100%;
         padding: 12px 16px; border-radius: var(--radius-lg, 12px);
         font-size: 14px; line-height: 1.7;
-        max-width: min(520px, calc(100% - 48px));
-        word-wrap: break-word;
+        overflow-wrap: break-word;
+        word-break: normal;
+        white-space: pre-wrap;
       }
       .ai-modal-msg.assistant .ai-modal-msg-bubble {
         background: var(--surface, #fff);
@@ -345,6 +359,8 @@
       }
       .ai-rich-content {
         display: grid; gap: 8px;
+        max-width: 100%;
+        min-width: 0;
       }
       .ai-rich-content p,
       .ai-rich-content ul,
@@ -409,7 +425,8 @@
 
       /* Message actions */
       .ai-modal-msg-actions {
-        display: flex; gap: 8px; margin-top: 6px; padding-left: 38px;
+        display: flex; gap: 8px; margin-top: 6px;
+        flex-wrap: wrap;
       }
       .ai-modal-msg-action-btn {
         display: inline-flex; align-items: center; gap: 4px;
@@ -708,7 +725,7 @@
   function buildMsgHTML(role, content) {
     return `<div class="ai-modal-msg ${role}">
       <div class="ai-modal-msg-avatar">${role === 'user' ? icons.user : icons.sparkle.replace('width="16"','width="14"').replace('height="16"','height="14"')}</div>
-      <div><div class="ai-modal-msg-bubble">${esc(content)}</div></div>
+      <div class="ai-modal-msg-content"><div class="ai-modal-msg-bubble">${esc(content)}</div></div>
     </div>`;
   }
 
@@ -716,7 +733,7 @@
     const messageId = resp.messageId || resp.message?.messageId || '';
     let html = `<div class="ai-modal-msg assistant" ${messageId ? `data-ai-message-id="${attr(messageId)}"` : ''}>
       <div class="ai-modal-msg-avatar">${icons.sparkle.replace('width="16"','width="14"').replace('height="16"','height="14"')}</div>
-      <div><div class="ai-modal-msg-bubble" data-ai-raw="${attr(resp.text || '')}"><div class="ai-rich-content">${renderAssistantContent(resp.text)}</div>`;
+      <div class="ai-modal-msg-content"><div class="ai-modal-msg-bubble" data-ai-raw="${attr(resp.text || '')}"><div class="ai-rich-content">${renderAssistantContent(resp.text)}</div>`;
 
     if (resp.type === 'filter') {
       const prompt = resp.prompt || resp.criteria?.prompt || '';
@@ -767,7 +784,7 @@
     const el = document.createElement('div');
     el.className = 'ai-modal-msg assistant';
     el.innerHTML = `<div class="ai-modal-msg-avatar">${icons.sparkle.replace('width="16"','width="14"').replace('height="16"','height="14"')}</div>
-      <div><div class="ai-modal-msg-bubble" data-ai-raw=""><div class="ai-rich-content">正在生成...</div></div></div>`;
+      <div class="ai-modal-msg-content"><div class="ai-modal-msg-bubble" data-ai-raw=""><div class="ai-rich-content">正在生成...</div></div></div>`;
     chatArea.appendChild(el);
     chatArea.scrollTop = chatArea.scrollHeight;
     return el;
