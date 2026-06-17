@@ -794,13 +794,34 @@ async function hydratePublicProfileRoute(session) {
   const userSession = session ?? auth.readSession("user");
   const userId = routeUserId(userSession);
   if (!userId) {
+    renderPublicProfileError("无法识别用户，请检查链接是否正确。");
     return;
   }
-  const payload = await api.users.public(userId, userSession?.token);
-  applyPublicProfile(payload);
-  installPublicProfileActions(payload, userSession);
+  try {
+    const payload = await api.users.public(userId, userSession?.token);
+    var shell = document.querySelector(".profile-shell");
+    if (shell) {
+      shell.querySelectorAll("[data-runtime-placeholder]").forEach(function(el) { el.remove(); });
+    }
+    applyPublicProfile(payload);
+    installPublicProfileActions(payload, userSession);
+  } catch (error) {
+    if (error && error.status === 404) {
+      renderPublicProfileError("该用户不存在或已被禁用。");
+    } else if (error && (error.status === 0 || error instanceof TypeError)) {
+      renderPublicProfileError("网络连接失败，请检查网络后重试。");
+    } else {
+      renderPublicProfileError((error && error.message) || "加载主页失败，请稍后重试。");
+    }
+  }
 }
 
+function renderPublicProfileError(message) {
+  var shell = document.querySelector(".profile-shell");
+  if (shell) {
+    shell.innerHTML = "<div class=\"runtime-state\" style=\"text-align:center;padding:40px 20px;\"><p style=\"font-size:16px;color:var(--muted);\">" + message + "</p></div>";
+  }
+}
 async function hydrateCreditRoute(session) {
   const userSession = session ?? auth.readSession("user");
   const userId = creditUserId(userSession);
@@ -10433,13 +10454,14 @@ function capitalize(value) {
 }
 
 function routeUserId(session) {
-  const match = window.location.pathname.match(/^\/users\/([^/]+)$/);
-  const raw = match?.[1];
-  if (raw && /^\d+$/.test(raw)) {
+  var match = window.location.pathname.match(/^\/users\/([^/]+)$/);
+  var raw = match ? match[1] : null;
+  if (raw) {
     return raw;
   }
-  return session?.user?.userId ?? null;
+  return (session && session.user) ? session.user.userId : null;
 }
+
 
 function creditUserId(session) {
   const fromQuery = new URLSearchParams(window.location.search).get("userId");

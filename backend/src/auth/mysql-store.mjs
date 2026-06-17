@@ -1113,11 +1113,7 @@ SELECT
     1,
     0
   ),
-  @status_allowed := IF(
-    (@actor_role = 'provider' AND so.\`status\` IN ('accepted', 'payer_confirmed'))
-    OR (@actor_role = 'payer' AND so.\`status\` = 'provider_confirmed'),
-    1, 0
-  )
+  @status_allowed := IF(so.\`status\` IN ('accepted', 'payer_confirmed', 'both_confirmed'), 1, 0)
 FROM \`service_order\` so
 JOIN \`service_request\` sr ON sr.\`request_id\` = so.\`request_id\`
 WHERE so.\`order_id\` = @order_id
@@ -1207,7 +1203,6 @@ SET
   \`provider_confirmed\` = @next_provider_confirmed,
   \`status\` = CASE
     WHEN @settled = 1 THEN 'completed'
-    WHEN @next_provider_confirmed = 1 THEN 'provider_confirmed'
     WHEN @next_payer_confirmed = 1 THEN 'payer_confirmed'
     ELSE 'accepted'
   END,
@@ -1669,100 +1664,62 @@ SELECT JSON_OBJECT('updated', ROW_COUNT(), 'unreadTotal', 0);
     const pageSize = Math.min(50, positiveInteger(query.pageSize, 20));
     const keyword = normalizeOptionalString(query.keyword ?? query.q)?.toLowerCase() ?? null;
     const offset = (page - 1) * pageSize;
-    const sql = `
-SELECT JSON_OBJECT(
-  'items', COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
-    'conversationId', q.\`conversation_id\`,
-    'type', q.\`type\`,
-    'title', q.\`title\`,
-    'participant', IF(q.\`other_user_id\` IS NULL, NULL, JSON_OBJECT(
-      'userId', q.\`other_user_id\`,
-      'username', q.\`other_username\`,
-      'displayName', q.\`other_display_name\`
-    )),
-    'orderId', q.\`order_id\`,
-    'preview', q.\`preview\`,
-    'unreadCount', q.\`unread_count\`,
-    'updatedAt', q.\`updated_at\`,
-    'href', q.\`href\`
-  )), JSON_ARRAY()),
-  'total', (SELECT COUNT(*) FROM (
-    SELECT CONCAT(COALESCE(m.\`order_id\`, 0), ':', IF(m.\`sender_id\` = ${id}, m.\`receiver_id\`, m.\`sender_id\`)) AS \`conversation_id\`
-    FROM \`message\` m
-    WHERE (m.\`sender_id\` = ${id} OR m.\`receiver_id\` = ${id}) AND m.\`archived_at\` IS NULL
-    GROUP BY \`conversation_id\`
-  ) c) + IF(EXISTS(SELECT 1 FROM \`notification\` n WHERE n.\`user_id\` = ${id}), 1, 0),
-  'unreadTotal', (
-    SELECT COUNT(*) FROM \`message\` m
-    WHERE m.\`receiver_id\` = ${id} AND m.\`is_read\` = 0
-      AND m.\`archived_at\` IS NULL
-  ) + (
-    SELECT COUNT(*) FROM \`notification\` n
-    WHERE n.\`user_id\` = ${id} AND n.\`read_at\` IS NULL
-  )
-)
-FROM (
-  SELECT *
-  FROM (
-    SELECT
-      CONCAT(COALESCE(m.\`order_id\`, 0), ':', IF(m.\`sender_id\` = ${id}, m.\`receiver_id\`, m.\`sender_id\`)) AS \`conversation_id\`,
-      IF(m.\`order_id\` IS NULL, 'direct', 'order') AS \`type\`,
-      IF(other_user.\`username\` IS NULL, '邻帮用户', other_user.\`username\`) AS \`title\`,
-      other_user.\`user_id\` AS \`other_user_id\`,
-      other_user.\`username\` AS \`other_username\`,
-      other_user.\`username\` AS \`other_display_name\`,
-      m.\`order_id\`,
-      (
-        SELECT m2.\`content\`
-        FROM \`message\` m2
-        WHERE (m2.\`sender_id\` = ${id} OR m2.\`receiver_id\` = ${id})
-          AND m2.\`archived_at\` IS NULL
-          AND CONCAT(COALESCE(m2.\`order_id\`, 0), ':', IF(m2.\`sender_id\` = ${id}, m2.\`receiver_id\`, m2.\`sender_id\`)) =
-            CONCAT(COALESCE(m.\`order_id\`, 0), ':', IF(m.\`sender_id\` = ${id}, m.\`receiver_id\`, m.\`sender_id\`))
-        ORDER BY m2.\`created_at\` DESC, m2.\`message_id\` DESC
-        LIMIT 1
-      ) AS \`preview\`,
-      SUM(IF(m.\`receiver_id\` = ${id} AND m.\`is_read\` = 0, 1, 0)) AS \`unread_count\`,
-      DATE_FORMAT(MAX(m.\`created_at\`), '%Y-%m-%dT%H:%i:%s.000Z') AS \`updated_at\`,
-      IF(m.\`order_id\` IS NULL, CONCAT('/messages?userId=', other_user.\`user_id\`), CONCAT('/orders/', m.\`order_id\`)) AS \`href\`
-    FROM \`message\` m
-    LEFT JOIN \`user\` other_user ON other_user.\`user_id\` = IF(m.\`sender_id\` = ${id}, m.\`receiver_id\`, m.\`sender_id\`)
-    WHERE (m.\`sender_id\` = ${id} OR m.\`receiver_id\` = ${id}) AND m.\`archived_at\` IS NULL
-    GROUP BY \`conversation_id\`, \`type\`, \`title\`, \`other_user_id\`, \`other_username\`, \`other_display_name\`, m.\`order_id\`
-    UNION ALL
-    SELECT
-      'system:notifications',
-      'system',
-      '系统通知',
-      NULL,
-      NULL,
-      NULL,
-      NULL,
-      NULL,
-      latest.\`title\`,
-      (SELECT COUNT(*) FROM \`notification\` n WHERE n.\`user_id\` = ${id} AND n.\`read_at\` IS NULL),
-      DATE_FORMAT(latest.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
-      '/notifications'
-    FROM \`notification\` latest
-    WHERE latest.\`user_id\` = ${id}
-    ORDER BY latest.\`created_at\` DESC, latest.\`notification_id\` DESC
-    LIMIT 1
-  ) unioned
-  ORDER BY \`updated_at\` DESC
-  LIMIT ${pageSize} OFFSET ${offset}
-) q;
-`;
-    const result = await mysqlJson(sql, { optional: true });
-    const conversations = Array.isArray(result?.items)
-      ? result.items.map(normalizeConversation).filter((item) => !keyword || conversationHaystack(item).includes(keyword))
-      : [];
-    return {
-      conversations,
-      total: keyword ? conversations.length : Number(result?.total ?? 0),
-      unreadTotal: Number(result?.unreadTotal ?? 0)
-    };
-  }
 
+    // Get message conversations
+    const convSql = `
+SELECT q.cid, q.tp, q.title, q.oid, q.ouname, q.odname, q.oid2, q.preview, q.unread, q.updated, q.href
+FROM (
+  SELECT
+    CONCAT(COALESCE(m.order_id, 0), ':', IF(m.sender_id = ${id}, m.receiver_id, m.sender_id)) AS cid,
+    IF(m.order_id IS NULL, 'direct', 'order') AS tp,
+    IF(ou.username IS NULL, '邻帮用户', ou.username) AS title,
+    ou.user_id AS oid,
+    ou.username AS ouname,
+    ou.username AS odname,
+    m.order_id AS oid2,
+    (SELECT m2.content FROM message m2
+      WHERE (m2.sender_id = ${id} OR m2.receiver_id = ${id})
+      AND m2.archived_at IS NULL
+      AND CONCAT(COALESCE(m2.order_id, 0), ':', IF(m2.sender_id = ${id}, m2.receiver_id, m2.sender_id)) =
+        CONCAT(COALESCE(m.order_id, 0), ':', IF(m.sender_id = ${id}, m.receiver_id, m.sender_id))
+      ORDER BY m2.created_at DESC, m2.message_id DESC LIMIT 1
+    ) AS preview,
+    SUM(IF(m.receiver_id = ${id} AND m.is_read = 0, 1, 0)) AS unread,
+    DATE_FORMAT(MAX(m.created_at), '%Y-%m-%dT%H:%i:%s.000Z') AS updated,
+    IF(m.order_id IS NULL, CONCAT('/messages?userId=', ou.user_id), CONCAT('/orders/', m.order_id)) AS href
+  FROM message m
+  LEFT JOIN user ou ON ou.user_id = IF(m.sender_id = ${id}, m.receiver_id, m.sender_id)
+  WHERE (m.sender_id = ${id} OR m.receiver_id = ${id}) AND m.archived_at IS NULL
+  GROUP BY cid, tp, title, oid, ouname, odname, oid2
+) q
+ORDER BY q.updated DESC
+LIMIT ${pageSize} OFFSET ${offset}
+`;
+    const rows = await mysqlQuery(convSql);
+    const conversations = (rows || []).map(r => ({
+      conversationId: r.cid,
+      type: r.tp,
+      title: r.title,
+      participant: r.oid ? { userId: r.oid, username: r.ouname, displayName: r.odname } : null,
+      orderId: r.oid2,
+      preview: r.preview,
+      unreadCount: Number(r.unread || 0),
+      updatedAt: r.updated,
+      href: r.href
+    }));
+
+    const notifSql = `SELECT COUNT(*) AS cnt FROM notification WHERE user_id = ${id} AND read_at IS NULL`;
+    const notifRow = await mysqlJson(notifSql, { optional: true });
+    const hasNotifications = (Number(notifRow?.cnt ?? 0) > 0);
+
+    const totalSql = `SELECT (SELECT COUNT(*) FROM (SELECT CONCAT(COALESCE(m2.order_id, 0), ':', IF(m2.sender_id = ${id}, m2.receiver_id, m2.sender_id)) AS x FROM message m2 WHERE (m2.sender_id = ${id} OR m2.receiver_id = ${id}) AND m2.archived_at IS NULL GROUP BY x) cc) AS mt, (SELECT COUNT(*) FROM message m3 WHERE m3.receiver_id = ${id} AND m3.is_read = 0 AND m3.archived_at IS NULL) AS mu, (SELECT COUNT(*) FROM notification n2 WHERE n2.user_id = ${id} AND n2.read_at IS NULL) AS nu`;
+    const totals = await mysqlJson(totalSql, { optional: true }) || {};
+    const total = Number(totals.mt ?? 0) + (hasNotifications ? 1 : 0);
+    const unreadTotal = Number(totals.mu ?? 0) + Number(totals.nu ?? 0);
+
+    const filtered = keyword ? conversations.filter(item => conversationHaystack(item).includes(keyword)) : conversations;
+    return { conversations: filtered, total: keyword ? filtered.length : total, unreadTotal };
+  }
   async function createReview(input) {
     const orderId = Number(input.orderId);
     const reviewerId = Number(input.reviewerId);
@@ -4992,7 +4949,13 @@ LIMIT 1
     }
   }
 
-  async function upsertUserProfile(userId, patch = {}) {
+    async function mysqlQuery(sql) {
+    const result = await mysqlJson(sql, { optional: true });
+    if (Array.isArray(result)) return result;
+    return [];
+  }
+
+async function upsertUserProfile(userId, patch = {}) {
     const existing = await pooledOne(`
 SELECT
   \`display_name\` AS displayName,
