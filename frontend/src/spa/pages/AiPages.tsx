@@ -162,6 +162,7 @@ export function AiAssistantPage({ api }: { api: ApiClient }) {
     const conv = params.get("conversationId");
     if (conv) {
       setConversationId(conv);
+      void loadConversation(api, conv, setMessages);
     }
   }, [queryKey, params]);
 
