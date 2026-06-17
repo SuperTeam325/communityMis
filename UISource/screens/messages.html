@@ -10,7 +10,7 @@
 <style>
   /* ===== 顶部导航 ===== */
   .msgs-header {
-    position: sticky; top: 0; z-index: 50;
+    position: sticky; top: 0; z-index: 101;
     background: oklch(97% 0.005 85 / 0.88);
     backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     padding: var(--space-lg) var(--space-lg) var(--space-md);
@@ -156,11 +156,11 @@
   }
 
   /* ===== 聊天视图 ===== */
-  .chat-view { display: none; flex-direction: column; height: 100dvh; }
+  .chat-view { display: none; flex-direction: column; height: calc(100dvh - var(--bottom-nav-height)); }
   .chat-view.active { display: flex; }
 
   .chat-header {
-    position: sticky; top: 0; z-index: 50;
+    position: sticky; top: 0; z-index: 101;
     background: oklch(97% 0.005 85 / 0.88);
     backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     padding: var(--space-lg); display: flex; align-items: center; gap: var(--space-md);
@@ -225,7 +225,7 @@
 
   /* 聊天输入栏 */
   .chat-input-bar {
-    position: sticky; bottom: 0; z-index: 50;
+    position: sticky; bottom: 0; z-index: 101;
     background: var(--surface); border-top: 1px solid var(--border-light);
     padding: var(--space-md) var(--space-lg) calc(var(--space-md) + env(safe-area-inset-bottom, 0));
     display: flex; align-items: flex-end; gap: var(--space-sm);

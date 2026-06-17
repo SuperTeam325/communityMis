@@ -10,7 +10,7 @@
 <style>
   /* ===== 顶部导航 ===== */
   .msgs-header {
-    position: sticky; top: 0; z-index: 50;
+    position: sticky; top: 0; z-index: 101;
     background: oklch(97% 0.005 85 / 0.88);
     backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     padding: var(--space-lg) var(--space-lg) var(--space-md);
@@ -156,11 +156,11 @@
   }
 
   /* ===== 聊天视图 ===== */
-  .chat-view { display: none; flex-direction: column; height: 100dvh; }
+  .chat-view { display: none; flex-direction: column; height: calc(100dvh - var(--bottom-nav-height)); }
   .chat-view.active { display: flex; }
 
   .chat-header {
-    position: sticky; top: 0; z-index: 50;
+    position: sticky; top: 0; z-index: 101;
     background: oklch(97% 0.005 85 / 0.88);
     backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     padding: var(--space-lg); display: flex; align-items: center; gap: var(--space-md);
@@ -225,7 +225,7 @@
 
   /* 聊天输入栏 */
   .chat-input-bar {
-    position: sticky; bottom: 0; z-index: 50;
+    position: sticky; bottom: 0; z-index: 101;
     background: var(--surface); border-top: 1px solid var(--border-light);
     padding: var(--space-md) var(--space-lg) calc(var(--space-md) + env(safe-area-inset-bottom, 0));
     display: flex; align-items: flex-end; gap: var(--space-sm);
@@ -774,10 +774,6 @@
   chatInput.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   });
-</script>
-<script src="/assets/app/jury-nav.js"></script>
-<script>
-(function(){"use strict";function t(){var u=window.__API_BASE_URL__||"";if(!u){if(!t._r)t._r=0;if(t._r++<20)setTimeout(t,500);return}fetch(u+"/api/auth/me",{credentials:"include"}).then(function(r){return r.ok?r.json():null}).then(function(d){if(d&&d.user&&d.user.isJury)n()}).catch(function(){})}function n(){var v=document.querySelector(".bottom-nav");if(!v||document.querySelector(".jlink"))return;var a=document.createElement("a");a.href="/jury";a.className="jlink";a.innerHTML="<svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>陪审";v.insertBefore(a,v.lastElementChild)}setTimeout(t,800)})();
 </script>
 </body>
 </html>
