@@ -1727,12 +1727,12 @@ FROM (
     ou.username AS ouname,
     ou.username AS odname,
     m.order_id AS oid2,
-    (SELECT m2.content FROM message m2
+    ANY_VALUE((SELECT m2.content FROM message m2
       WHERE (m2.sender_id = ${id} OR m2.receiver_id = ${id})
       AND m2.archived_at IS NULL
       AND CONCAT(COALESCE(m2.order_id, 0), ':', IF(m2.sender_id = ${id}, m2.receiver_id, m2.sender_id)) =
         CONCAT(COALESCE(m.order_id, 0), ':', IF(m.sender_id = ${id}, m.receiver_id, m.sender_id))
-      ORDER BY m2.created_at DESC, m2.message_id DESC LIMIT 1
+      ORDER BY m2.created_at DESC, m2.message_id DESC LIMIT 1)
     ) AS preview,
     SUM(IF(m.receiver_id = ${id} AND m.is_read = 0, 1, 0)) AS unread,
     DATE_FORMAT(MAX(m.created_at), '%Y-%m-%dT%H:%i:%s.000Z') AS updated,
@@ -3697,7 +3697,7 @@ FROM (
     DATE_FORMAT(l.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
     ${aiExceptionCaseSql("l")} AS \`exception_type\`,
     ${aiExceptionRiskCaseSql(aiExceptionCaseSql("l"))} AS \`risk_level\`,
-    COALESCE(l.\`error_message\`, (SELECT m.\`content\` FROM \`ai_message\` m WHERE m.\`conversation_id\` = l.\`conversation_id\` ORDER BY m.\`created_at\` DESC, m.\`message_id\` DESC LIMIT 1)) AS \`reason\`,
+    COALESCE(l.\`error_message\`, (SELECT m.\`content\` FROM \`ai_message\` m WHERE m.\`conversation_id\` = l.\`conversation_id\` ORDER BY m.\`created_at\` DESC, m.\`message_id\` DESC LIMIT 1) AS \`reason\`,
     IF(u.\`user_id\` IS NULL, NULL, ${userJsonObjectSql("u")}) AS \`user_json\`,
     IF(c.\`conversation_id\` IS NULL, NULL, ${aiConversationJsonObjectSql("c")}) AS \`conversation_json\`
   FROM \`ai_call_log\` l
@@ -5000,9 +5000,14 @@ LIMIT 1
   }
 
     async function mysqlQuery(sql) {
-    const result = await mysqlJson(sql, { optional: true });
-    if (Array.isArray(result)) return result;
-    return [];
+    try {
+      const pool = await mysqlPool();
+      const [rows] = await pool.query(sql);
+      if (Array.isArray(rows)) return rows;
+      return [];
+    } catch (err) {
+      return [];
+    }
   }
 
 async function upsertUserProfile(userId, patch = {}) {
