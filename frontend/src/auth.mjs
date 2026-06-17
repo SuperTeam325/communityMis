@@ -24,19 +24,42 @@ export function createAuthController(options = {}) {
     readProfileDraft
   };
 
+  function storageKey(kind) {
+    return `neighbor_auth_${kind}`;
+  }
+
   function readSession(kind) {
-    return null;
+    try {
+      const raw = globalThis.sessionStorage?.getItem(storageKey(kind));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed?.expiresAt) return null;
+      if (new Date(parsed.expiresAt).getTime() < Date.now()) {
+        globalThis.sessionStorage?.removeItem(storageKey(kind));
+        return null;
+      }
+      return { token: parsed.token, user: parsed.user, expiresAt: parsed.expiresAt };
+    } catch {
+      return null;
+    }
   }
 
   function saveSession(kind, payload) {
     const session = {
+      token: payload.token ?? null,
       expiresAt: payload.expiresAt ?? null,
       user: payload.user ?? null
     };
+    try {
+      globalThis.sessionStorage?.setItem(storageKey(kind), JSON.stringify(session));
+    } catch { /* quota exceeded, ignore */ }
     return session;
   }
 
   function clearSession(kind) {
+    try {
+      globalThis.sessionStorage?.removeItem(storageKey(kind));
+    } catch { /* ignore */ }
     return null;
   }
 
@@ -157,12 +180,17 @@ export function createAuthController(options = {}) {
 
   async function refresh(kind) {
     try {
+      const stored = readSession(kind);
+      const token = stored?.token ?? null;
       const payload = kind === "admin"
-        ? await api.adminAuth.me(null)
-        : await api.auth.me(null);
+        ? await api.adminAuth.me(token)
+        : await api.auth.me(token);
       const updated = {
-        user: payload.user ?? null
+        token: token,
+        user: payload.user ?? null,
+        expiresAt: stored?.expiresAt ?? null
       };
+      saveSession(kind, updated);
       return updated;
     } catch (error) {
       if (isAuthError(error)) {

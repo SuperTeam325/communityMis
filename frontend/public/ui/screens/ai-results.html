@@ -170,7 +170,7 @@
 
 <!-- Results summary -->
 <div class="result-summary">
-  <span class="count">正在加载真实匹配结果</span>
+  <span class="count">共找到 <strong>3</strong> 个匹配结果</span>
   <select class="sort-select" onchange="sortResults(this.value)">
     <option value="match">按匹配度排序</option>
     <option value="newest">按发布时间排序</option>
@@ -180,8 +180,71 @@
 
 <!-- Results -->
 <div class="result-list">
-  <div class="no-results" data-runtime-placeholder>
-    <p>正在根据真实需求数据筛选。</p>
+  <!-- Match 1 — High -->
+  <div class="task-result-card high-match" onclick="location.href='post-detail.html'">
+    <div class="result-top">
+      <span class="badge badge--accent">辅导</span>
+      <span class="match-badge match-high">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        匹配度 94%
+      </span>
+    </div>
+    <div class="result-title">找英语口语陪练，每周两次</div>
+    <div class="result-meta">
+      <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> 1.5 小时/次</span>
+      <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> 陈老师教画画</span>
+      <span class="result-credit">★ 4.8</span>
+    </div>
+    <div class="match-reasons">
+      <span class="match-reason match-key">⿡ 关键词「英语」精确匹配</span>
+      <span class="match-reason">类型「辅导」</span>
+      <span class="match-reason">信用 4.8 ≥ 筛选要求</span>
+      <span class="match-reason">2 小时前发布</span>
+    </div>
+  </div>
+
+  <!-- Match 2 — High -->
+  <div class="task-result-card high-match" onclick="location.href='post-detail.html'">
+    <div class="result-top">
+      <span class="badge badge--accent">辅导</span>
+      <span class="match-badge match-high">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        匹配度 87%
+      </span>
+    </div>
+    <div class="result-title">需要一位英语好的邻居帮忙辅导初中生</div>
+    <div class="result-meta">
+      <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> 2 小时/次</span>
+      <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> 赵姐</span>
+      <span class="result-credit">★ 4.6</span>
+    </div>
+    <div class="match-reasons">
+      <span class="match-reason match-key">⿡ 关键词「英语」匹配标题</span>
+      <span class="match-reason">类型「辅导」</span>
+      <span class="match-reason">信用 4.6 ≥ 筛选要求</span>
+    </div>
+  </div>
+
+  <!-- Match 3 — Medium -->
+  <div class="task-result-card medium-match" onclick="location.href='post-detail.html'">
+    <div class="result-top">
+      <span class="badge badge--success">陪伴</span>
+      <span class="match-badge match-medium">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        匹配度 62%
+      </span>
+    </div>
+    <div class="result-title">寻找英语学习搭子，一起打卡</div>
+    <div class="result-meta">
+      <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> 灵活安排</span>
+      <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> 李阿姨</span>
+      <span class="result-credit">★ 4.9</span>
+    </div>
+    <div class="match-reasons">
+      <span class="match-reason match-key">⿡ 关键词「英语」部分匹配</span>
+      <span class="match-reason">类型为「陪伴」非严格匹配</span>
+      <span class="match-reason">信用 4.9 ≥ 筛选要求</span>
+    </div>
   </div>
 </div>
 
@@ -234,6 +297,10 @@
     });
     cards.forEach(c => list.appendChild(c));
   }
+</script>
+<script src="/assets/app/jury-nav.js"></script>
+<script>
+(function(){"use strict";function t(){var u=window.__API_BASE_URL__||"";if(!u){if(!t._r)t._r=0;if(t._r++<20)setTimeout(t,500);return}fetch(u+"/api/auth/me",{credentials:"include"}).then(function(r){return r.ok?r.json():null}).then(function(d){if(d&&d.user&&d.user.isJury)n()}).catch(function(){})}function n(){var v=document.querySelector(".bottom-nav");if(!v||document.querySelector(".jlink"))return;var a=document.createElement("a");a.href="/jury";a.className="jlink";a.innerHTML="<svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>陪审";v.insertBefore(a,v.lastElementChild)}setTimeout(t,800)})();
 </script>
 </body>
 </html>

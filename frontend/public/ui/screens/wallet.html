@@ -348,12 +348,12 @@
   </div>
 
   <div class="tx-list" id="tx-list">
-<div data-runtime-placeholder class="runtime-placeholder">正在加载真实交易记录。</div>
-</div>
+    <!-- Rendered by JS -->
+  </div>
 
   <div class="pagination" id="tx-pagination">
-
-</div>
+    <!-- Rendered by JS -->
+  </div>
 
   <div class="wallet-bottom-spacer"></div>
 </div>
@@ -389,9 +389,132 @@
 
 <script src="../js/ai-modal.js"></script>
 <script>
-  // Production shell loads wallet data from backend APIs.
+  /* ─── Transaction data ─── */
+  var allTransactions = [
+    { id: '#LB-20240603-0012', type: 'income', title: '帮李阿姨代购日用品', amount: '+35.00', balance: '286.50', orderId: 'ORD-240603-042', time: '2024-06-03 14:22' },
+    { id: '#LB-20240603-0011', type: 'expense', title: '请小王帮忙遛狗', amount: '-20.00', balance: '251.50', orderId: 'ORD-240603-041', time: '2024-06-03 10:15' },
+    { id: '#LB-20240602-0010', type: 'income', title: '帮赵姐组装书柜', amount: '+45.00', balance: '271.50', orderId: 'ORD-240602-039', time: '2024-06-02 16:48' },
+    { id: '#LB-20240601-0009', type: 'expense', title: '请陈师傅修水龙头', amount: '-30.00', balance: '226.50', orderId: 'ORD-240601-038', time: '2024-06-01 09:30' },
+    { id: '#LB-20240530-0008', type: 'income', title: '代取快递送到 5 号楼', amount: '+10.00', balance: '256.50', orderId: 'ORD-240530-036', time: '2024-05-30 18:05' },
+    { id: '#LB-20240528-0007', type: 'income', title: '帮忙搬一箱矿泉水到 7 楼', amount: '+12.00', balance: '246.50', orderId: 'ORD-240528-035', time: '2024-05-28 11:42' },
+    { id: '#LB-20240526-0006', type: 'expense', title: '请邻居帮忙打扫阳台', amount: '-25.00', balance: '234.50', orderId: 'ORD-240526-034', time: '2024-05-26 15:20' },
+    { id: '#LB-20240524-0005', type: 'income', title: '辅导初三数学 2 小时', amount: '+40.00', balance: '259.50', orderId: 'ORD-240524-032', time: '2024-05-24 20:10' },
+    { id: '#LB-20240522-0004', type: 'expense', title: '社区医院排队取报告单', amount: '-50.00', balance: '219.50', orderId: 'ORD-240522-030', time: '2024-05-22 08:55' },
+    { id: '#LB-20240520-0003', type: 'income', title: '帮刘叔修电脑重装系统', amount: '+65.00', balance: '269.50', orderId: 'ORD-240520-028', time: '2024-05-20 13:30' },
+    { id: '#LB-20240518-0002', type: 'income', title: '丰巢取件送到 3 号楼', amount: '+10.00', balance: '204.50', orderId: 'ORD-240518-025', time: '2024-05-18 17:15' },
+    { id: '#LB-20240515-0001', type: 'income', title: '新用户注册奖励', amount: '+5.00', balance: '194.50', orderId: '—', time: '2024-05-15 09:00', system: true }
+  ];
 
+  var PAGE_SIZE = 8;
+  var currentFilter = 'all';
+  var currentPage = 1;
+
+  function getFilteredTxs() {
+    if (currentFilter === 'all') return allTransactions;
+    return allTransactions.filter(function(t) { return t.type === currentFilter; });
+  }
+
+  function renderTxList() {
+    var filtered = getFilteredTxs();
+    var totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+    if (currentPage > totalPages) currentPage = Math.max(1, totalPages);
+
+    var start = (currentPage - 1) * PAGE_SIZE;
+    var pageItems = filtered.slice(start, start + PAGE_SIZE);
+
+    var listEl = document.getElementById('tx-list');
+
+    if (pageItems.length === 0) {
+      listEl.innerHTML = '<div class="tx-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg><p>暂无该类型的交易记录</p></div>';
+    } else {
+      listEl.innerHTML = pageItems.map(function(tx) {
+        var iconSvg = '';
+        if (tx.type === 'income') {
+          iconSvg = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
+        } else {
+          iconSvg = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>';
+        }
+
+        var amountClass = tx.type;
+        var prefix = tx.type === 'income' ? '+' : (tx.type === 'expense' ? '−' : '');
+        var amountDisplay = prefix + ' ' + tx.amount.replace(/[+-]/, '');
+
+        return (
+          '<div class="tx-item">' +
+            '<div class="tx-icon ' + tx.type + '">' + iconSvg + '</div>' +
+            '<div class="tx-body">' +
+              '<div class="tx-title">' + tx.title + '</div>' +
+              '<div class="tx-order-id">' + tx.id + (tx.orderId !== '—' ? ' · 订单 ' + tx.orderId : '') + '</div>' +
+              '<div class="tx-time">' + tx.time + '</div>' +
+            '</div>' +
+            '<div class="tx-amount-cell">' +
+              '<div class="tx-amount ' + amountClass + '">' + amountDisplay + '</div>' +
+              '<div class="tx-balance">余额 ⏂' + tx.balance + '</div>' +
+            '</div>' +
+          '</div>'
+        );
+      }).join('');
+    }
+
+    renderPagination(totalPages);
+  }
+
+  function renderPagination(totalPages) {
+    var pagEl = document.getElementById('tx-pagination');
+    if (totalPages <= 1) { pagEl.innerHTML = ''; return; }
+
+    var html = '';
+    html += '<button ' + (currentPage === 1 ? 'disabled' : '') + ' onclick="goPage(' + (currentPage - 1) + ')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg></button>';
+
+    for (var i = 1; i <= totalPages; i++) {
+      if (totalPages <= 5 || i === 1 || i === totalPages || Math.abs(i - currentPage) <= 1) {
+        html += '<button class="' + (i === currentPage ? 'active' : '') + '" onclick="goPage(' + i + ')">' + i + '</button>';
+      } else if (i === 2 && currentPage > 3) {
+        html += '<span class="page-ellipsis">…</span>';
+      } else if (i === totalPages - 1 && currentPage < totalPages - 2) {
+        html += '<span class="page-ellipsis">…</span>';
+      }
+    }
+
+    html += '<button ' + (currentPage === totalPages ? 'disabled' : '') + ' onclick="goPage(' + (currentPage + 1) + ')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></button>';
+    pagEl.innerHTML = html;
+  }
+
+  function goPage(p) { currentPage = p; renderTxList(); }
+
+  /* Filter switching */
+  document.querySelectorAll('#tx-filters button').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('#tx-filters button').forEach(function(b) { b.classList.remove('active'); });
+      this.classList.add('active');
+      currentFilter = this.dataset.filter;
+      currentPage = 1;
+      renderTxList();
+    });
+  });
+
+  /* Earn coins button */
+  document.getElementById('btn-earn').addEventListener('click', function() {
+    window.location.href = 'tasks.html';
+  });
+
+  /* Help tooltip */
+  function showHelp() {
+    var tip = document.createElement('div');
+    tip.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:400;background:var(--fg);color:#fff;padding:16px 24px;border-radius:var(--radius-lg);font-size:14px;line-height:1.7;max-width:320px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.2);';
+    tip.innerHTML = '<strong>时间币是什么？</strong><br>1 时间币 ≈ 12 分钟服务<br>通过帮助邻居赚取，也可以用来请邻居帮忙。<br>新用户注册即送 5 时间币 🎁';
+    document.body.appendChild(tip);
+    setTimeout(function() { tip.style.opacity = '0'; tip.style.transition = 'opacity 0.3s'; }, 2500);
+    setTimeout(function() { tip.remove(); }, 2800);
+  }
+
+  // Initial render
+  renderTxList();
 </script>
 
+<script src="/assets/app/jury-nav.js"></script>
+<script>
+(function(){"use strict";function t(){var u=window.__API_BASE_URL__||"";if(!u){if(!t._r)t._r=0;if(t._r++<20)setTimeout(t,500);return}fetch(u+"/api/auth/me",{credentials:"include"}).then(function(r){return r.ok?r.json():null}).then(function(d){if(d&&d.user&&d.user.isJury)n()}).catch(function(){})}function n(){var v=document.querySelector(".bottom-nav");if(!v||document.querySelector(".jlink"))return;var a=document.createElement("a");a.href="/jury";a.className="jlink";a.innerHTML="<svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>陪审";v.insertBefore(a,v.lastElementChild)}setTimeout(t,800)})();
+</script>
 </body>
 </html>

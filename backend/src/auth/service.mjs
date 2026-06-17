@@ -95,13 +95,24 @@ export function createAuthService(options = {}) {
 
     const sid = sessionIdFromCookie(request);
     const token = options.allowBearer === false ? null : bearerToken(request);
-    const tokenPayload = sid ? { sid } : token ? verifySignedSessionToken(token, sessionSecret, new Date()) : null;
-    if (token && !sid && !tokenPayload) {
+    // Prefer Bearer token for tab-isolated sessions; fall back to cookie-based session
+    let sessionSid = null;
+    if (token) {
+      const verified = verifySignedSessionToken(token, sessionSecret, new Date());
+      if (verified?.sid) {
+        sessionSid = verified.sid;
+      }
+    }
+    if (!sessionSid && sid) {
+      sessionSid = sid;
+    }
+    if (token && !sessionSid) {
       throw new HttpError(401, "INVALID_TOKEN", "Authentication token is invalid or expired.");
     }
-    if (!tokenPayload?.sid) {
+    if (!sessionSid) {
       throw new HttpError(401, "UNAUTHENTICATED", "Authentication is required.");
     }
+    const tokenPayload = { sid: sessionSid };
 
     const now = new Date();
     const session = await store.findSession(tokenPayload.sid);

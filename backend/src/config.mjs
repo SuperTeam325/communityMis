@@ -134,7 +134,10 @@ function booleanValue(value, fallback) {
 
 function normalizeRegistrationVerification(value) {
   const text = String(value ?? "email").trim().toLowerCase();
-  return text === "email" ? "email" : "email";
+  if (text === "none" || text === "false" || text === "off") {
+    return "none";
+  }
+  return "email";
 }
 
 function emptyToNull(value) {

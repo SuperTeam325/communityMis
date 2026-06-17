@@ -411,14 +411,19 @@ function removeBlocks(html, start, end) {
 function injectShell(html, route, options = {}) {
   const needsAuth = route.surface === "user" || route.surface === "admin";
   const authGuardCss = needsAuth
-    ? `<style>html[data-auth-state="checking"] body>*{visibility:hidden}html[data-auth-state="checking"] body{background:var(--bg,#f5f5f5)}html[data-auth-state="checking"] body::after{content:"";position:fixed;inset:0;z-index:9999;background:var(--bg,#f5f5f5)}</style>`
+    ? `<style>
+html[data-auth-state="checking"] body>*{visibility:hidden}
+html[data-auth-state="checking"] body::after{content:"";position:fixed;inset:0;z-index:9998;background:var(--bg,#f8f9fa)}
+html[data-auth-state="checking"] body::before{content:"加载中...";position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--fg-secondary,#888);font-family:system-ui,sans-serif}
+</style>`
     : "";
   const headInjection = [
     authGuardCss,
     `<link rel="stylesheet" href="${assetPath("/assets/styles/theme.css", options)}">`,
     `<link rel="stylesheet" href="${assetPath("/assets/styles/shell.css", options)}">`
   ].filter(Boolean).join("\n");
-  const bodyScript = `<script type="module" src="${assetPath(options.shellLogicalPath ?? "/assets/app/prototype-shell.mjs", options)}"></script>`;
+  const buildVersion = options.runtimeConfig?.buildVersion ?? Date.now();
+  const bodyScript = `<script type="module" src="${assetPath(options.shellLogicalPath ?? "/assets/app/prototype-shell.mjs", options)}?v=${buildVersion}"></script>`;
 
   let output = html;
   if (needsAuth) {
