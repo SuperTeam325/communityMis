@@ -8,253 +8,419 @@
 <link rel="stylesheet" href="../css/tokens.css">
 <link rel="stylesheet" href="../css/common.css">
 <style>
-  .jury-page { max-width: 860px; margin: 0 auto; padding: var(--space-3xl) var(--space-lg); }
-  @media (max-width: 640px) { .jury-page { padding: var(--space-lg); } }
+  /* ---- Top sticky header ---- */
+  .jury-topbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    height: var(--nav-height);
+    background: oklch(97% 0.005 85 / 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border-light);
+    display: flex; align-items: center; gap: var(--space-md);
+    padding: 0 var(--space-lg);
+  }
+  .jury-back-btn {
+    width: 36px; height: 36px; border-radius: var(--radius-full);
+    background: var(--border-light); color: var(--fg);
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s; flex-shrink: 0;
+  }
+  .jury-back-btn:hover { background: var(--border); }
+  .jury-topbar-title {
+    flex: 1; font-family: var(--font-display); font-size: 18px; font-weight: 700;
+    text-align: center;
+  }
+  .jury-topbar-spacer { width: 36px; flex-shrink: 0; }
 
-  .jury-back {
-    display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted);
-    margin-bottom: var(--space-2xl); transition: color 0.15s;
+  /* ---- Page layout ---- */
+  .jury-page {
+    max-width: 780px; margin: 0 auto;
+    padding: calc(var(--nav-height) + var(--space-2xl)) var(--space-lg) var(--space-4xl);
   }
-  .jury-back:hover { color: var(--fg); }
-
-  .jury-header {
-    background: var(--surface); border-radius: var(--radius-lg);
-    border: 1px solid var(--border-light); padding: var(--space-2xl);
-    margin-bottom: var(--space-xl);
-  }
-  .jury-badge-row { display: flex; gap: var(--space-sm); margin-bottom: var(--space-lg); flex-wrap: wrap; }
-  .jury-badge-row .jtag {
-    font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: var(--radius-full);
-  }
-  .jtag.dispute { background: var(--danger-light); color: var(--danger); }
-  .jtag.order { background: var(--border-light); color: var(--muted); }
-  .jtag.urgent { background: var(--warning-light); color: var(--warning); }
-
-  .jury-header h1 {
-    font-family: var(--font-display); font-size: 22px; font-weight: 700;
-    letter-spacing: -0.01em; margin-bottom: var(--space-sm); line-height: 1.3;
-  }
-  .jury-header .jh-meta { font-size: 13px; color: var(--muted); line-height: 1.7; }
-  .jury-header .jh-meta strong { color: var(--fg); }
-
-  /* Evidence panels */
-  .evidence-grid {
-    display: grid; grid-template-columns: 1fr 1fr;
-    gap: var(--space-lg); margin-bottom: var(--space-xl);
-  }
-  @media (max-width: 640px) { .evidence-grid { grid-template-columns: 1fr; } }
-  .evidence-panel {
-    background: var(--surface); border-radius: var(--radius-lg);
-    border: 1px solid var(--border-light); padding: var(--space-xl);
-  }
-  .evidence-panel .ep-role {
-    font-size: 11px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.05em; margin-bottom: var(--space-md); color: var(--muted);
-    display: flex; align-items: center; gap: var(--space-sm);
-  }
-  .evidence-panel .ep-role .dot {
-    width: 10px; height: 10px; border-radius: var(--radius-full);
-  }
-  .evidence-panel .ep-role .dot.demand { background: var(--secondary); }
-  .evidence-panel .ep-role .dot.service { background: var(--accent); }
-  .evidence-panel .ep-user { font-size: 16px; font-weight: 700; margin-bottom: var(--space-sm); }
-  .evidence-panel .ep-credit { font-size: 12px; color: var(--muted); margin-bottom: var(--space-lg); }
-  .evidence-panel .ep-claim {
-    font-size: 14px; line-height: 1.7; color: var(--fg); margin-bottom: var(--space-lg);
-    padding: var(--space-md); background: var(--bg); border-radius: var(--radius-sm);
-  }
-  .evidence-panel .ep-files { display: flex; flex-direction: column; gap: var(--space-sm); }
-  .evidence-panel .ep-file {
-    display: flex; align-items: center; gap: var(--space-sm);
-    padding: 8px 12px; border-radius: var(--radius-sm);
-    background: var(--bg); font-size: 12px; color: var(--muted);
-    font-family: var(--font-mono);
+  @media (max-width: 640px) {
+    .jury-page { padding-top: calc(var(--nav-height) + var(--space-lg)); padding-bottom: var(--space-3xl); }
   }
 
-  /* AI summary box */
-  .ai-box {
-    background: oklch(96% 0.02 200); border: 1px solid var(--secondary-light);
-    border-radius: var(--radius-lg); padding: var(--space-xl); margin-bottom: var(--space-xl);
-  }
-  .ai-box h3 {
-    font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: var(--space-sm);
-    color: var(--secondary); margin-bottom: var(--space-lg);
-  }
-  .ai-box .ai-items { display: grid; gap: var(--space-md); }
-  .ai-box .ai-item { display: flex; gap: var(--space-md); font-size: 13px; line-height: 1.6; }
-  .ai-box .ai-label { font-weight: 600; white-space: nowrap; color: var(--fg); min-width: 64px; }
-  .ai-box .ai-note {
-    margin-top: var(--space-md); font-size: 11px; color: var(--muted);
-    display: flex; align-items: center; gap: 4px;
-  }
-
-  /* Current tally */
-  .tally-section { margin-bottom: var(--space-xl); }
-  .tally-section h3 {
+  .section { margin-bottom: var(--space-xl); }
+  .section-title {
     font-family: var(--font-display); font-size: 18px; font-weight: 700;
     margin-bottom: var(--space-lg); display: flex; align-items: center; gap: var(--space-sm);
   }
-  .tally-bars { display: flex; gap: var(--space-md); flex-wrap: wrap; }
+
+  /* ---- Status banner ---- */
+  .status-banner {
+    display: flex; align-items: flex-start; gap: var(--space-md);
+    padding: var(--space-lg); border-radius: var(--radius-lg);
+    margin-bottom: var(--space-xl);
+  }
+  .status-banner.in-progress {
+    background: linear-gradient(135deg, var(--warning-light), oklch(98% 0.04 75));
+    border: 1px solid oklch(90% 0.04 75);
+  }
+  .status-banner .sb-icon { width: 24px; height: 24px; flex-shrink: 0; margin-top: 2px; }
+  .status-banner .sb-text h4 { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+  .status-banner .sb-text p { font-size: 13px; color: var(--muted); line-height: 1.5; }
+
+  /* ---- Case header card ---- */
+  .case-card {
+    background: var(--surface); border-radius: var(--radius-lg);
+    border: 1px solid var(--border-light); padding: var(--space-2xl);
+    margin-bottom: var(--space-xl); box-shadow: var(--shadow-sm);
+  }
+  .case-badges { display: flex; flex-wrap: wrap; gap: var(--space-sm); margin-bottom: var(--space-lg); }
+  .case-badges .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 12px; border-radius: var(--radius-full);
+    font-size: 12px; font-weight: 600;
+  }
+  .case-badges .badge.dispute { background: var(--danger-light); color: var(--danger); }
+  .case-badges .badge.order { background: var(--border-light); color: var(--muted); }
+  .case-badges .badge.urgent { background: var(--warning-light); color: var(--warning); }
+  .case-title {
+    font-family: var(--font-display); font-size: 24px; font-weight: 700;
+    letter-spacing: -0.01em; line-height: 1.25; margin-bottom: var(--space-lg);
+  }
+  @media (max-width: 480px) { .case-title { font-size: 20px; } }
+  .case-meta {
+    display: flex; flex-wrap: wrap; gap: var(--space-sm) var(--space-xl);
+    font-size: 13px; color: var(--muted); margin-bottom: var(--space-xl);
+  }
+  .case-meta strong { color: var(--fg); font-weight: 600; }
+  .case-progress-label {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: var(--space-sm);
+  }
+  .case-progress-track {
+    height: 8px; background: var(--border-light); border-radius: var(--radius-full); overflow: hidden;
+  }
+  .case-progress-fill {
+    height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-light));
+    border-radius: var(--radius-full); transition: width 0.6s ease;
+  }
+
+  /* ---- Evidence panels ---- */
+  .evidence-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-lg); margin-bottom: var(--space-xl); }
+  @media (max-width: 720px) { .evidence-grid { grid-template-columns: 1fr; } }
+  .evidence-panel {
+    background: var(--surface); border-radius: var(--radius-lg);
+    border: 1px solid var(--border-light); overflow: hidden;
+    box-shadow: var(--shadow-sm); transition: box-shadow 0.2s, transform 0.2s;
+  }
+  .evidence-panel:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+  .evidence-panel.demand { border-left: 3px solid var(--secondary); }
+  .evidence-panel.service { border-left: 3px solid var(--accent); }
+  .ep-header {
+    display: flex; align-items: center; gap: var(--space-md);
+    padding: var(--space-lg); border-bottom: 1px solid var(--border-light); background: var(--bg);
+  }
+  .ep-avatar {
+    width: 44px; height: 44px; border-radius: var(--radius-full);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 16px; font-weight: 700; flex-shrink: 0;
+  }
+  .ep-avatar.demand { background: var(--secondary); }
+  .ep-avatar.service { background: var(--accent); }
+  .ep-info { flex: 1; min-width: 0; }
+  .ep-name { font-size: 16px; font-weight: 700; }
+  .ep-role {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; margin-top: 2px;
+  }
+  .ep-role.demand { color: var(--secondary); }
+  .ep-role.service { color: var(--accent); }
+  .ep-body { padding: var(--space-lg); }
+  .ep-credit {
+    font-size: 12px; color: var(--muted); margin-bottom: var(--space-md);
+    display: flex; gap: var(--space-md); flex-wrap: wrap;
+  }
+  .ep-claim {
+    font-size: 14px; line-height: 1.75; color: var(--fg);
+    padding: var(--space-md); background: var(--bg); border-radius: var(--radius-md);
+    margin-bottom: var(--space-md);
+  }
+  .ep-files { display: flex; flex-direction: column; gap: var(--space-sm); }
+  .ep-file {
+    display: flex; align-items: center; gap: var(--space-sm);
+    padding: 10px 12px; border-radius: var(--radius-md);
+    background: var(--bg); font-size: 13px; color: var(--muted);
+    transition: background 0.15s; cursor: pointer;
+  }
+  .ep-file:hover { background: var(--border-light); }
+  .ep-file svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+  /* ---- AI summary box ---- */
+  .ai-box {
+    background: linear-gradient(135deg, oklch(96% 0.02 200), var(--surface));
+    border: 1.5px solid var(--secondary-light); border-radius: var(--radius-lg);
+    padding: var(--space-xl); margin-bottom: var(--space-xl); box-shadow: var(--shadow-sm);
+  }
+  .ai-box h3 {
+    font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: var(--space-sm);
+    color: var(--secondary); margin-bottom: var(--space-lg);
+  }
+  .ai-badge {
+    font-size: 11px; padding: 3px 10px; border-radius: var(--radius-full);
+    background: var(--secondary); color: #fff; font-weight: 600; margin-left: auto;
+  }
+  .ai-items { display: grid; gap: var(--space-md); }
+  .ai-item { display: flex; gap: var(--space-md); font-size: 13px; line-height: 1.7; }
+  .ai-label { font-weight: 600; white-space: nowrap; color: var(--fg); min-width: 64px; }
+  .ai-note {
+    margin-top: var(--space-md); padding-top: var(--space-md);
+    border-top: 1px dashed var(--border); font-size: 12px; color: var(--muted);
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  /* ---- Current tally ---- */
+  .tally-section { margin-bottom: var(--space-xl); }
+  .tally-bars { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-md); margin-bottom: var(--space-lg); }
+  @media (max-width: 560px) { .tally-bars { grid-template-columns: 1fr; } }
   .tally-bar-card {
-    flex: 1; min-width: 120px; background: var(--surface); border-radius: var(--radius-lg);
-    border: 1px solid var(--border-light); padding: var(--space-lg); text-align: center;
+    background: var(--surface); border-radius: var(--radius-lg);
+    border: 1px solid var(--border-light); padding: var(--space-lg);
+    box-shadow: var(--shadow-sm);
   }
   .tally-bar-card .tb-label { font-size: 13px; color: var(--muted); margin-bottom: var(--space-sm); }
   .tally-bar-card .tb-count {
-    font-family: var(--font-display); font-size: 28px; font-weight: 700; letter-spacing: -0.02em;
-    margin-bottom: var(--space-sm);
+    font-family: var(--font-display); font-size: 32px; font-weight: 700;
+    letter-spacing: -0.02em; margin-bottom: var(--space-sm);
   }
-  .tally-bar-card .tb-bar {
-    height: 6px; border-radius: 3px; background: var(--border-light); overflow: hidden;
-  }
-  .tally-bar-card .tb-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
-  .tb-fill.demand { background: var(--secondary); }
-  .tb-fill.service { background: var(--accent); }
-  .tb-fill.mediate { background: var(--warning); }
+  .tally-bar-card .tb-bar { height: 8px; border-radius: var(--radius-full); background: var(--border-light); overflow: hidden; }
+  .tally-bar-card .tb-fill { height: 100%; border-radius: var(--radius-full); transition: width 0.5s ease; }
+  .tb-fill.demand { background: linear-gradient(90deg, var(--secondary), oklch(60% 0.1 175)); }
+  .tb-fill.service { background: linear-gradient(90deg, var(--accent), var(--accent-light)); }
+  .tb-fill.mediate { background: linear-gradient(90deg, var(--warning), oklch(70% 0.1 75)); }
 
   .tally-table {
     width: 100%; background: var(--surface); border-radius: var(--radius-lg);
-    border: 1px solid var(--border-light); overflow: hidden;
-    margin-top: var(--space-lg);
+    border: 1px solid var(--border-light); overflow: hidden; box-shadow: var(--shadow-sm);
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
   }
-  .tally-table table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .tally-table table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 520px; }
   .tally-table th {
     text-align: left; padding: 12px var(--space-lg); font-size: 11px;
     font-weight: 600; color: var(--muted); text-transform: uppercase;
-    letter-spacing: 0.04em; border-bottom: 1px solid var(--border-light);
-    background: var(--bg);
+    letter-spacing: 0.04em; border-bottom: 1px solid var(--border-light); background: var(--bg);
   }
-  .tally-table td { padding: 12px var(--space-lg); border-bottom: 1px solid var(--border-light); }
+  .tally-table td { padding: 14px var(--space-lg); border-bottom: 1px solid var(--border-light); vertical-align: top; }
   .tally-table tr:last-child td { border-bottom: none; }
-  .tally-table .vote-badge {
-    display: inline-block; padding: 3px 10px; border-radius: var(--radius-full);
-    font-size: 12px; font-weight: 600;
+  .tally-table td:last-child { white-space: nowrap; color: var(--muted); font-size: 12px; font-family: var(--font-mono); }
+  .vote-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 10px; border-radius: var(--radius-full); font-size: 12px; font-weight: 600;
   }
   .vote-badge.demand { background: var(--secondary-light); color: var(--secondary); }
   .vote-badge.service { background: var(--accent-subtle); color: var(--accent); }
   .vote-badge.mediate { background: var(--warning-light); color: var(--warning); }
 
-  /* Vote form */
+  /* ---- Vote form ---- */
   .vote-form {
     background: var(--surface); border-radius: var(--radius-lg);
-    border: 2px solid var(--accent); padding: var(--space-2xl);
+    border: 2px solid var(--accent); padding: var(--space-2xl); box-shadow: var(--shadow-sm);
   }
-  .vote-form h3 {
-    font-family: var(--font-display); font-size: 18px; font-weight: 700;
-    margin-bottom: var(--space-sm);
-  }
-  .vote-form .vf-subtitle {
-    font-size: 13px; color: var(--muted); margin-bottom: var(--space-xl);
-  }
-  .vote-options { display: flex; gap: var(--space-md); margin-bottom: var(--space-xl); flex-wrap: wrap; }
+  .vote-form h3 { font-family: var(--font-display); font-size: 20px; font-weight: 700; margin-bottom: var(--space-sm); }
+  .vote-form .vf-subtitle { font-size: 14px; color: var(--muted); margin-bottom: var(--space-xl); line-height: 1.6; }
+  .vote-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-md); margin-bottom: var(--space-xl); }
+  @media (max-width: 640px) { .vote-options { grid-template-columns: 1fr; } }
   .vote-opt {
-    flex: 1; min-width: 130px; padding: var(--space-xl); border-radius: var(--radius-md);
+    position: relative; padding: var(--space-xl); border-radius: var(--radius-md);
     border: 2px solid var(--border-light); text-align: center; cursor: pointer;
-    transition: all 0.2s;
+    background: var(--surface); transition: all 0.2s;
   }
-  .vote-opt:hover { border-color: var(--accent-light); }
-  .vote-opt.selected { border-color: var(--accent); background: var(--accent-subtle); }
-  .vote-opt .vo-icon { font-size: 28px; margin-bottom: var(--space-sm); }
+  .vote-opt:hover { border-color: var(--accent-light); box-shadow: var(--shadow-sm); transform: translateY(-2px); }
+  .vote-opt.selected { border-color: var(--accent); background: var(--accent-subtle); box-shadow: 0 0 0 3px var(--accent-subtle); }
+  .vote-opt .vo-check {
+    position: absolute; top: 10px; right: 10px; width: 20px; height: 20px;
+    border-radius: var(--radius-full); background: var(--border-light); color: #fff;
+    display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.2s;
+  }
+  .vote-opt.selected .vo-check { opacity: 1; background: var(--accent); }
+  .vote-opt .vo-icon {
+    width: 44px; height: 44px; margin: 0 auto var(--space-sm);
+    display: flex; align-items: center; justify-content: center;
+    border-radius: var(--radius-full); background: var(--bg);
+  }
+  .vote-opt .vo-icon svg { width: 24px; height: 24px; }
   .vote-opt .vo-label { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
-  .vote-opt .vo-desc { font-size: 12px; color: var(--muted); }
+  .vote-opt .vo-desc { font-size: 12px; color: var(--muted); line-height: 1.5; }
   .vote-textarea {
-    width: 100%; min-height: 80px; padding: 12px; border-radius: var(--radius-md);
+    width: 100%; min-height: 96px; padding: 14px; border-radius: var(--radius-md);
     border: 1.5px solid var(--border); font-size: 14px; outline: none;
-    margin-bottom: var(--space-xl); resize: vertical; font-family: var(--font-body);
+    margin-bottom: var(--space-sm); resize: vertical; font-family: var(--font-body);
+    background: var(--bg); line-height: 1.7; transition: border-color 0.15s, box-shadow 0.15s;
   }
-  .vote-textarea:focus { border-color: var(--accent); }
-  .vote-char-count { font-size: 12px; color: var(--muted); text-align: right; margin-top: -16px; margin-bottom: var(--space-lg); }
+  .vote-textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-subtle); }
+  .vote-char-count { font-size: 12px; color: var(--muted); text-align: right; margin-bottom: var(--space-xl); font-family: var(--font-mono); }
   .vote-actions { display: flex; gap: var(--space-md); flex-wrap: wrap; }
   .vote-submitted {
-    text-align: center; padding: var(--space-3xl);
+    text-align: center; padding: var(--space-3xl) var(--space-xl);
+    background: var(--success-light); border-color: var(--success);
   }
-  .vote-submitted .vs-icon { font-size: 48px; margin-bottom: var(--space-lg); }
-  .vote-submitted .vs-title { font-size: 18px; font-weight: 700; margin-bottom: var(--space-sm); }
-  .vote-submitted .vs-desc { font-size: 14px; color: var(--muted); line-height: 1.6; margin-bottom: var(--space-xl); }
+  .vote-submitted .vs-icon { width: 64px; height: 64px; margin: 0 auto var(--space-lg); color: var(--success); }
+  .vote-submitted .vs-title { font-size: 20px; font-weight: 700; margin-bottom: var(--space-sm); }
+  .vote-submitted .vs-desc { font-size: 14px; color: var(--muted); line-height: 1.7; margin-bottom: var(--space-xl); max-width: 360px; margin-left: auto; margin-right: auto; }
 
-  /* Confirm dialog overlay */
+  /* ---- Confirm dialog overlay ---- */
   .confirm-overlay {
-    position: fixed; inset: 0; z-index: 400; background: rgba(0,0,0,0.4);
+    position: fixed; inset: 0; z-index: 400; background: rgba(0,0,0,0.35);
     display: flex; align-items: center; justify-content: center;
-    opacity: 0; pointer-events: none; transition: opacity 0.2s;
+    opacity: 0; pointer-events: none; transition: opacity 0.25s;
+    backdrop-filter: blur(2px);
   }
   .confirm-overlay.open { opacity: 1; pointer-events: auto; }
   .confirm-dialog {
     background: var(--surface); border-radius: var(--radius-xl); padding: var(--space-3xl);
     max-width: 420px; width: 90%; text-align: center; box-shadow: var(--shadow-lg);
+    transform: scale(0.96); transition: transform 0.25s;
   }
-  .confirm-dialog .cd-icon { font-size: 40px; margin-bottom: var(--space-lg); }
-  .confirm-dialog .cd-title { font-size: 17px; font-weight: 700; margin-bottom: var(--space-sm); }
-  .confirm-dialog .cd-desc { font-size: 13px; color: var(--muted); line-height: 1.6; margin-bottom: var(--space-xl); }
+  .confirm-overlay.open .confirm-dialog { transform: scale(1); }
+  .confirm-dialog .cd-icon { width: 56px; height: 56px; margin: 0 auto var(--space-lg); color: var(--accent); }
+  .confirm-dialog .cd-title { font-size: 18px; font-weight: 700; margin-bottom: var(--space-sm); }
+  .confirm-dialog .cd-desc { font-size: 14px; color: var(--muted); line-height: 1.7; margin-bottom: var(--space-xl); }
+  .confirm-dialog .cd-desc strong { color: var(--fg); }
   .confirm-dialog .cd-actions { display: flex; gap: var(--space-md); justify-content: center; }
 
+  /* ---- Toast ---- */
   .toast {
     position: fixed; bottom: var(--space-3xl); left: 50%; transform: translateX(-50%);
     background: var(--fg); color: #fff; padding: 12px 24px; border-radius: var(--radius-md);
     font-size: 14px; font-weight: 500; z-index: 500; box-shadow: var(--shadow-lg);
-    opacity: 0; transition: opacity 0.3s; pointer-events: none;
+    opacity: 0; transition: opacity 0.3s, transform 0.3s; pointer-events: none;
   }
-  .toast.show { opacity: 1; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 </style>
 </head>
 <body>
 
-<div class="jury-page">
-  <a class="jury-back" href="javascript:history.back()">← 返回</a>
+<header class="jury-topbar">
+  <button class="jury-back-btn" onclick="history.back()" aria-label="返回">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
+  <h1 class="jury-topbar-title">陪审投票</h1>
+  <div class="jury-topbar-spacer" aria-hidden="true"></div>
+</header>
 
-  <!-- Header -->
-  <div class="jury-header">
-    <div class="jury-badge-row">
-      <span class="jtag dispute">质量争议</span>
-      <span class="jtag order">#DSP-240528-003</span>
-      <span class="jtag urgent">投票中 · 剩余 18 小时</span>
-    </div>
-    <h1>保洁服务质量争议 — 需求方反映清洁不彻底</h1>
-    <div class="jh-meta">
-      关联订单 <strong>#240528-003</strong> · 争议金额 <strong>15 ⏂</strong> · 发起时间 <strong>2026-06-03 14:22</strong><br>
-      当前阶段：<strong style="color:var(--warning)">陪审投票中</strong> · 已投票 4/7 · 还剩 3 席未投
+<main class="jury-page">
+
+  <!-- Status banner -->
+  <div class="status-banner in-progress">
+    <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    <div class="sb-text">
+      <h4>投票进行中</h4>
+      <p>剩余 18 小时 · 已投票 4/7 · 还剩 3 席未投</p>
     </div>
   </div>
+
+  <!-- Case header -->
+  <section class="case-card">
+    <div class="case-badges">
+      <span class="badge dispute">质量争议</span>
+      <span class="badge order">#DSP-240528-003</span>
+      <span class="badge urgent">投票中 · 剩余 18 小时</span>
+    </div>
+    <h2 class="case-title">保洁服务质量争议 — 需求方反映清洁不彻底</h2>
+    <div class="case-meta">
+      <span>关联订单 <strong>#240528-003</strong></span>
+      <span>争议金额 <strong>15 ⏂</strong></span>
+      <span>发起时间 <strong>2026-06-03 14:22</strong></span>
+    </div>
+    <div class="case-progress">
+      <div class="case-progress-label"><span>陪审进度</span><span>4 / 7</span></div>
+      <div class="case-progress-track"><div class="case-progress-fill" style="width:57%"></div></div>
+    </div>
+  </section>
 
   <!-- Evidence -->
-  <div class="evidence-grid">
-    <div class="evidence-panel">
-      <div class="ep-role"><span class="dot demand"></span>需求方主张</div>
-      <div class="ep-user">赵姐 <span style="font-size:13px;color:var(--muted)">信用 3.6</span></div>
-      <div class="ep-credit">注册 2025-08 · 完成 12 单 · 被评 8 次</div>
-      <div class="ep-claim">约定2小时全屋保洁，但卫生间和厨房角落未清理，灶台油污残留。服务方未提前告知深度清洁需额外收费。要求退还 50% 报酬（7.5 ⏂）。</div>
-      <div class="ep-files">
-        <div class="ep-file">📎 photo_kitchen_01.jpg (1.2 MB)</div>
-        <div class="ep-file">📎 photo_bathroom_02.jpg (0.9 MB)</div>
-        <div class="ep-file">📎 chat_screenshot_p1.png (0.5 MB)</div>
+  <section class="section">
+    <h3 class="section-title">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--fg)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+      双方主张与证据
+    </h3>
+    <div class="evidence-grid">
+      <div class="evidence-panel demand">
+        <div class="ep-header">
+          <div class="ep-avatar demand">赵</div>
+          <div class="ep-info">
+            <div class="ep-name">赵姐 <span style="font-size:13px;color:var(--muted);font-weight:500">信用 3.6</span></div>
+            <div class="ep-role demand">需求方主张</div>
+          </div>
+        </div>
+        <div class="ep-body">
+          <div class="ep-credit">
+            <span>注册 2025-08</span><span>完成 12 单</span><span>被评 8 次</span>
+          </div>
+          <div class="ep-claim">约定2小时全屋保洁，但卫生间和厨房角落未清理，灶台油污残留。服务方未提前告知深度清洁需额外收费。要求退还 50% 报酬（7.5 ⏂）。</div>
+          <div class="ep-files">
+            <div class="ep-file">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              photo_kitchen_01.jpg (1.2 MB)
+            </div>
+            <div class="ep-file">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              photo_bathroom_02.jpg (0.9 MB)
+            </div>
+            <div class="ep-file">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              chat_screenshot_p1.png (0.5 MB)
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="evidence-panel service">
+        <div class="ep-header">
+          <div class="ep-avatar service">陈</div>
+          <div class="ep-info">
+            <div class="ep-name">陈阿姨 <span style="font-size:13px;color:var(--muted);font-weight:500">信用 4.7</span></div>
+            <div class="ep-role service">服务方主张</div>
+          </div>
+        </div>
+        <div class="ep-body">
+          <div class="ep-credit">
+            <span>注册 2025-03</span><span>完成 89 单</span><span>被评 72 次</span>
+          </div>
+          <div class="ep-claim">按约定完成了全屋保洁，进出前后都有照片为证。灶台油污是长期积垢需深度清洁（不在此次服务范围），已在服务前口头告知。愿意退还 20%（3 ⏂）作为善意。</div>
+          <div class="ep-files">
+            <div class="ep-file">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              before_after_all.jpg (2.1 MB)
+            </div>
+            <div class="ep-file">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              chat_screenshot.png (0.6 MB)
+            </div>
+          </div>
+        </div>
       </div>
     </div>
-    <div class="evidence-panel">
-      <div class="ep-role"><span class="dot service"></span>服务方主张</div>
-      <div class="ep-user">陈阿姨 <span style="font-size:13px;color:var(--muted)">信用 4.7</span></div>
-      <div class="ep-credit">注册 2025-03 · 完成 89 单 · 被评 72 次</div>
-      <div class="ep-claim">按约定完成了全屋保洁，进出前后都有照片为证。灶台油污是长期积垢需深度清洁（不在此次服务范围），已在服务前口头告知。愿意退还 20%（3 ⏂）作为善意。</div>
-      <div class="ep-files">
-        <div class="ep-file">📎 before_after_all.jpg (2.1 MB)</div>
-        <div class="ep-file">📎 chat_screenshot.png (0.6 MB)</div>
-      </div>
-    </div>
-  </div>
+  </section>
 
   <!-- AI analysis -->
-  <div class="ai-box">
-    <h3>🤖 AI 辅助分析</h3>
-    <div class="ai-items">
-      <div class="ai-item"><span class="ai-label">争议焦点</span><span>灶台清洁是否在原约定服务范围内——该点可能决定裁决方向</span></div>
-      <div class="ai-item"><span class="ai-label">证据评估</span><span>双方均有照片证据；服务方有口头告知的主张但无书面记录；需求方提供的灶台照片显示油污较重但无法确认是否为一次服务可清理</span></div>
-      <div class="ai-item"><span class="ai-label">历史参考</span><span>平台历史上有 3 起类似保洁类纠纷，均以调解退还 25%-40% 结案</span></div>
+  <section class="section">
+    <div class="ai-box">
+      <h3>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        AI 辅助分析
+        <span class="ai-badge">仅供参考</span>
+      </h3>
+      <div class="ai-items">
+        <div class="ai-item"><span class="ai-label">争议焦点</span><span>灶台清洁是否在原约定服务范围内——该点可能决定裁决方向</span></div>
+        <div class="ai-item"><span class="ai-label">证据评估</span><span>双方均有照片证据；服务方有口头告知的主张但无书面记录；需求方提供的灶台照片显示油污较重但无法确认是否为一次服务可清理</span></div>
+        <div class="ai-item"><span class="ai-label">历史参考</span><span>平台历史上有 3 起类似保洁类纠纷，均以调解退还 25%-40% 结案</span></div>
+      </div>
+      <div class="ai-note">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        AI分析仅供参考，请独立做出判断
+      </div>
     </div>
-    <div class="ai-note">⚠ AI分析仅供参考，请独立做出判断</div>
-  </div>
+  </section>
 
   <!-- Current tally -->
-  <div class="tally-section">
-    <h3>📊 当前投票统计</h3>
+  <section class="tally-section">
+    <h3 class="section-title">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--fg)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      当前投票统计
+    </h3>
     <div class="tally-bars" id="tallyBars">
       <div class="tally-bar-card">
         <div class="tb-label">调解建议</div>
@@ -285,7 +451,7 @@
         </tbody>
       </table>
     </div>
-  </div>
+  </section>
 
   <!-- Vote form -->
   <div class="vote-form" id="voteForm">
@@ -294,17 +460,26 @@
 
     <div class="vote-options" id="voteOptions">
       <div class="vote-opt" data-vote="demand" onclick="selectVote('demand', this)">
-        <div class="vo-icon">🏠</div>
+        <div class="vo-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
+        <div class="vo-icon" style="color:var(--secondary)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        </div>
         <div class="vo-label">需求方胜诉</div>
         <div class="vo-desc">支持退还全部或部分时间币</div>
       </div>
       <div class="vote-opt" data-vote="service" onclick="selectVote('service', this)">
-        <div class="vo-icon">🛠</div>
+        <div class="vo-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
+        <div class="vo-icon" style="color:var(--accent)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+        </div>
         <div class="vo-label">服务方胜诉</div>
         <div class="vo-desc">驳回申诉，维持原约定</div>
       </div>
       <div class="vote-opt" data-vote="mediate" onclick="selectVote('mediate', this)">
-        <div class="vo-icon">🤝</div>
+        <div class="vo-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
+        <div class="vo-icon" style="color:var(--warning)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </div>
         <div class="vo-label">调解处理</div>
         <div class="vo-desc">建议双方各退一步，部分退款</div>
       </div>
@@ -321,7 +496,9 @@
 
   <!-- Submitted state -->
   <div class="vote-form vote-submitted" id="voteSubmitted" style="display:none">
-    <div class="vs-icon">✅</div>
+    <div class="vs-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+    </div>
     <div class="vs-title">投票已提交</div>
     <div class="vs-desc">
       你的投票已记录，感谢你的参与。<br>
@@ -330,12 +507,14 @@
     <button class="btn btn--outline" onclick="window.location.reload()">查看最新统计</button>
   </div>
 
-</div>
+</main>
 
-<!-- Confirm dialog -->
+<!-- Confirm dialog overlay -->
 <div class="confirm-overlay" id="confirmOverlay">
   <div class="confirm-dialog">
-    <div class="cd-icon">⚖️</div>
+    <div class="cd-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+    </div>
     <div class="cd-title">确认提交投票？</div>
     <div class="cd-desc">
       你的投票结果为 "<strong id="confirmVoteLabel"></strong>"。<br>

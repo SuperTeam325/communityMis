@@ -22,7 +22,6 @@ test.beforeAll(async () => {
   frontend = createFrontendServer({
     env: {
       NODE_ENV: "production",
-      FRONTEND_MODE: "spa",
       API_BASE_URL: `http://127.0.0.1:${backendPort}`,
       APP_ENV: "spa-stage03-e2e",
       BUILD_VERSION: "spa-stage03-e2e"

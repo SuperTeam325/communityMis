@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createApiClient } from "../frontend/src/api/client.mjs";
-import { routeById } from "../frontend/src/routes.mjs";
+import { routeById } from "../frontend/src/spa/route-data.mjs";
 
 const checks = [];
 
@@ -32,9 +32,9 @@ async function checkStaticWiring() {
   const componentTest = await readFile(new URL("../tests/component/spa-stage-05.test.tsx", import.meta.url), "utf8");
 
   for (const id of ["ai-assistant", "ai-results", "admin-ai-logs", "admin-ai-conversations", "admin-ai-feedback", "admin-ai-errors", "admin-ai-config"]) {
-    const route = routeById.get(id);
+    const route = routeById(id);
     record(Boolean(route), `${id} route is registered`);
-    record(route?.source?.endsWith(".html"), `${id} keeps production route manifest source`);
+    record(route && !("source" in route), `${id} route is SPA metadata without prototype source`);
   }
 
   for (const symbol of ["AiAssistantPage", "AiResultsPage", "AdminAiLogsPage", "AdminAiConversationsPage", "AdminAiFeedbackPage", "AdminAiErrorsPage", "AdminAiConfigPage"]) {

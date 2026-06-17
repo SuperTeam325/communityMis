@@ -1,6 +1,6 @@
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createFrontendServer } from "../frontend/server.mjs";
-import { responsiveViewports } from "../frontend/src/routes.mjs";
+import { responsiveViewports } from "../frontend/src/spa/route-data.mjs";
 import { chromium } from "playwright";
 
 const checks = [];

@@ -3,7 +3,7 @@ process.env.API_BASE_URL ??= `http://127.0.0.1:${process.env.BACKEND_PORT ?? "30
 process.env.APP_ENV ??= "preview";
 
 const { createFrontendServer } = await import("../frontend/server.mjs");
-const { PROJECT_ROOT } = await import("../frontend/src/prototypeRenderer.mjs");
+const { PROJECT_ROOT } = await import("../frontend/src/spa/server-runtime.mjs");
 
 const port = Number(process.env.FRONTEND_PORT ?? 5173);
 

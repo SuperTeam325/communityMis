@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, test } from "vitest";
 import { normalizeRuntimeConfig } from "../../frontend/src/spa/runtime";
 import { withQuery, createApiClient } from "../../frontend/src/spa/api";
-import { routes } from "../../frontend/src/routes.mjs";
+import { appRoutes, resolveLegacyRedirect } from "../../frontend/src/spa/route-data.mjs";
 
 describe("frontend runtime config", () => {
   test("normalizes defaults and clamps Sentry sample rate", () => {
@@ -117,58 +117,15 @@ describe("frontend runtime config", () => {
     expect(plain).toBe("标题\n\n公式 E=mc^2\n\n- 重点");
   });
 
-  test("prototype shell binds visible controls without inline onclick handlers", () => {
-    const shell = fs.readFileSync(path.join(process.cwd(), "frontend", "src", "prototype-shell.mjs"), "utf8");
-
-    for (const expected of [
-      "function bindBackButton(selector, fallbackPath)",
-      "\".wallet-back\"",
-      "\".disp-back\"",
-      "\".dd-back\"",
-      "\".detail-back\"",
-      "\".orders-back\"",
-      "\".review-back\"",
-      "navigateTo(\"/profile\")",
-      "navigateTo(\"/wallet/freeze\")",
-      "showGlobalMessage(\"时间币用于发布任务",
-      "window.__adminAiConfigSnapshot",
-      "restoreAdminAiConfigSnapshot",
-      "window.__adminAuditLogsCurrentPage",
-      "exportAdminAuditLogsCsv",
-      "downloadCsv(`audit-logs-current-page-${timestampForFilename(new Date())}.csv`, rows)",
-      "function saveAdminFinalDraft(dispute)",
-      "function restoreAdminFinalDraft(dispute)",
-      "adminDisputeFinalDraft:",
-      "if (route.id === \"help\")",
-      "function hydrateHelpRoute()",
-      "rewriteHelpLinks()",
-      "api.admin.importSensitiveWords",
-      "api.admin.batchReviewRiskContent",
-      "api.admin.batchResolveAiFeedback",
-      "api.admin.retryAiErrors",
-      "api.admin.createAiIncident",
-      "function updateCoinEstimate()",
-      "function installDisputeEvidenceUpload",
-      "uploadFileAsset(userSession, file, \"dispute-evidence\"",
-      "data-ai-select=\"feedback\"",
-      "data-risk-select-row"
-    ]) {
-      expect(shell).toContain(expected);
-    }
-
-    expect(shell).not.toContain("onclick=\"history.back()\"");
-    expect(shell).not.toContain("onclick=\"showHelp()\"");
-    expect(shell).not.toContain("onclick=\"exportCSV()\"");
-  });
-
-  test("feed filter chips do not share active state with category chips", () => {
-    const shell = fs.readFileSync(path.join(process.cwd(), "frontend", "src", "prototype-shell.mjs"), "utf8");
-
-    expect(shell).toContain("? state.filter === \"all\" && categoryCode === state.category");
-    expect(shell).toContain("const active = state.filter === \"all\" && category.code === state.category;");
-    expect(shell).toContain("const active = filter === state.filter && !state.category;");
-    expect(shell).not.toContain("filterAttr === state.filter && (!state.category || TASK_FILTERS.get(state.filter)?.category === state.category)");
-    expect(shell).not.toContain("filter === state.filter && (!state.category || TASK_FILTERS.get(state.filter)?.category === state.category)");
+  test("SPA route metadata replaces the prototype route source system", () => {
+    const routeIds = new Set(appRoutes.map((item) => item.id));
+    expect(routeIds.has("feed")).toBe(true);
+    expect(routeIds.has("admin-dashboard")).toBe(true);
+    expect(routeIds.has("jury-dispute-voting")).toBe(true);
+    expect(appRoutes.every((route) => !("source" in route))).toBe(true);
+    expect(resolveLegacyRedirect("/screens/feed.html")).toBe("/feed");
+    expect(resolveLegacyRedirect("/community-posts/42")).toBe("/posts/42");
+    expect(resolveLegacyRedirect("/jury/voting", new URLSearchParams("disputeId=99"))).toBe("/jury/disputes/99");
   });
 
   test("global AI modal uses cookie and CSRF authenticated backend actions", () => {
@@ -203,7 +160,7 @@ describe("frontend runtime config", () => {
   });
 
   test("help route is public read-only and hydrated by the prototype shell", () => {
-    const help = routes.find((item) => item.id === "help");
+    const help = appRoutes.find((item) => item.id === "help");
 
     expect(help?.surface).toBe("public");
     expect(help?.path).toBe("/help");

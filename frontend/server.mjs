@@ -1,19 +1,9 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import {
-  buildRouteIndexHtml,
-  createRuntimeConfig,
-  DIST_ROOT,
-  PRODUCTION_UI_ROOT,
-  PROJECT_ROOT,
-  renderPrototypeHtml
-} from "./src/prototypeRenderer.mjs";
-import { legacyRedirects, resolveRoute, routePath, routes } from "./src/routes.mjs";
-
-const CURRENT_FILE = fileURLToPath(import.meta.url);
-const FRONTEND_ROOT = path.dirname(CURRENT_FILE);
+import { pathToFileURL } from "node:url";
+import { resolveLegacyRedirect, routePayload } from "./src/spa/route-data.mjs";
+import { createRuntimeConfig, DIST_ROOT, PROJECT_ROOT } from "./src/spa/server-runtime.mjs";
 
 const MIME_TYPES = new Map([
   [".css", "text/css; charset=utf-8"],
@@ -50,8 +40,8 @@ export function handleRequest(request, response, runtime = createServerRuntime()
     return;
   }
 
-  const legacyTarget = legacyRedirects.get(url.pathname);
-  if (legacyTarget) {
+  const legacyTarget = resolveLegacyRedirect(url.pathname, url.searchParams);
+  if (legacyTarget && legacyTarget !== url.pathname) {
     response.writeHead(302, {
       ...securityHeaders(runtime),
       "cache-control": "no-cache",
@@ -81,11 +71,6 @@ export function handleRequest(request, response, runtime = createServerRuntime()
     return;
   }
 
-  if (url.pathname === "/app" || url.pathname === "/app/") {
-    sendIndex(response, isHead, runtime);
-    return;
-  }
-
   const staticFile = resolveStaticFile(runtime, url.pathname);
   if (staticFile) {
     serveFile(response, staticFile, isHead, runtime, staticCacheControl(staticFile));
@@ -97,78 +82,20 @@ export function handleRequest(request, response, runtime = createServerRuntime()
     return;
   }
 
-  if (runtime.isSpaMode) {
-    sendIndex(response, isHead, runtime);
-    return;
-  }
-
-  const { route } = resolveRoute(url.pathname);
-  if (route) {
-    sendHtml(response, 200, routeHtml(route, runtime), isHead, runtime);
-    return;
-  }
-
-  sendHtml(response, 404, notFoundHtml(runtime), isHead, runtime);
-}
-
-let cachedAssetManifest = null;
-
-function loadAssetManifest(distRoot) {
-  if (cachedAssetManifest) return cachedAssetManifest;
-  try {
-    const manifestPath = path.join(distRoot, "manifest.json");
-    if (fs.existsSync(manifestPath)) {
-      cachedAssetManifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-      return cachedAssetManifest;
-    }
-  } catch {
-    // manifest unavailable — dev mode will use logical (unhashed) paths
-  }
-  return null;
+  sendIndex(response, isHead, runtime);
 }
 
 function createServerRuntime(options = {}) {
   const env = options.env ?? process.env;
   const mode = options.mode ?? env.NODE_ENV ?? "development";
   const config = options.runtimeConfig ?? createRuntimeConfig({ env, mode });
-  const distRoot = options.distRoot ?? DIST_ROOT;
-  const manifest = loadAssetManifest(distRoot);
-
-  // Always use frontend/public/ as fallbackRoot, not distRoot (which would
-  // be a no-op since resolveStaticFile already tries distRoot first).
-  // This ensures unhashed assets in public/ are always reachable.
-  const fallbackRoot = path.join(FRONTEND_ROOT, "public");
-
-  // In dev mode, also allow serving CSS/JS directly from public/ui/
-  // (the UI source directory) as a last resort when no manifest mapping
-  // or hashed build output is available.
-  const uiSourceRoot = mode !== "production" ? PRODUCTION_UI_ROOT : null;
-
   return {
     config,
-    distRoot,
-    fallbackRoot,
-    uiSourceRoot,
-    manifest,
+    distRoot: options.distRoot ?? DIST_ROOT,
     mode,
-    frontendMode: env.FRONTEND_MODE === "spa" ? "spa" : "prototype",
-    isSpaMode: env.FRONTEND_MODE === "spa",
+    frontendMode: "spa",
     isProduction: mode === "production"
   };
-}
-
-function routePayload() {
-  return routes.map((item) => ({
-    id: item.id,
-    title: item.title,
-    source: item.source,
-    path: item.path,
-    entryPath: routePath(item),
-    surface: item.surface,
-    layout: item.layout,
-    auth: item.surface === "admin" ? "admin" : item.surface === "user" ? "user" : "none",
-    nav: item.layout === "adminShell" ? "admin" : item.layout === "userShell" && ["feed", "tasks", "post", "messages", "profile"].includes(item.id) ? "user" : "hidden"
-  })).filter((item, index, list) => list.findIndex((entry) => entry.id === item.id) === index);
 }
 
 function frontendHealthPayload(runtime) {
@@ -184,32 +111,9 @@ function frontendHealthPayload(runtime) {
 
 function resolveStaticFile(runtime, pathname) {
   const decoded = decodeURIComponent(pathname);
-  // 1. Try dist/ first (hashed production assets)
   const target = safeJoin(runtime.distRoot, decoded.slice(1));
   if (target && fs.existsSync(target) && fs.statSync(target).isFile()) {
     return target;
-  }
-  // 2. Try public/ fallback (unhashed static files)
-  //    Note: public/ styles are at /styles/*, not /assets/styles/*,
-  //    so we also try stripping the /assets/ prefix for the file lookup.
-  const fallback = safeJoin(runtime.fallbackRoot, decoded.slice(1));
-  if (fallback && fs.existsSync(fallback) && fs.statSync(fallback).isFile()) {
-    return fallback;
-  }
-  // 2b. For /assets/ prefixed URLs, also try public/ without the /assets/ prefix
-  //    (e.g. /assets/styles/shell.css → public/styles/shell.css)
-  if (decoded.startsWith("/assets/")) {
-    const alt = safeJoin(runtime.fallbackRoot, decoded.slice("/assets/".length));
-    if (alt && fs.existsSync(alt) && fs.statSync(alt).isFile()) {
-      return alt;
-    }
-  }
-  // 3. In dev mode, try public/ui/ (CSS/JS source files before hashing)
-  if (runtime.uiSourceRoot) {
-    const uiFallback = safeJoin(runtime.uiSourceRoot, decoded.slice(1));
-    if (uiFallback && fs.existsSync(uiFallback) && fs.statSync(uiFallback).isFile()) {
-      return uiFallback;
-    }
   }
   return null;
 }
@@ -221,42 +125,6 @@ function sendIndex(response, isHead, runtime) {
     return;
   }
   serveFile(response, indexPath, isHead, runtime, "no-cache");
-}
-
-function routeHtml(route, runtime) {
-  if (runtime.isProduction) {
-    const htmlPath = path.join(runtime.distRoot, "pages", `${route.id}.html`);
-    if (fs.existsSync(htmlPath)) {
-      return fs.readFileSync(htmlPath, "utf8");
-    }
-  }
-  const opts = {
-    runtimeConfig: runtime.config,
-    shellLogicalPath: "/assets/app/main.mjs",
-    stripInlineEvents: true,
-    stripInlineScripts: true
-  };
-  // In development mode, use the asset manifest to rewrite logical CSS/JS paths
-  // (e.g. /css/tokens.css → /css/tokens.9237d5c336cf.css) so that files are
-  // served correctly from the hashed build output in frontend/dist/.
-  if (!runtime.isProduction && runtime.manifest?.prototypeAssets) {
-    opts.assets = runtime.manifest.prototypeAssets;
-  }
-  return renderPrototypeHtml(route, opts);
-}
-
-function notFoundHtml(runtime) {
-  if (runtime.isProduction) {
-    const htmlPath = path.join(runtime.distRoot, "pages", "404.html");
-    if (fs.existsSync(htmlPath)) {
-      return fs.readFileSync(htmlPath, "utf8");
-    }
-  }
-  const opts = { runtimeConfig: runtime.config };
-  if (!runtime.isProduction && runtime.manifest?.prototypeAssets) {
-    opts.assets = runtime.manifest.prototypeAssets;
-  }
-  return buildRouteIndexHtml(opts);
 }
 
 function serveFile(response, filePath, isHead, runtime, cacheControl) {
@@ -287,15 +155,6 @@ function sendJson(response, status, payload, isHead = false, runtime = createSer
   response.writeHead(status, {
     ...securityHeaders(runtime),
     "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-cache"
-  });
-  response.end(isHead ? undefined : body);
-}
-
-function sendHtml(response, status, body, isHead = false, runtime = createServerRuntime()) {
-  response.writeHead(status, {
-    ...securityHeaders(runtime),
-    "content-type": "text/html; charset=utf-8",
     "cache-control": "no-cache"
   });
   response.end(isHead ? undefined : body);
