@@ -9,6 +9,9 @@ export type AppRoute = {
   entryPath: string;
   surface: RouteSurface;
   layout: RouteLayout;
+  auth?: "none" | "user" | "admin";
+  nav?: "hidden" | "user" | "admin";
+  legacyPaths?: string[];
 };
 
 export type RuntimeConfig = {

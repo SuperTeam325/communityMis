@@ -1,5 +1,5 @@
 import React from "react";
-import { useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import type { ApiClient } from "../api";
 import { Field, PageHeader, StateView, asArray, friendlyError, text, useAsync } from "./shared";
 
@@ -11,10 +11,10 @@ export function OrdersPage({ api }: { api: ApiClient }) {
       <PageHeader title="我的订单" />
       <StateView loading={state.loading} error={state.error} empty={orders.length === 0}>
         <div className="card-list">{orders.map((order) => (
-          <a className="card interactive" key={text(order.orderId)} href={`/orders/${text(order.orderId)}`}>
+          <Link className="card interactive" key={text(order.orderId)} to={`/orders/${text(order.orderId)}`}>
             <div className="card-title">订单 #{text(order.orderId)}</div>
             <p>{text(order.statusText ?? order.status)}</p>
-          </a>
+          </Link>
         ))}</div>
       </StateView>
     </>
@@ -35,8 +35,8 @@ export function OrderDetailPage({ api }: { api: ApiClient }) {
           <p>{text(order?.statusText ?? order?.status)}</p>
           <div className="action-row">
             <button className="btn btn--primary" onClick={() => api.orders.confirm(id).then(() => window.location.reload()).catch((reason) => setError(friendlyError(reason)))}>确认完成</button>
-            <a className="btn btn--secondary" href="/reviews/new">评价</a>
-            <a className="btn btn--secondary" href="/disputes/new">发起纠纷</a>
+            <Link className="btn btn--secondary" to="/reviews/new">评价</Link>
+            <Link className="btn btn--secondary" to="/disputes/new">发起纠纷</Link>
           </div>
           {error ? <p className="field-error">{error}</p> : null}
         </article>
@@ -46,6 +46,7 @@ export function OrderDetailPage({ api }: { api: ApiClient }) {
 }
 
 export function ReviewPage({ api }: { api: ApiClient }) {
+  const navigate = useNavigate();
   return (
     <>
       <PageHeader title="订单评价" />
@@ -56,7 +57,7 @@ export function ReviewPage({ api }: { api: ApiClient }) {
           rating: Number(form.get("rating")),
           content: form.get("content")
         });
-        window.location.href = "/orders";
+        navigate("/orders", { replace: true });
       }}>
         <Field label="订单 ID"><input name="orderId" required /></Field>
         <Field label="评分"><input name="rating" type="number" min="1" max="5" required /></Field>

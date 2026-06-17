@@ -226,8 +226,10 @@ function emitRouteManifest() {
     path: item.path,
     entryPath: routePath(item),
     surface: item.surface,
-    layout: item.layout
-  }));
+    layout: item.layout,
+    auth: item.surface === "admin" ? "admin" : item.surface === "user" ? "user" : "none",
+    nav: item.layout === "adminShell" ? "admin" : item.layout === "userShell" && ["feed", "tasks", "post", "messages", "profile"].includes(item.id) ? "user" : "hidden"
+  })).filter((item, index, list) => list.findIndex((entry) => entry.id === item.id) === index);
   fs.writeFileSync(path.join(distRoot, "routes.json"), `${JSON.stringify(payload, null, 2)}\n`);
 }
 
@@ -253,14 +255,16 @@ function emitDeploymentManifest() {
     buildVersion: process.env.BUILD_VERSION ?? "dev",
     environment: process.env.APP_ENV ?? "production",
     builtAt: new Date().toISOString(),
-    type: "vite-react-spa",
+    type: process.env.FRONTEND_MODE === "spa" ? "vite-react-spa" : "vite-hybrid",
+    frontendMode: process.env.FRONTEND_MODE === "spa" ? "spa" : "prototype",
     assets,
     prototypeAssets: assetManifest.assets,
     vite: viteManifest,
     routes: Object.fromEntries(routes.map((route) => [route.id, {
       path: route.path,
       entryPath: routePath(route),
-      file: `/pages/${route.id}.html`
+      file: `/pages/${route.id}.html`,
+      auth: route.surface === "admin" ? "admin" : route.surface === "user" ? "user" : "none"
     }]))
   }, null, 2)}\n`);
 }

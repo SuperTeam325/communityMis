@@ -1,5 +1,5 @@
 import React from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import type { ApiClient } from "../api";
 import { useAuth } from "../auth";
 import { Field, friendlyError } from "./shared";
@@ -37,7 +37,7 @@ export function LoginPage({ admin = false }: { api: ApiClient; admin?: boolean }
         <Field label="密码"><input name="password" type="password" autoComplete="current-password" required /></Field>
         {error ? <p className="field-error" role="alert">{error}</p> : null}
         <button className="btn btn--primary" disabled={busy}>{busy ? "处理中..." : "登录"}</button>
-        {!admin ? <a href="/register">注册新账号</a> : null}
+        {!admin ? <Link to="/register">注册新账号</Link> : null}
       </form>
     </main>
   );

@@ -1,5 +1,5 @@
 import React from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import type { ApiClient } from "../api";
 import { FileUpload, Field, PageHeader, StateView, asArray, friendlyError, text, useAsync } from "./shared";
 
@@ -8,14 +8,14 @@ export function TasksPage({ api }: { api: ApiClient }) {
   const requests = asArray<Record<string, unknown>>(state.data, "requests");
   return (
     <>
-      <PageHeader title="任务市场" action={<a className="btn btn--primary" href="/post">发布</a>} />
+      <PageHeader title="任务市场" action={<Link className="btn btn--primary" to="/post">发布</Link>} />
       <StateView loading={state.loading} error={state.error} empty={requests.length === 0}>
         <div className="card-list">
           {requests.map((item) => (
             <article className="card" key={text(item.requestId)}>
-              <a className="card-title" href={`/posts/${text(item.requestId)}`}>{text(item.title)}</a>
+              <Link className="card-title" to={`/posts/${text(item.requestId)}`}>{text(item.title)}</Link>
               <p>{text(item.description || item.content)}</p>
-              <div className="action-row"><a className="btn btn--secondary" href={`/posts/${text(item.requestId)}`}>查看详情</a></div>
+              <div className="action-row"><Link className="btn btn--secondary" to={`/posts/${text(item.requestId)}`}>查看详情</Link></div>
             </article>
           ))}
         </div>
@@ -89,7 +89,7 @@ export function RequestDetailPage({ api }: { api: ApiClient }) {
           <p>{text(request?.description || request?.content)}</p>
           <div className="action-row">
             <button className="btn btn--primary" onClick={() => api.requests.accept(id).then(() => window.location.reload()).catch((reason) => setError(friendlyError(reason)))}>接单</button>
-            <a className="btn btn--secondary" href={`/users/${text(request?.publisherId ?? request?.userId)}`}>联系用户</a>
+            <Link className="btn btn--secondary" to={`/users/${text(request?.publisherId ?? request?.userId)}`}>联系用户</Link>
           </div>
           {error ? <p className="field-error">{error}</p> : null}
         </article>

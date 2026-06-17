@@ -1,5 +1,5 @@
 import React, { Suspense } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Link, NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import type { ApiClient } from "./api";
 import { useAuth } from "./auth";
 import { setMonitoringUser } from "./monitoring";
@@ -11,7 +11,7 @@ import { LoginPage, RegisterPage } from "./pages/AuthPages";
 import { FeedPage } from "./pages/FeedPage";
 import { TasksPage, RequestDetailPage, PostPage } from "./pages/RequestsPages";
 import { OrdersPage, OrderDetailPage, ReviewPage } from "./pages/OrdersPages";
-import { DisputeCreatePage, DisputeDetailPage, JuryVotingPage } from "./pages/DisputesPages";
+import { DisputeCreatePage, DisputeDetailPage, JuryHallPage, JuryVotingPage } from "./pages/DisputesPages";
 import { WalletPage, WalletFreezePage } from "./pages/WalletPages";
 import { MessagesPage, NotificationsPage } from "./pages/MessagesPages";
 import { AiAssistantPage, AiResultsPage } from "./pages/AiPages";
@@ -34,10 +34,6 @@ export function App({ api, config }: { api: ApiClient; config: RuntimeConfig }) 
           element={<RouteFrame api={api} config={config} route={route} />}
         />
       ))}
-      <Route
-        path="/jury/disputes/:id"
-        element={<RouteFrame api={api} config={config} route={routeById("jury-voting")!} />}
-      />
       <Route path="*" element={<NotFoundPage routes={appRoutes} />} />
     </Routes>
   );
@@ -58,10 +54,10 @@ function RouteFrame(props: PageProps) {
   if (auth.loading && route.surface !== "launcher") {
     return <LoadingScreen />;
   }
-  if (route.surface === "user" && !auth.session) {
+  if (route.auth === "user" && !auth.session) {
     return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
   }
-  if (route.surface === "admin" && (!auth.session || !["admin", "super_admin"].includes(auth.session.user.role))) {
+  if (route.auth === "admin" && (!auth.session || !["admin", "super_admin"].includes(auth.session.user.role))) {
     return <Navigate to={`/admin/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
   }
   if (route.surface === "userAuth" && auth.session?.user.role === "user") {
@@ -100,7 +96,9 @@ function PageSwitch(props: PageProps) {
     case "review": return <ReviewPage api={props.api} />;
     case "dispute-create": return <DisputeCreatePage api={props.api} />;
     case "dispute-detail": return <DisputeDetailPage api={props.api} />;
+    case "jury-hall": return <JuryHallPage api={props.api} />;
     case "jury-voting": return <JuryVotingPage api={props.api} />;
+    case "jury-dispute-voting": return <JuryVotingPage api={props.api} />;
     case "wallet": return <WalletPage api={props.api} />;
     case "wallet-freeze": return <WalletFreezePage api={props.api} />;
     case "messages": return <MessagesPage api={props.api} />;
@@ -124,17 +122,17 @@ function UserShell({ route, children }: { route: AppRoute; children: React.React
   return (
     <div className="app-shell user-shell">
       <header className="top-nav">
-        <a className="logo" href="/feed">邻<span>帮</span></a>
-        <nav>{userNav.map((item) => <a key={item.id} className={route.id === item.id ? "active" : ""} href={item.path}>{item.label}</a>)}</nav>
+        <Link className="logo" to="/feed">邻<span>帮</span></Link>
+        <nav>{userNav.map((item) => <NavLink key={item.id} className={({ isActive }) => isActive || route.id === item.id ? "active" : ""} to={item.path}>{item.label}</NavLink>)}</nav>
         <div className="nav-right">
-          <a className="nav-avatar" href="/profile">
+          <Link className="nav-avatar" to="/profile">
             {auth.session?.user.avatarUrl ? <img src={auth.session?.user.avatarUrl} alt="" /> : <span className="nav-avatar-placeholder">{(auth.session?.user.displayName ?? auth.session?.user.username ?? "").slice(0, 1)}</span>}
             <span>{auth.session?.user.displayName ?? auth.session?.user.username}</span>
-          </a>
+          </Link>
         </div>
       </header>
       <main className="page">{children}</main>
-      <nav className="bottom-nav">{userNav.map((item) => <a key={item.id} className={route.id === item.id ? "active" : ""} href={item.path}>{item.label}</a>)}</nav>
+      <nav className="bottom-nav">{userNav.map((item) => <NavLink key={item.id} className={({ isActive }) => isActive || route.id === item.id ? "active" : ""} to={item.path}>{item.label}</NavLink>)}</nav>
     </div>
   );
 }
@@ -144,8 +142,8 @@ function AdminShell({ route, children }: { route: AppRoute; children: React.Reac
   return (
     <div className="admin-layout">
       <aside className="admin-sidebar">
-        <a className="admin-logo" href="/admin/dashboard">邻帮 MIS</a>
-        <nav>{adminNav.map((item) => <a key={item.id} className={route.id === item.id ? "active" : ""} href={item.path}>{item.label}</a>)}</nav>
+        <Link className="admin-logo" to="/admin/dashboard">邻帮 MIS</Link>
+        <nav>{adminNav.map((item) => <NavLink key={item.id} className={({ isActive }) => isActive || route.id === item.id ? "active" : ""} to={item.path}>{item.label}</NavLink>)}</nav>
       </aside>
       <main className="admin-main">
         <header className="admin-topbar">

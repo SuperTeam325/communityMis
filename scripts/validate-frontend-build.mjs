@@ -69,6 +69,11 @@ function checkAssets() {
 
 async function checkProductionServer() {
   recordProductionConfigFailure();
+  await checkPrototypeModeProductionServer();
+  await checkSpaModeProductionServer();
+}
+
+async function checkPrototypeModeProductionServer() {
   const server = createFrontendServer({
     env: {
       NODE_ENV: "production",
@@ -119,6 +124,46 @@ async function checkProductionServer() {
 
     const runtimeAsset = await fetch(`${baseUrl}/assets/app/main.mjs`);
     record(runtimeAsset.headers.get("cache-control") === "no-cache", "prototype runtime asset uses no-cache");
+  } finally {
+    await close(server);
+  }
+}
+
+async function checkSpaModeProductionServer() {
+  const server = createFrontendServer({
+    env: {
+      NODE_ENV: "production",
+      FRONTEND_MODE: "spa",
+      API_BASE_URL: "https://api.example.test",
+      APP_ENV: "test",
+      BUILD_VERSION: "frontend-build-test",
+      SENTRY_DSN: "https://public@example.ingest.sentry.io/1",
+      SENTRY_TRACES_SAMPLE_RATE: "0.1"
+    }
+  });
+  const port = await listen(server);
+  const baseUrl = `http://127.0.0.1:${port}`;
+  try {
+    const health = await fetch(`${baseUrl}/frontend-health`);
+    const healthPayload = await health.json();
+    record(healthPayload.frontendMode === "spa", "SPA mode health reports frontend mode");
+
+    for (const route of ["/login", "/feed", "/orders/demo", "/jury", "/jury/disputes/demo", "/admin/dashboard"]) {
+      const response = await fetch(`${baseUrl}${route}`);
+      const html = await response.text();
+      record(response.ok && html.includes('id="root"'), `SPA mode serves React index for ${route}`);
+      record(!html.includes("prototype-shell.mjs"), `SPA mode route does not load prototype shell: ${route}`);
+      checkSecurityHeaders(response, "SPA HTML");
+    }
+
+    const legacyResponse = await fetch(`${baseUrl}/screens/feed.html`, { redirect: "manual" });
+    record(legacyResponse.status === 302 && legacyResponse.headers.get("location") === "/feed", "SPA mode keeps legacy HTML redirect");
+
+    const apiResponse = await fetch(`${baseUrl}/api/health`);
+    record(apiResponse.status === 404, "SPA mode excludes /api/* from history fallback");
+
+    const missingStatic = await fetch(`${baseUrl}/assets/missing-build-check.js`);
+    record(missingStatic.status === 404, "SPA mode does not fallback missing static assets");
   } finally {
     await close(server);
   }

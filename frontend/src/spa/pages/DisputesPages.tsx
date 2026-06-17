@@ -1,5 +1,5 @@
 import React from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import type { ApiClient } from "../api";
 import { FileUpload, Field, PageHeader, StateView, asArray, friendlyError, text, useAsync } from "./shared";
 
@@ -61,8 +61,41 @@ export function DisputeDetailPage({ api }: { api: ApiClient }) {
   );
 }
 
+export function JuryHallPage({ api }: { api: ApiClient }) {
+  const state = useAsync(() => api.jury.disputes(), [api]);
+  const disputes = asArray<Record<string, unknown>>(state.data, "disputes");
+  return (
+    <>
+      <PageHeader title="陪审大厅" />
+      <StateView loading={state.loading} error={state.error} empty={disputes.length === 0}>
+        <div className="card-list">
+          {disputes.map((item) => {
+            const disputeId = text(item.disputeId, "");
+            return (
+              <article className="card" key={disputeId}>
+                <div className="card-title">纠纷 #{disputeId}</div>
+                <p>{text(item.reason)}</p>
+                <div className="meta-row">
+                  <span>{text(item.statusText ?? item.status)}</span>
+                  <span>{text(item.createdAt)}</span>
+                </div>
+                <div className="action-row">
+                  <Link className="btn btn--secondary" to={`/disputes/${encodeURIComponent(disputeId)}`}>查看详情</Link>
+                  <Link className="btn btn--primary" to={`/jury/disputes/${encodeURIComponent(disputeId)}`}>参与投票</Link>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </StateView>
+    </>
+  );
+}
+
 export function JuryVotingPage({ api }: { api: ApiClient }) {
-  const disputeId = new URLSearchParams(window.location.search).get("disputeId") || window.location.pathname.split("/").pop() || "";
+  const { id = "" } = useParams();
+  const [params] = useSearchParams();
+  const disputeId = id || params.get("dispute") || params.get("disputeId") || params.get("id") || "";
   const state = useAsync(() => api.jury.dispute(disputeId), [api, disputeId]);
   const dispute = (state.data?.dispute ?? state.data) as Record<string, unknown> | null;
   return (

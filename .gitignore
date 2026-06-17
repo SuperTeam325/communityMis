@@ -95,6 +95,8 @@ plan/
 !README.md
 !docs/
 !docs/*.md
+!intro/
+!intro/*.md
 
 head.png
 !plan/

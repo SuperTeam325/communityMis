@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import type { ApiClient } from "../api";
 import { DataTable, PageHeader, StateView, asArray, text, useAsync } from "./shared";
 
@@ -13,7 +14,7 @@ export function WalletPage({ api }: { api: ApiClient }) {
   const wallet = (state.data?.wallet.wallet ?? state.data?.wallet) as Record<string, unknown> | undefined;
   return (
     <>
-      <PageHeader title="时间币钱包" action={<a className="btn btn--secondary" href="/wallet/freeze">冻结明细</a>} />
+      <PageHeader title="时间币钱包" action={<Link className="btn btn--secondary" to="/wallet/freeze">冻结明细</Link>} />
       <StateView loading={state.loading} error={state.error}>
         <section className="metric-grid">
           <div className="metric-card"><span>余额</span><strong>{text(wallet?.balance, "0")}</strong></div>

@@ -45,6 +45,11 @@ export function handleRequest(request, response, runtime = createServerRuntime()
     return;
   }
 
+  if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
+    sendText(response, 404, "Not Found", isHead, runtime);
+    return;
+  }
+
   const legacyTarget = legacyRedirects.get(url.pathname);
   if (legacyTarget) {
     response.writeHead(302, {
@@ -89,6 +94,11 @@ export function handleRequest(request, response, runtime = createServerRuntime()
 
   if (isStaticPath(url.pathname)) {
     sendText(response, 404, "Not Found", isHead, runtime);
+    return;
+  }
+
+  if (runtime.isSpaMode) {
+    sendIndex(response, isHead, runtime);
     return;
   }
 
@@ -141,6 +151,8 @@ function createServerRuntime(options = {}) {
     uiSourceRoot,
     manifest,
     mode,
+    frontendMode: env.FRONTEND_MODE === "spa" ? "spa" : "prototype",
+    isSpaMode: env.FRONTEND_MODE === "spa",
     isProduction: mode === "production"
   };
 }
@@ -153,8 +165,10 @@ function routePayload() {
     path: item.path,
     entryPath: routePath(item),
     surface: item.surface,
-    layout: item.layout
-  }));
+    layout: item.layout,
+    auth: item.surface === "admin" ? "admin" : item.surface === "user" ? "user" : "none",
+    nav: item.layout === "adminShell" ? "admin" : item.layout === "userShell" && ["feed", "tasks", "post", "messages", "profile"].includes(item.id) ? "user" : "hidden"
+  })).filter((item, index, list) => list.findIndex((entry) => entry.id === item.id) === index);
 }
 
 function frontendHealthPayload(runtime) {
@@ -163,6 +177,7 @@ function frontendHealthPayload(runtime) {
     service: "community-mis-frontend",
     version: runtime.config.buildVersion,
     appEnv: runtime.config.appEnv,
+    frontendMode: runtime.frontendMode,
     timestamp: new Date().toISOString()
   };
 }
@@ -330,7 +345,7 @@ function contentSecurityPolicy(config) {
     "form-action 'self'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    "script-src 'self' 'unsafe-inline'",
+    "script-src 'self'",
     "style-src 'self' 'unsafe-inline'",
     `connect-src ${Array.from(new Set(connectSources)).join(" ")}`
   ].join("; ");

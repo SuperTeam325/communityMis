@@ -162,6 +162,7 @@ export function createApiClient(config: RuntimeConfig, fetchImpl: typeof fetch =
       juryResult: (id: string) => request<Record<string, unknown>>(`/api/disputes/${encodeURIComponent(id)}/jury-result`)
     },
     jury: {
+      disputes: () => request<Record<string, unknown>>("/api/jury/disputes"),
       dispute: (id: string) => request<Record<string, unknown>>(`/api/jury/disputes/${encodeURIComponent(id)}`),
       vote: (id: string, payload: unknown) => request<Record<string, unknown>>(`/api/jury/disputes/${encodeURIComponent(id)}/votes`, { method: "POST", body: payload as BodyInit })
     },

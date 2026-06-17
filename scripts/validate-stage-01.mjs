@@ -3,8 +3,6 @@ import http from "node:http";
 import path from "node:path";
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createFrontendServer } from "../frontend/server.mjs";
-import { renderComponentInventory } from "../frontend/src/components/placeholders.mjs";
-import { renderPrototypeHtml } from "../frontend/src/prototypeRenderer.mjs";
 import { responsiveViewports, routePath, routes } from "../frontend/src/routes.mjs";
 
 const projectRoot = process.cwd();
@@ -15,8 +13,6 @@ await run();
 async function run() {
   checkFileLayout();
   checkRouteCoverage();
-  checkPrototypeRewrite();
-  checkComponentPlaceholders();
   await checkServers();
 
   const failed = checks.filter((item) => !item.ok);
@@ -33,116 +29,97 @@ function checkFileLayout() {
   for (const requiredPath of [
     "frontend/server.mjs",
     "frontend/src/routes.mjs",
-    "frontend/src/api/client.mjs",
-    "frontend/src/components/placeholders.mjs",
+    "frontend/src/spa/App.tsx",
+    "frontend/src/spa/routes.ts",
+    "frontend/src/spa/main.tsx",
     "backend/server.mjs",
     "backend/src/app.mjs",
-    "database/migrations/0001_stage_01_placeholder.sql",
     "scripts/start-local.mjs"
   ]) {
-    record(fs.existsSync(path.join(projectRoot, requiredPath)), `required skeleton file exists: ${requiredPath}`);
+    record(fs.existsSync(path.join(projectRoot, requiredPath)), `required SPA skeleton file exists: ${requiredPath}`);
   }
 }
 
 function checkRouteCoverage() {
-  const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, "UISource", "DESIGN-MANIFEST.json"), "utf8"));
-  const htmlFiles = manifest.sourceFiles.html;
-  const routeSources = new Set(routes.map((item) => item.source));
   const routePaths = new Set(routes.map((item) => item.path));
   const entryPaths = new Set(routes.map((item) => routePath(item)));
-
-  record(htmlFiles.length === routes.length, "manifest declares one HTML prototype per route");
-  record(routes.length === htmlFiles.length, "route table has one route per prototype");
-
-  for (const file of htmlFiles) {
-    record(routeSources.has(file), `prototype has production route: ${file}`);
-    const sourcePath = path.join(projectRoot, "UISource", file);
-    record(fs.existsSync(sourcePath), `prototype source exists: ${file}`);
-  }
+  const routeIds = new Set(routes.map((item) => item.id));
+  const spaRoutes = fs.readFileSync(path.join(projectRoot, "frontend", "src", "spa", "routes.ts"), "utf8");
+  const appSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "spa", "App.tsx"), "utf8");
 
   for (const expected of [
     "/",
     "/feed",
     "/tasks",
     "/orders/:id",
+    "/jury",
+    "/jury/voting",
     "/admin/login",
     "/admin/dashboard",
     "/admin/ai/config"
   ]) {
-    record(routePaths.has(expected), `expected route pattern exists: ${expected}`);
+    record(routePaths.has(expected), `legacy route pattern exists: ${expected}`);
   }
 
   for (const expected of ["/orders/demo", "/posts/demo", "/users/demo", "/disputes/demo"]) {
-    record(entryPaths.has(expected), `dynamic prototype entry path exists: ${expected}`);
+    record(entryPaths.has(expected), `dynamic route entry path exists: ${expected}`);
   }
 
-  record(new Set(routes.map((item) => item.id)).size === routes.length, "route ids are unique");
-  record(new Set(routes.map((item) => item.source)).size === routes.length, "route sources are unique");
-}
-
-function checkPrototypeRewrite() {
-  for (const item of routes) {
-    const html = renderPrototypeHtml(item);
-    record(!/href=["'][^"']*\.html/.test(html), `HTML hrefs rewritten for ${item.source}`);
-    record(!/location\.(href|replace)\(["'][^"']*\.html/.test(html), `location redirects rewritten for ${item.source}`);
-    record(!/\b(?:href|src)=["'](?:\.\.\/|\.\/)?(?:css|js)\//.test(html), `asset paths are absolute for ${item.source}`);
-    recordInlineScriptsParse(html, item.source);
+  for (const expectedId of ["jury-hall", "jury-voting"]) {
+    record(routeIds.has(expectedId), `legacy route id exists: ${expectedId}`);
+    record(spaRoutes.includes(`id: "${expectedId}"`), `SPA route metadata exists: ${expectedId}`);
   }
+  record(spaRoutes.includes('path: "/jury/disputes/:id"'), "SPA route metadata includes jury dispute voting deep link");
+  record(appSource.includes("NavLink") && appSource.includes("Link"), "SPA shell uses React Router navigation primitives");
 
-  const shellCss = fs.readFileSync(path.join(projectRoot, "frontend", "public", "styles", "shell.css"), "utf8");
-  record(/overflow-x:\s*hidden/.test(shellCss), "frontend shell guards against horizontal overflow");
+  record(new Set(routes.map((item) => item.id)).size === routes.length, "legacy route ids are unique");
+  record(new Set(routes.map((item) => item.source)).size === routes.length, "legacy route sources are unique");
   record(responsiveViewports.some((item) => item.width === 390), "mobile validation viewport is registered");
   record(responsiveViewports.some((item) => item.width === 820), "tablet validation viewport is registered");
   record(responsiveViewports.some((item) => item.width === 1440), "desktop validation viewport is registered");
 }
 
-function recordInlineScriptsParse(html, source) {
-  const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)];
-  scripts.forEach((match, index) => {
-    const attrs = match[1] ?? "";
-    const code = match[2] ?? "";
-    if (/\bsrc\s*=/.test(attrs) || /\btype\s*=\s*["']module["']/i.test(attrs) || code.trim() === "") {
-      return;
-    }
-
-    try {
-      new Function(code);
-      record(true, `inline script parses for ${source} #${index + 1}`);
-    } catch (error) {
-      record(false, `inline script parses for ${source} #${index + 1}: ${error.message}`);
-    }
-  });
-}
-
-function checkComponentPlaceholders() {
-  const inventory = renderComponentInventory();
-  for (const expected of ["UserPageShell", "AdminPageShell", "FilterBar", "DataTable", "FormSection", "StatusBadge", "DialogSurface"]) {
-    record(inventory.includes(expected), `component placeholder exists: ${expected}`);
-  }
-}
-
 async function checkServers() {
   const backend = createBackendServer();
-  const frontend = createFrontendServer();
+  const frontend = createFrontendServer({
+    env: {
+      NODE_ENV: "development",
+      FRONTEND_MODE: "spa",
+      API_BASE_URL: "http://127.0.0.1:3001",
+      APP_ENV: "stage01",
+      BUILD_VERSION: "stage01"
+    }
+  });
   const backendPort = await listen(backend);
   const frontendPort = await listen(frontend);
+  const baseUrl = `http://127.0.0.1:${frontendPort}`;
 
   try {
     const health = await fetchJson(`http://127.0.0.1:${backendPort}/api/health`);
     record(health.status === "ok", "backend health check returns ok");
 
-    const routesResponse = await fetchJson(`http://127.0.0.1:${frontendPort}/routes.json`);
-    record(routesResponse.length === routes.length, "frontend exposes route manifest");
+    const frontendHealth = await fetchJson(`${baseUrl}/frontend-health`);
+    record(frontendHealth.frontendMode === "spa", "frontend health reports SPA mode");
 
-    for (const item of routes) {
-      const response = await fetch(`http://127.0.0.1:${frontendPort}${routePath(item)}`);
-      record(response.ok, `frontend route responds: ${routePath(item)}`);
+    const routesResponse = await fetchJson(`${baseUrl}/routes.json`);
+    record(routesResponse.length === routes.length, "frontend exposes route manifest");
+    record(routesResponse.some((item) => item.id === "jury-hall" && item.auth === "user"), "route manifest exposes jury hall metadata");
+
+    for (const expectedPath of ["/", "/feed", "/tasks", "/orders/demo", "/disputes/demo", "/jury", "/jury/disputes/demo", "/admin/dashboard"]) {
+      const response = await fetch(`${baseUrl}${expectedPath}`);
+      const html = await response.text();
+      record(response.ok && html.includes('id="root"'), `SPA fallback serves index for ${expectedPath}`);
+      record(!html.includes("prototype-shell.mjs"), `SPA fallback does not load prototype shell for ${expectedPath}`);
     }
 
-    const legacyResponse = await fetch(`http://127.0.0.1:${frontendPort}/screens/feed.html`, {
-      redirect: "manual"
-    });
+    const legacyResponse = await fetch(`${baseUrl}/screens/feed.html`, { redirect: "manual" });
     record(legacyResponse.status === 302 && legacyResponse.headers.get("location") === "/feed", "legacy prototype URL redirects to production route");
+
+    const apiResponse = await fetch(`${baseUrl}/api/health`);
+    record(apiResponse.status === 404, "frontend server does not swallow /api/* paths with SPA fallback");
+
+    const missingStatic = await fetch(`${baseUrl}/assets/missing-stage01.js`);
+    record(missingStatic.status === 404, "missing static asset returns 404 instead of SPA fallback");
   } finally {
     await close(backend);
     await close(frontend);
@@ -165,13 +142,7 @@ function listen(server) {
 
 function close(server) {
   return new Promise((resolve, reject) => {
-    server.close((error) => {
-      if (error) {
-        reject(error);
-      } else {
-        resolve();
-      }
-    });
+    server.close((error) => error ? reject(error) : resolve());
   });
 }
 
