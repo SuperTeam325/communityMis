@@ -392,7 +392,7 @@ textarea.input { resize: vertical; min-height: 100px; line-height: 1.6; }
   background: var(--surface); cursor: pointer; transition: all 0.15s;
   display: flex; align-items: center; gap: 3px;
 }
-.ai-modal-msg-action-btn:hover { border-color: var(--accent-light); color: var(--accent); }
+.ai-modal-msg-action-btn:hover { border-color: var(--accent-light); }
 .ai-modal-msg-action-btn.active { background: var(--accent-subtle); border-color: var(--accent); color: var(--accent); }
 .ai-modal-msg-action-btn svg { width: 12px; height: 12px; }
 
