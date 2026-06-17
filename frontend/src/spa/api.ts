@@ -15,6 +15,11 @@ export class ApiError extends Error {
 export type ApiClient = ReturnType<typeof createApiClient>;
 
 export function createApiClient(config: RuntimeConfig, fetchImpl: typeof fetch = fetch) {
+  type StreamHandlers = {
+    onEvent?: (event: Record<string, unknown>) => void;
+    onDelta?: (chunk: string, event: Record<string, unknown>) => void;
+  };
+
   const request = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
     const headers = new Headers(options.headers);
     const body = normalizeBody(options.body, headers);
@@ -36,8 +41,51 @@ export function createApiClient(config: RuntimeConfig, fetchImpl: typeof fetch =
     return payload as T;
   };
 
+  const streamRequest = async (path: string, options: RequestInit = {}, handlers: StreamHandlers = {}) => {
+    const headers = new Headers(options.headers);
+    const body = normalizeBody(options.body, headers);
+    if (!headers.has("accept")) headers.set("accept", "application/x-ndjson");
+    if (isMutation(options.method) && !headers.has("x-csrf-token")) {
+      const csrfToken = readCookie("csrf_token");
+      if (csrfToken) headers.set("x-csrf-token", csrfToken);
+    }
+
+    const response = await fetchImpl(resolveUrl(config.apiBaseUrl, path), {
+      ...options,
+      body,
+      headers,
+      credentials: "include"
+    });
+    if (!response.ok) {
+      const payload = await parseResponse(response);
+      throw new ApiError(apiMessage(payload, response.status), { status: response.status, payload });
+    }
+    if (!response.body) {
+      throw new ApiError("浏览器不支持流式响应。", { status: response.status });
+    }
+
+    let donePayload: Record<string, unknown> | null = null;
+    for await (const event of parseNdjsonStream(response.body)) {
+      handlers.onEvent?.(event);
+      if (event.type === "delta" && typeof event.content === "string") {
+        handlers.onDelta?.(event.content, event);
+      }
+      if (event.type === "error") {
+        const errorPayload = event.error ?? event;
+        throw new ApiError(apiMessage({ error: errorPayload }, response.status), { status: response.status, payload: event });
+      }
+      if (event.type === "done") {
+        donePayload = event.payload && typeof event.payload === "object"
+          ? event.payload as Record<string, unknown>
+          : event;
+      }
+    }
+    return donePayload ?? {};
+  };
+
   return {
     request,
+    streamRequest,
     auth: {
       login: (payload: unknown) => request<{ user: unknown }>("/api/auth/login", { method: "POST", body: payload as BodyInit }),
       register: (payload: unknown) => request<{ user: unknown }>("/api/auth/register", { method: "POST", body: payload as BodyInit }),
@@ -119,6 +167,7 @@ export function createApiClient(config: RuntimeConfig, fetchImpl: typeof fetch =
     },
     ai: {
       chat: (payload: unknown) => request<Record<string, unknown>>("/api/ai/chat", { method: "POST", body: payload as BodyInit }),
+      chatStream: (payload: unknown, handlers: StreamHandlers = {}) => streamRequest("/api/ai/chat/stream", { method: "POST", body: payload as BodyInit }, handlers),
       conversations: (params = {}) => request<Record<string, unknown>>(withQuery("/api/ai/conversations", params)),
       conversation: (id: string) => request<Record<string, unknown>>(`/api/ai/conversations/${encodeURIComponent(id)}`),
       feedback: (messageId: string, payload: unknown) => request<Record<string, unknown>>(`/api/ai/messages/${encodeURIComponent(messageId)}/feedback`, { method: "POST", body: payload as BodyInit }),
@@ -223,6 +272,37 @@ async function parseResponse(response: Response) {
   const contentType = response.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) return response.json();
   return response.text();
+}
+
+async function* parseNdjsonStream(body: ReadableStream<Uint8Array>) {
+  const decoder = new TextDecoder();
+  const reader = body.getReader();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      let index = buffer.indexOf("\n");
+      while (index >= 0) {
+        const line = buffer.slice(0, index).trim();
+        buffer = buffer.slice(index + 1);
+        if (line) {
+          yield JSON.parse(line) as Record<string, unknown>;
+        }
+        index = buffer.indexOf("\n");
+      }
+    }
+    buffer += decoder.decode();
+    const line = buffer.trim();
+    if (line) {
+      yield JSON.parse(line) as Record<string, unknown>;
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 function apiMessage(payload: unknown, status: number) {

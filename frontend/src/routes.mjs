@@ -30,7 +30,7 @@ export const routes = [
   route("entry", "邻帮入口", "index.html", "/", "launcher", "entry"),
   route("login", "登录", "screens/login.html", "/login", "userAuth", "auth"),
   route("register", "注册", "screens/register.html", "/register", "userAuth", "auth"),
-  route("feed", "首页信息流", "screens/feed.html", "/feed", "user", "userShell"),
+  route("feed", "首页信息流", "screens/feed.html", "/feed", "public", "userShell"),
   route("tasks", "任务市场", "screens/tasks.html", "/tasks", "user", "userShell"),
   route("post", "发布", "screens/post.html", "/post", "user", "userShell"),
   route("messages", "消息中心", "screens/messages.html", "/messages", "user", "userShell"),

@@ -91,6 +91,25 @@ test("published task stays authenticated and appears in feed", async ({ page }) 
   await expect(page).not.toHaveURL(/\/login/);
 });
 
+test("messages and notifications hydrate with cookie session", async ({ page }) => {
+  await page.goto(`${frontendBaseUrl}/login`);
+  await page.locator("#login-username").fill("user_a");
+  await page.locator("#login-password").fill("user123456");
+  await page.locator("#login-submit").click();
+  await expect(page).toHaveURL(/\/feed$/);
+
+  await page.goto(`${frontendBaseUrl}/messages`);
+  await expect(page.locator("#tab-chat .runtime-placeholder")).toHaveCount(0);
+  await expect(page.locator("#tab-system .runtime-placeholder")).toHaveCount(0);
+  await expect(page.locator("#tab-chat .conv-item", { hasText: "小王维修" })).toHaveCount(1);
+  await page.locator("#msg-tabs button[data-tab='system']").click();
+  await expect(page.locator("#tab-system .notif-item", { hasText: "需求已被接单" })).toHaveCount(1);
+
+  await page.goto(`${frontendBaseUrl}/notifications`);
+  await expect(page.locator("#notif-list .runtime-placeholder")).toHaveCount(0);
+  await expect(page.locator("#notif-list .notif-card[data-notification-id]", { hasText: "需求已被接单" })).toHaveCount(1);
+});
+
 test("core business API flow works with cookie and CSRF browser model", async () => {
   const userA = createCookieAwareApi(apiBaseUrl);
   const userB = createCookieAwareApi(apiBaseUrl);

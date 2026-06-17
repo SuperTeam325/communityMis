@@ -60,6 +60,63 @@ describe("frontend runtime config", () => {
     expect(new Headers(calls[0].init.headers).get("x-csrf-token")).toBe("csrf-123");
   });
 
+  test("browser client reads AI chat NDJSON streams", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    Object.defineProperty(document, "cookie", {
+      value: "csrf_token=csrf-stream",
+      configurable: true
+    });
+    const stream = new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        controller.enqueue(encoder.encode(`${JSON.stringify({ type: "start", conversation: { conversationId: 9 } })}\n`));
+        controller.enqueue(encoder.encode(`${JSON.stringify({ type: "delta", content: "A" })}\n`));
+        controller.enqueue(encoder.encode(`${JSON.stringify({ type: "delta", content: "I" })}\n`));
+        controller.enqueue(encoder.encode(`${JSON.stringify({ type: "done", payload: { answer: "AI" } })}\n`));
+        controller.close();
+      }
+    });
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(stream, {
+        status: 200,
+        headers: { "content-type": "application/x-ndjson" }
+      });
+    }) as typeof fetch;
+
+    const api = createApiClient({
+      apiBaseUrl: "https://api.example.test",
+      appEnv: "test",
+      buildVersion: "test",
+      sentryDsn: "",
+      sentryTracesSampleRate: 0,
+      sentryIngestOrigin: ""
+    }, fetchImpl);
+    const chunks: string[] = [];
+    const result = await api.ai.chatStream({ messages: [{ role: "user", content: "hi" }] }, {
+      onDelta: (chunk) => chunks.push(chunk)
+    });
+
+    expect(calls[0].url).toBe("https://api.example.test/api/ai/chat/stream");
+    expect(new Headers(calls[0].init.headers).get("x-csrf-token")).toBe("csrf-stream");
+    expect(chunks.join("")).toBe("AI");
+    expect(result.answer).toBe("AI");
+  });
+
+  test("AI rich text renderer supports Markdown, LaTeX, copy text, and HTML escaping", async () => {
+    const { aiRichTextToPlainText, renderAiRichText } = await import("../../frontend/src/shared/ai-rich-text.mjs");
+
+    const html = renderAiRichText("## 标题\n\n公式 $E=mc^2$ 和 <script>alert(1)</script>\n\n- **重点**");
+    const plain = aiRichTextToPlainText("## 标题\n\n公式 $E=mc^2$\n\n- **重点**");
+
+    expect(html).toContain("ai-rich-heading");
+    expect(html).toContain("ai-math-inline");
+    expect(html).toContain("<sup>2</sup>");
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).not.toContain("<script>");
+    expect(plain).toBe("标题\n\n公式 E=mc^2\n\n- 重点");
+  });
+
   test("prototype shell binds visible controls without inline onclick handlers", () => {
     const shell = fs.readFileSync(path.join(process.cwd(), "frontend", "src", "prototype-shell.mjs"), "utf8");
 
@@ -111,8 +168,14 @@ describe("frontend runtime config", () => {
       "credentials: 'include'",
       "readCookie('csrf_token')",
       "headers['x-csrf-token'] = csrfToken",
+      "requestStreamJson('/api/ai/chat/stream'",
       "requestJson('/api/ai/chat'",
       "requestJson('/api/ai/messages/' + encodeURIComponent(messageId) + '/feedback'",
+      "ai-rich-text.mjs",
+      "data-ai-raw",
+      "ClipboardItem",
+      "'text/html'",
+      "response.body?.getReader",
       "data-ai-modal-action=\"results\"",
       "data-ai-modal-action=\"draft\"",
       "currentConversationId = data.conversation?.conversationId || currentConversationId"
