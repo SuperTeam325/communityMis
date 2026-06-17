@@ -161,6 +161,16 @@ describe("frontend runtime config", () => {
     expect(shell).not.toContain("onclick=\"exportCSV()\"");
   });
 
+  test("feed filter chips do not share active state with category chips", () => {
+    const shell = fs.readFileSync(path.join(process.cwd(), "frontend", "src", "prototype-shell.mjs"), "utf8");
+
+    expect(shell).toContain("? state.filter === \"all\" && categoryCode === state.category");
+    expect(shell).toContain("const active = state.filter === \"all\" && category.code === state.category;");
+    expect(shell).toContain("const active = filter === state.filter && !state.category;");
+    expect(shell).not.toContain("filterAttr === state.filter && (!state.category || TASK_FILTERS.get(state.filter)?.category === state.category)");
+    expect(shell).not.toContain("filter === state.filter && (!state.category || TASK_FILTERS.get(state.filter)?.category === state.category)");
+  });
+
   test("global AI modal uses cookie and CSRF authenticated backend actions", () => {
     const modal = fs.readFileSync(path.join(process.cwd(), "frontend", "public", "ui", "js", "ai-modal.js"), "utf8");
 

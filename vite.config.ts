@@ -27,7 +27,7 @@ export default defineConfig({
   },
   server: {
     host: "127.0.0.1",
-    port: 5173
+    port: parseInt(process.env.FRONTEND_PORT ?? "5173")
   },
   define: {
     "import.meta.env.VITE_BUILD_VERSION": JSON.stringify(process.env.BUILD_VERSION ?? "dev")

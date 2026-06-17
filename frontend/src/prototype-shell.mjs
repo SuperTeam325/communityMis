@@ -1724,8 +1724,8 @@ function applyFeedControls(state) {
     // 避免将无属性按钮的兜底值 "all" 错误匹配到 state.filter
     if (!categoryCode && filterAttr === undefined) return;
     const active = categoryCode
-      ? categoryCode === state.category
-      : filterAttr === state.filter && (!state.category || TASK_FILTERS.get(state.filter)?.category === state.category);
+      ? state.filter === "all" && categoryCode === state.category
+      : filterAttr === state.filter && !state.category;
     button.classList.toggle("active", active);
   });
 }
@@ -1750,13 +1750,13 @@ function renderFeedCategories(categories, state, userSession) {
     .filter((category) => category?.code && !staticLabels.has(category.name))
     .slice(0, 4)
     .map((category) => {
-      const active = category.code === state.category;
+      const active = state.filter === "all" && category.code === state.category;
       return `<button class="chip${active ? " active" : ""}" data-filter="all" data-category-code="${escapeAttribute(category.code)}">${escapeHtml(category.name)}</button>`;
     });
 
   tabs.innerHTML = `
     ${staticFilters.map(([filter, label]) => {
-      const active = filter === state.filter && (!state.category || TASK_FILTERS.get(state.filter)?.category === state.category);
+      const active = filter === state.filter && !state.category;
       return `<button class="chip${active ? " active" : ""}" data-filter="${escapeHtml(filter)}">${escapeHtml(label)}</button>`;
     }).join("")}
     ${categoryButtons.join("")}
