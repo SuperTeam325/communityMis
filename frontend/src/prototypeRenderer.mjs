@@ -56,7 +56,9 @@ export function stripDemoBusinessContent(html, route) {
     output = removeBlocks(output, rule.start, rule.end);
   }
   for (const rule of config.replaceRanges ?? []) {
-    output = replaceRange(output, rule.start, rule.end, rule.replacement ?? "");
+    output = rule.last
+      ? replaceRangeLast(output, rule.start, rule.end, rule.replacement ?? "")
+      : replaceRange(output, rule.start, rule.end, rule.replacement ?? "");
   }
   return output;
 }
@@ -128,7 +130,7 @@ const DEMO_CONTENT_RULES = {
       { selector: "#panel-accepted" }
     ],
     replaceRanges: [
-      { start: "  // Order data", end: "  renderAll();", replacement: "  // Production shell loads orders from backend APIs.\n" }
+      { start: "  // Order data", end: "  renderAll();\n", replacement: "  // Production shell loads orders from backend APIs.\n", last: true }
     ]
   },
   wallet: {
@@ -137,17 +139,18 @@ const DEMO_CONTENT_RULES = {
       { selector: "#tx-pagination" }
     ],
     replaceRanges: [
-      { start: "  /* ─── Transaction data ─── */", end: "  // Initial render\n  renderTxList();", replacement: "  // Production shell loads wallet data from backend APIs.\n" }
+      { start: "  /* ─── Transaction data ─── */", end: "  // Initial render\n  renderTxList();", replacement: "  // Production shell loads wallet data from backend APIs.\n", last: true }
     ]
   },
   messages: {
     emptyElements: [
       { selector: "#tab-chat .msg-list", content: runtimeLoading("正在加载真实私信。") },
       { selector: "#tab-system .msg-list", content: runtimeLoading("正在加载真实通知。") },
-      { selector: "#chat-messages" }
+      { selector: "#chat-messages" },
+      { selector: "#chat-name", content: "正在加载会话" }
     ],
     replaceRanges: [
-      { start: "  // 聊天数据", end: "  chatInput.addEventListener('keydown', e => {\n    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }\n  });", replacement: "  // Production shell loads messages from backend APIs.\n" }
+      { start: "  // 聊天数据", end: "  chatInput.addEventListener('keydown', e => {\n    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }\n  });", replacement: "  // Production shell loads messages from backend APIs.\n", last: true }
     ]
   },
   notifications: {
@@ -158,9 +161,15 @@ const DEMO_CONTENT_RULES = {
   },
   profile: {
     emptyElements: [
+      { selector: ".profile-name", content: "正在加载真实用户资料" },
+      { selector: ".profile-bio", content: "用户资料将从后端接口读取" },
       { selector: "#panel-myposts", content: runtimeLoading("正在加载真实帖子。") },
       { selector: "#panel-mytasks", content: runtimeLoading("正在加载真实任务。") },
       { selector: "#panel-accepted", content: runtimeLoading("正在加载真实接单记录。") }
+    ],
+    removeBlocks: [
+      { start: '    <a href="dispute-detail.html?id=DSP-240528-003" class="settings-item">', end: "    </a>" },
+      { start: '    <a href="dispute-detail.html?id=DSP-LIVE528-003" class="settings-item">', end: "    </a>" }
     ]
   },
   "post-detail": {
@@ -221,7 +230,7 @@ const DEMO_CONTENT_RULES = {
       { selector: "#transactionBody", content: `<tr data-runtime-placeholder><td colspan="8">正在加载真实流水数据。</td></tr>` }
     ],
     replaceRanges: [
-      { start: "  const transactions = [", end: "  renderTable();", replacement: "  const transactions = [];\n" }
+      { start: "  const transactions = [", end: "  renderTable();\n", replacement: "  const transactions = [];\n", last: true }
     ]
   },
   "admin-disputes": {
@@ -272,6 +281,9 @@ const DEMO_CONTENT_RULES = {
   "ai-assistant": {
     emptyElements: [
       { selector: "#hist-panel .hist-list", content: `<div class="hist-item" data-runtime-placeholder><div class="hist-title">正在加载历史对话</div><div class="hist-time">请稍候</div></div>` }
+    ],
+    replaceRanges: [
+      { start: "  // Mock AI responses", end: "  // Feedback\n  function sendFeedback(btn, type) {", replacement: "  // Production shell loads AI answers from backend APIs.\n  function sendFeedback(btn, type) {", last: true }
     ]
   },
   "admin-ai-config": {
@@ -279,7 +291,7 @@ const DEMO_CONTENT_RULES = {
       { selector: ".audit-preview", content: `<div class="ap-label">📜 审计日志（最近 5 条）</div><div class="audit-entry" data-runtime-placeholder><span class="ae-time">--</span><span class="ae-action">LOAD</span><span class="ae-detail">正在加载真实配置变更记录</span></div>` }
     ],
     replaceRanges: [
-      { start: "const savedConfig = {", end: "captureOriginals();", replacement: "const savedConfig = {};\n" }
+      { start: "let hasChanges = false;", end: "document.getElementById('unsavedHint').style.display = 'none';", replacement: "let hasChanges = false;\nlet originalValues = {};\n// Production shell loads AI configuration and audit data from backend APIs.\n", last: true }
     ]
   },
   "admin-system": {
@@ -397,11 +409,55 @@ function replaceRange(html, start, end, replacement) {
   if (startIndex < 0) {
     return html;
   }
-  const endIndex = html.indexOf(end, startIndex + start.length);
+  const endMatch = findEndMarker(html, end, startIndex + start.length);
+  const endIndex = endMatch.index;
   if (endIndex < 0) {
     return html;
   }
-  return `${html.slice(0, startIndex)}${replacement}${html.slice(endIndex + end.length)}`;
+  return `${html.slice(0, startIndex)}${replacement}${html.slice(endIndex + endMatch.length)}`;
+}
+
+function replaceRangeLast(html, start, end, replacement) {
+  const startIndex = html.indexOf(start);
+  if (startIndex < 0) {
+    return html;
+  }
+  const endMatch = findLastEndMarker(html, end);
+  const endIndex = endMatch.index;
+  if (endIndex < startIndex) {
+    return html;
+  }
+  return `${html.slice(0, startIndex)}${replacement}${html.slice(endIndex + endMatch.length)}`;
+}
+
+function findEndMarker(html, marker, fromIndex) {
+  const normalized = marker.replace(/\r\n/g, "\n");
+  const variants = normalized.includes("\n")
+    ? [normalized, normalized.replace(/\n/g, "\r\n")]
+    : [marker];
+  let best = { index: -1, length: 0 };
+  for (const variant of variants) {
+    const index = html.indexOf(variant, fromIndex);
+    if (index >= 0 && (best.index < 0 || index < best.index)) {
+      best = { index, length: variant.length };
+    }
+  }
+  return best;
+}
+
+function findLastEndMarker(html, marker) {
+  const normalized = marker.replace(/\r\n/g, "\n");
+  const variants = normalized.includes("\n")
+    ? [normalized, normalized.replace(/\n/g, "\r\n")]
+    : [marker];
+  let best = { index: -1, length: 0 };
+  for (const variant of variants) {
+    const index = html.lastIndexOf(variant);
+    if (index > best.index) {
+      best = { index, length: variant.length };
+    }
+  }
+  return best;
 }
 
 function removeBlocks(html, start, end) {

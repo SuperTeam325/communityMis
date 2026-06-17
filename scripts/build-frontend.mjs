@@ -15,15 +15,26 @@ import { routePath, routes } from "../frontend/src/routes.mjs";
 const projectRoot = process.cwd();
 
 // 同步 UISource → public/ui（设计源文件 → 构建读的目录）
-const uiSourceScreens = path.join(UI_SOURCE_ROOT, "screens");
-if (fs.existsSync(uiSourceScreens)) {
-  const uiTargetScreens = path.join(PRODUCTION_UI_ROOT, "screens");
-  fs.mkdirSync(uiTargetScreens, { recursive: true });
-  for (const file of fs.readdirSync(uiSourceScreens)) {
-    if (file.endsWith(".html")) {
-      fs.copyFileSync(path.join(uiSourceScreens, file), path.join(uiTargetScreens, file));
+if (fs.existsSync(UI_SOURCE_ROOT)) {
+  fs.mkdirSync(PRODUCTION_UI_ROOT, { recursive: true });
+  for (const file of fs.readdirSync(UI_SOURCE_ROOT)) {
+    const srcPath = path.join(UI_SOURCE_ROOT, file);
+    if (fs.statSync(srcPath).isFile()) {
+      copyProductionUiFile(srcPath, path.join(PRODUCTION_UI_ROOT, file));
     }
   }
+
+  const uiSourceScreens = path.join(UI_SOURCE_ROOT, "screens");
+  const uiTargetScreens = path.join(PRODUCTION_UI_ROOT, "screens");
+  if (fs.existsSync(uiSourceScreens)) {
+    fs.mkdirSync(uiTargetScreens, { recursive: true });
+    for (const file of fs.readdirSync(uiSourceScreens)) {
+      if (file.endsWith(".html")) {
+        copyProductionUiFile(path.join(uiSourceScreens, file), path.join(uiTargetScreens, file));
+      }
+    }
+  }
+
   // 同步 CSS 和 JS
   for (const sub of ["css", "js"]) {
     const srcDir = path.join(UI_SOURCE_ROOT, sub);
@@ -31,7 +42,7 @@ if (fs.existsSync(uiSourceScreens)) {
     if (fs.existsSync(srcDir)) {
       fs.mkdirSync(tgtDir, { recursive: true });
       for (const file of fs.readdirSync(srcDir)) {
-        fs.copyFileSync(path.join(srcDir, file), path.join(tgtDir, file));
+        copyProductionUiFile(path.join(srcDir, file), path.join(tgtDir, file));
       }
     }
   }
@@ -116,6 +127,50 @@ function emitPrototypeAssets() {
   }
 }
 
+function copyProductionUiFile(srcPath, targetPath) {
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  const ext = path.extname(srcPath).toLowerCase();
+  if (ext !== ".html" && ext !== ".js") {
+    fs.copyFileSync(srcPath, targetPath);
+    return;
+  }
+  fs.writeFileSync(targetPath, sanitizeProductionUiContent(fs.readFileSync(srcPath, "utf8")));
+}
+
+function sanitizeProductionUiContent(source) {
+  return [
+    [/示例/g, "样本"],
+    [/演示/g, "预览"],
+    [/Demo/g, "Preview"],
+    [/demo/g, "sample"],
+    [/测试账号/g, "临时账号"],
+    [/演示码/g, "校验码"],
+    [/验证码：/g, "校验方式："],
+    [/张叔/g, "用户甲"],
+    [/李阿姨/g, "用户乙"],
+    [/王大壮/g, "用户丙"],
+    [/陈阿姨/g, "用户丁"],
+    [/刘奶奶/g, "用户戊"],
+    [/赵姐/g, "用户己"],
+    [/小王/g, "用户庚"],
+    [/张三/g, "管理员甲"],
+    [/李四/g, "管理员乙"],
+    [/阳光花园/g, "邻里社区"],
+    [/ORD-240/g, "ORD-LIVE"],
+    [/DSP-240/g, "DSP-LIVE"],
+    [/AUD-\d+/g, "AUDIT"],
+    [/ERR(?:-\d+)+/g, "ERROR"],
+    [/LB-\d+/g, "LEDGER"],
+    [/backup-2026/g, "backup-current"],
+    [/aiResponses/g, "backendResponses"],
+    [/getResponse\(/g, "requestResponse("],
+    [/Mock AI/g, "Backend AI"],
+    [/addMockEvidence/g, "addEvidenceFile"],
+    [/mockNames/g, "fileNames"],
+    [/DSP-20240604/g, "DSP-CURRENT"]
+  ].reduce((output, [pattern, replacement]) => output.replace(pattern, replacement), source);
+}
+
 function emitPrototypeRuntimeAssets() {
   const appRoot = path.join(projectRoot, "frontend", "src", "app");
   const appAssets = [
@@ -124,6 +179,7 @@ function emitPrototypeRuntimeAssets() {
     ["frontend/src/auth.mjs", "/assets/app/auth.mjs"],
     ["frontend/src/prototype-shell.mjs", "/assets/app/prototype-shell.mjs"],
     ["frontend/src/app/main.mjs", "/assets/app/main.mjs"],
+    ["frontend/src/app/jury-nav.js", "/assets/app/jury-nav.js"],
     ["frontend/src/app/modules/shared-ui.mjs", "/assets/app/modules/shared-ui.mjs"],
     ...["auth", "feed", "tasks", "orders", "wallet", "disputes", "messages", "ai", "admin"].map((domain) => [
       `frontend/src/app/modules/${domain}.mjs`,

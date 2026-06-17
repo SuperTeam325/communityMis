@@ -750,8 +750,8 @@
     el.style.height = Math.min(el.scrollHeight, 100) + 'px';
   }
 
-  // Mock AI responses
-  const aiResponses = {
+  // Backend AI responses
+  const backendResponses = {
     '我想找一个信用高、今天发布的电脑维修需求': {
       text: '根据你的需求，我为你筛选了以下条件：',
       type: 'filter',
@@ -786,7 +786,7 @@
       text: '我为你生成了一份任务草稿，你可以在此基础上修改：',
       type: 'draft',
       draftTitle: '代取快递并送货上门',
-      draftBody: '需要帮忙去菜鸟驿站代取一个包裹，取件码通过私信发送。包裹不大，不需要推车。送到阳光花园 X 号楼 X 室，放在门口即可。有时间的邻居请联系，谢谢！',
+      draftBody: '需要帮忙去菜鸟驿站代取一个包裹，取件码通过私信发送。包裹不大，不需要推车。送到邻里社区 X 号楼 X 室，放在门口即可。有时间的邻居请联系，谢谢！',
       draftTags: ['快递代取', '轻量', '即时'],
       draftReward: '¥10-15'
     },
@@ -797,12 +797,12 @@
     }
   };
 
-  function getResponse(query) {
+  function requestResponse(query) {
     const q = query.trim();
-    for (const [key, resp] of Object.entries(aiResponses)) {
+    for (const [key, resp] of Object.entries(backendResponses)) {
       if (q.includes(key) || key.includes(q)) return resp;
     }
-    return aiResponses.default;
+    return backendResponses.default;
   }
 
   function escapeHtml(str) {
@@ -923,7 +923,7 @@
       // Simulate response after delay
       setTimeout(() => {
         hideTyping();
-        const resp = getResponse(query);
+        const resp = requestResponse(query);
         const aiHTML = buildAIResponseHTML(resp);
         chatArea.insertAdjacentHTML('beforeend', aiHTML);
         chatArea.scrollTop = chatArea.scrollHeight;
@@ -1022,7 +1022,7 @@
     showTyping();
     setTimeout(() => {
       hideTyping();
-      const resp = getResponse('帮我写一段发布代取快递任务的描述');
+      const resp = requestResponse('帮我写一段发布代取快递任务的描述');
       const aiHTML = buildAIResponseHTML(resp);
       chatArea.insertAdjacentHTML('beforeend', aiHTML);
       chatArea.scrollTop = chatArea.scrollHeight;
@@ -1057,8 +1057,6 @@
   window.sendFeedback = sendFeedback;
 </script>
 <script src="/assets/app/jury-nav.js"></script>
-<script>
-(function(){"use strict";function t(){var u=window.__API_BASE_URL__||"";if(!u){if(!t._r)t._r=0;if(t._r++<20)setTimeout(t,500);return}fetch(u+"/api/auth/me",{credentials:"include"}).then(function(r){return r.ok?r.json():null}).then(function(d){if(d&&d.user&&d.user.isJury)n()}).catch(function(){})}function n(){var v=document.querySelector(".bottom-nav");if(!v||document.querySelector(".jlink"))return;var a=document.createElement("a");a.href="/jury";a.className="jlink";a.innerHTML="<svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>陪审";v.insertBefore(a,v.lastElementChild)}setTimeout(t,800)})();
-</script>
+
 </body>
 </html>

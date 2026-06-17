@@ -19,6 +19,7 @@ const ROUTE_DOMAINS = new Map([
   ["wallet-freeze", "wallet"],
   ["dispute-create", "disputes"],
   ["dispute-detail", "disputes"],
+  ["jury-hall", "disputes"],
   ["jury-voting", "disputes"],
   ["messages", "messages"],
   ["notifications", "messages"],

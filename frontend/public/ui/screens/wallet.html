@@ -391,18 +391,18 @@
 <script>
   /* ─── Transaction data ─── */
   var allTransactions = [
-    { id: '#LB-20240603-0012', type: 'income', title: '帮李阿姨代购日用品', amount: '+35.00', balance: '286.50', orderId: 'ORD-240603-042', time: '2024-06-03 14:22' },
-    { id: '#LB-20240603-0011', type: 'expense', title: '请小王帮忙遛狗', amount: '-20.00', balance: '251.50', orderId: 'ORD-240603-041', time: '2024-06-03 10:15' },
-    { id: '#LB-20240602-0010', type: 'income', title: '帮赵姐组装书柜', amount: '+45.00', balance: '271.50', orderId: 'ORD-240602-039', time: '2024-06-02 16:48' },
-    { id: '#LB-20240601-0009', type: 'expense', title: '请陈师傅修水龙头', amount: '-30.00', balance: '226.50', orderId: 'ORD-240601-038', time: '2024-06-01 09:30' },
-    { id: '#LB-20240530-0008', type: 'income', title: '代取快递送到 5 号楼', amount: '+10.00', balance: '256.50', orderId: 'ORD-240530-036', time: '2024-05-30 18:05' },
-    { id: '#LB-20240528-0007', type: 'income', title: '帮忙搬一箱矿泉水到 7 楼', amount: '+12.00', balance: '246.50', orderId: 'ORD-240528-035', time: '2024-05-28 11:42' },
-    { id: '#LB-20240526-0006', type: 'expense', title: '请邻居帮忙打扫阳台', amount: '-25.00', balance: '234.50', orderId: 'ORD-240526-034', time: '2024-05-26 15:20' },
-    { id: '#LB-20240524-0005', type: 'income', title: '辅导初三数学 2 小时', amount: '+40.00', balance: '259.50', orderId: 'ORD-240524-032', time: '2024-05-24 20:10' },
-    { id: '#LB-20240522-0004', type: 'expense', title: '社区医院排队取报告单', amount: '-50.00', balance: '219.50', orderId: 'ORD-240522-030', time: '2024-05-22 08:55' },
-    { id: '#LB-20240520-0003', type: 'income', title: '帮刘叔修电脑重装系统', amount: '+65.00', balance: '269.50', orderId: 'ORD-240520-028', time: '2024-05-20 13:30' },
-    { id: '#LB-20240518-0002', type: 'income', title: '丰巢取件送到 3 号楼', amount: '+10.00', balance: '204.50', orderId: 'ORD-240518-025', time: '2024-05-18 17:15' },
-    { id: '#LB-20240515-0001', type: 'income', title: '新用户注册奖励', amount: '+5.00', balance: '194.50', orderId: '—', time: '2024-05-15 09:00', system: true }
+    { id: '#LEDGER-0012', type: 'income', title: '帮用户乙代购日用品', amount: '+35.00', balance: '286.50', orderId: 'ORD-LIVE603-042', time: '2024-06-03 14:22' },
+    { id: '#LEDGER-0011', type: 'expense', title: '请用户庚帮忙遛狗', amount: '-20.00', balance: '251.50', orderId: 'ORD-LIVE603-041', time: '2024-06-03 10:15' },
+    { id: '#LEDGER-0010', type: 'income', title: '帮用户己组装书柜', amount: '+45.00', balance: '271.50', orderId: 'ORD-LIVE602-039', time: '2024-06-02 16:48' },
+    { id: '#LEDGER-0009', type: 'expense', title: '请陈师傅修水龙头', amount: '-30.00', balance: '226.50', orderId: 'ORD-LIVE601-038', time: '2024-06-01 09:30' },
+    { id: '#LEDGER-0008', type: 'income', title: '代取快递送到 5 号楼', amount: '+10.00', balance: '256.50', orderId: 'ORD-LIVE530-036', time: '2024-05-30 18:05' },
+    { id: '#LEDGER-0007', type: 'income', title: '帮忙搬一箱矿泉水到 7 楼', amount: '+12.00', balance: '246.50', orderId: 'ORD-LIVE528-035', time: '2024-05-28 11:42' },
+    { id: '#LEDGER-0006', type: 'expense', title: '请邻居帮忙打扫阳台', amount: '-25.00', balance: '234.50', orderId: 'ORD-LIVE526-034', time: '2024-05-26 15:20' },
+    { id: '#LEDGER-0005', type: 'income', title: '辅导初三数学 2 小时', amount: '+40.00', balance: '259.50', orderId: 'ORD-LIVE524-032', time: '2024-05-24 20:10' },
+    { id: '#LEDGER-0004', type: 'expense', title: '社区医院排队取报告单', amount: '-50.00', balance: '219.50', orderId: 'ORD-LIVE522-030', time: '2024-05-22 08:55' },
+    { id: '#LEDGER-0003', type: 'income', title: '帮刘叔修电脑重装系统', amount: '+65.00', balance: '269.50', orderId: 'ORD-LIVE520-028', time: '2024-05-20 13:30' },
+    { id: '#LEDGER-0002', type: 'income', title: '丰巢取件送到 3 号楼', amount: '+10.00', balance: '204.50', orderId: 'ORD-LIVE518-025', time: '2024-05-18 17:15' },
+    { id: '#LEDGER-0001', type: 'income', title: '新用户注册奖励', amount: '+5.00', balance: '194.50', orderId: '—', time: '2024-05-15 09:00', system: true }
   ];
 
   var PAGE_SIZE = 8;
@@ -513,8 +513,6 @@
 </script>
 
 <script src="/assets/app/jury-nav.js"></script>
-<script>
-(function(){"use strict";function t(){var u=window.__API_BASE_URL__||"";if(!u){if(!t._r)t._r=0;if(t._r++<20)setTimeout(t,500);return}fetch(u+"/api/auth/me",{credentials:"include"}).then(function(r){return r.ok?r.json():null}).then(function(d){if(d&&d.user&&d.user.isJury)n()}).catch(function(){})}function n(){var v=document.querySelector(".bottom-nav");if(!v||document.querySelector(".jlink"))return;var a=document.createElement("a");a.href="/jury";a.className="jlink";a.innerHTML="<svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>陪审";v.insertBefore(a,v.lastElementChild)}setTimeout(t,800)})();
-</script>
+
 </body>
 </html>

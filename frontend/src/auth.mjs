@@ -70,10 +70,11 @@ export function createAuthController(options = {}) {
 
   async function registerUser(payload, profileDraft = {}) {
     await api.auth.register(payload);
-    const session = await loginUser({
+    await api.auth.login({
       username: payload.username,
       password: payload.password
     });
+    const session = await refresh("user") ?? { token: null, user: null, expiresAt: null };
     saveProfileDraft(session.user, {
       ...profileDraft,
       phone: payload.phone ?? profileDraft.phone ?? null,

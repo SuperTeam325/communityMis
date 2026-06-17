@@ -661,6 +661,10 @@ async function hydrateCurrentRoute(session) {
       await hydrateDisputeDetailRoute(session);
       return;
     }
+    if (route.id === "jury-hall") {
+      await hydrateJuryHallRoute(session);
+      return;
+    }
     if (route.id === "jury-voting") {
       await hydrateJuryVotingRoute(session);
       return;
@@ -2648,17 +2652,17 @@ function applyRequestDetail(item, userSession = null, comments = []) {
       navigateTo(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
       return;
     }
-    const message = prompt(`申请接单「${item.title}」\n\n请输入申请理由（可选）：`, "我对这个需求很感兴趣，希望能为您服务。");
-    if (message === null) {
-      return;
-    }
     const button = document.getElementById("accept-request");
-    const restore = setLoading(button, "提交中...");
+    const restore = setLoading(button, "接单中...");
     try {
-      await api.requests.apply(userSession.token, item.requestId, message || undefined);
-      button.textContent = "已申请";
+      const result = await api.requests.accept(userSession.token, item.requestId);
+      const orderId = result.order?.orderId;
+      button.textContent = "已接单";
       button.disabled = true;
-      showToast("申请已提交，等待发布者确认。", "success");
+      showToast("接单成功，正在进入订单详情。", "success");
+      if (orderId) {
+        setTimeout(() => navigateTo(`/orders/${encodeURIComponent(orderId)}`), 600);
+      }
     } catch (error) {
       restore();
       showToast(acceptErrorMessage(error), "error");
@@ -3578,6 +3582,58 @@ async function hydrateJuryVotingRoute(session) {
   } catch (error) {
     renderJuryVotingState("error", juryErrorMessage(error));
   }
+}
+
+async function hydrateJuryHallRoute(session) {
+  const userSession = session ?? auth.readSession("user");
+  const list = document.getElementById("L");
+  if (!list || !hasUserSession(userSession)) {
+    return;
+  }
+  renderJuryHallState("loading", "正在读取待投票纠纷。");
+  try {
+    const payload = await api.jury.disputes(sessionToken(userSession));
+    const disputes = Array.isArray(payload?.disputes) ? payload.disputes : [];
+    if (disputes.length === 0) {
+      renderJuryHallState("empty", "当前没有需要陪审团投票的纠纷。");
+      return;
+    }
+    list.innerHTML = disputes.map(juryHallCard).join("");
+  } catch (error) {
+    renderJuryHallState("error", juryErrorMessage(error));
+  }
+}
+
+function renderJuryHallState(kind, message) {
+  const list = document.getElementById("L");
+  if (!list) {
+    return;
+  }
+  const action = kind === "error"
+    ? '<button type="button" data-jury-retry>重试</button>'
+    : '<a href="/feed">返回首页</a>';
+  list.innerHTML = `<div class="s ${kind === "error" ? "se" : ""}">
+    <strong>${escapeHtml(kind === "loading" ? "加载中" : kind === "empty" ? "暂无待投票纠纷" : "加载失败")}</strong>
+    <p>${escapeHtml(message)}</p>
+    ${kind === "loading" ? "" : action}
+  </div>`;
+  list.querySelector("[data-jury-retry]")?.addEventListener("click", () => hydrateJuryHallRoute(auth.readSession("user")));
+}
+
+function juryHallCard(dispute) {
+  const reason = String(dispute.reason || "暂无纠纷说明").slice(0, 120);
+  return `<a href="/jury/voting?disputeId=${encodeURIComponent(dispute.disputeId)}" class="c">
+    <div class="ch">
+      <span class="ci">#${escapeHtml(dispute.disputeId)}</span>
+      <span class="ct">${escapeHtml(disputeTypeLabel(dispute.type))}</span>
+    </div>
+    <div class="cb">${escapeHtml(reason)}</div>
+    <div class="cf">
+      <span>订单 #${escapeHtml(dispute.orderId ?? "-")}</span>
+      <span>${escapeHtml(formatDateTime(dispute.updatedAt ?? dispute.createdAt))}</span>
+      <span class="ca">参与投票</span>
+    </div>
+  </a>`;
 }
 
 function renderJuryVotingState(kind, message) {

@@ -51,7 +51,7 @@ function checkRouteCoverage() {
   const routePaths = new Set(routes.map((item) => item.path));
   const entryPaths = new Set(routes.map((item) => routePath(item)));
 
-  record(htmlFiles.length === 41, "manifest declares 41 HTML prototypes");
+  record(htmlFiles.length === routes.length, "manifest declares one HTML prototype per route");
   record(routes.length === htmlFiles.length, "route table has one route per prototype");
 
   for (const file of htmlFiles) {
