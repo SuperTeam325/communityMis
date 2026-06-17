@@ -84,6 +84,8 @@ export function createMysqlAuthStore(options = {}) {
     listDisputeEvidence,
     createJuryVote,
     listJuryVotesForDisputeId,
+    listJuryDisputes,
+    updateUserJury,
     findJuryVote,
     listAdminUsers,
     updateUserStatus,
@@ -1712,100 +1714,62 @@ SELECT JSON_OBJECT('updated', ROW_COUNT(), 'unreadTotal', 0);
     const pageSize = Math.min(50, positiveInteger(query.pageSize, 20));
     const keyword = normalizeOptionalString(query.keyword ?? query.q)?.toLowerCase() ?? null;
     const offset = (page - 1) * pageSize;
-    const sql = `
-SELECT JSON_OBJECT(
-  'items', COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
-    'conversationId', q.\`conversation_id\`,
-    'type', q.\`type\`,
-    'title', q.\`title\`,
-    'participant', IF(q.\`other_user_id\` IS NULL, NULL, JSON_OBJECT(
-      'userId', q.\`other_user_id\`,
-      'username', q.\`other_username\`,
-      'displayName', q.\`other_display_name\`
-    )),
-    'orderId', q.\`order_id\`,
-    'preview', q.\`preview\`,
-    'unreadCount', q.\`unread_count\`,
-    'updatedAt', q.\`updated_at\`,
-    'href', q.\`href\`
-  )), JSON_ARRAY()),
-  'total', (SELECT COUNT(*) FROM (
-    SELECT CONCAT(COALESCE(m.\`order_id\`, 0), ':', IF(m.\`sender_id\` = ${id}, m.\`receiver_id\`, m.\`sender_id\`)) AS \`conversation_id\`
-    FROM \`message\` m
-    WHERE (m.\`sender_id\` = ${id} OR m.\`receiver_id\` = ${id}) AND m.\`archived_at\` IS NULL
-    GROUP BY \`conversation_id\`
-  ) c) + IF(EXISTS(SELECT 1 FROM \`notification\` n WHERE n.\`user_id\` = ${id}), 1, 0),
-  'unreadTotal', (
-    SELECT COUNT(*) FROM \`message\` m
-    WHERE m.\`receiver_id\` = ${id} AND m.\`is_read\` = 0
-      AND m.\`archived_at\` IS NULL
-  ) + (
-    SELECT COUNT(*) FROM \`notification\` n
-    WHERE n.\`user_id\` = ${id} AND n.\`read_at\` IS NULL
-  )
-)
-FROM (
-  SELECT *
-  FROM (
-    SELECT
-      CONCAT(COALESCE(m.\`order_id\`, 0), ':', IF(m.\`sender_id\` = ${id}, m.\`receiver_id\`, m.\`sender_id\`)) AS \`conversation_id\`,
-      IF(m.\`order_id\` IS NULL, 'direct', 'order') AS \`type\`,
-      IF(other_user.\`username\` IS NULL, '邻帮用户', other_user.\`username\`) AS \`title\`,
-      other_user.\`user_id\` AS \`other_user_id\`,
-      other_user.\`username\` AS \`other_username\`,
-      other_user.\`username\` AS \`other_display_name\`,
-      m.\`order_id\`,
-      (
-        SELECT m2.\`content\`
-        FROM \`message\` m2
-        WHERE (m2.\`sender_id\` = ${id} OR m2.\`receiver_id\` = ${id})
-          AND m2.\`archived_at\` IS NULL
-          AND CONCAT(COALESCE(m2.\`order_id\`, 0), ':', IF(m2.\`sender_id\` = ${id}, m2.\`receiver_id\`, m2.\`sender_id\`)) =
-            CONCAT(COALESCE(m.\`order_id\`, 0), ':', IF(m.\`sender_id\` = ${id}, m.\`receiver_id\`, m.\`sender_id\`))
-        ORDER BY m2.\`created_at\` DESC, m2.\`message_id\` DESC
-        LIMIT 1
-      ) AS \`preview\`,
-      SUM(IF(m.\`receiver_id\` = ${id} AND m.\`is_read\` = 0, 1, 0)) AS \`unread_count\`,
-      DATE_FORMAT(MAX(m.\`created_at\`), '%Y-%m-%dT%H:%i:%s.000Z') AS \`updated_at\`,
-      IF(m.\`order_id\` IS NULL, CONCAT('/messages?userId=', other_user.\`user_id\`), CONCAT('/orders/', m.\`order_id\`)) AS \`href\`
-    FROM \`message\` m
-    LEFT JOIN \`user\` other_user ON other_user.\`user_id\` = IF(m.\`sender_id\` = ${id}, m.\`receiver_id\`, m.\`sender_id\`)
-    WHERE (m.\`sender_id\` = ${id} OR m.\`receiver_id\` = ${id}) AND m.\`archived_at\` IS NULL
-    GROUP BY \`conversation_id\`, \`type\`, \`title\`, \`other_user_id\`, \`other_username\`, \`other_display_name\`, m.\`order_id\`
-    UNION ALL
-    SELECT
-      'system:notifications',
-      'system',
-      '系统通知',
-      NULL,
-      NULL,
-      NULL,
-      NULL,
-      NULL,
-      latest.\`title\`,
-      (SELECT COUNT(*) FROM \`notification\` n WHERE n.\`user_id\` = ${id} AND n.\`read_at\` IS NULL),
-      DATE_FORMAT(latest.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
-      '/notifications'
-    FROM \`notification\` latest
-    WHERE latest.\`user_id\` = ${id}
-    ORDER BY latest.\`created_at\` DESC, latest.\`notification_id\` DESC
-    LIMIT 1
-  ) unioned
-  ORDER BY \`updated_at\` DESC
-  LIMIT ${pageSize} OFFSET ${offset}
-) q;
-`;
-    const result = await mysqlJson(sql, { optional: true });
-    const conversations = Array.isArray(result?.items)
-      ? result.items.map(normalizeConversation).filter((item) => !keyword || conversationHaystack(item).includes(keyword))
-      : [];
-    return {
-      conversations,
-      total: keyword ? conversations.length : Number(result?.total ?? 0),
-      unreadTotal: Number(result?.unreadTotal ?? 0)
-    };
-  }
 
+    // Get message conversations
+    const convSql = `
+SELECT q.cid, q.tp, q.title, q.oid, q.ouname, q.odname, q.oid2, q.preview, q.unread, q.updated, q.href
+FROM (
+  SELECT
+    CONCAT(COALESCE(m.order_id, 0), ':', IF(m.sender_id = ${id}, m.receiver_id, m.sender_id)) AS cid,
+    IF(m.order_id IS NULL, 'direct', 'order') AS tp,
+    IF(ou.username IS NULL, '邻帮用户', ou.username) AS title,
+    ou.user_id AS oid,
+    ou.username AS ouname,
+    ou.username AS odname,
+    m.order_id AS oid2,
+    (SELECT m2.content FROM message m2
+      WHERE (m2.sender_id = ${id} OR m2.receiver_id = ${id})
+      AND m2.archived_at IS NULL
+      AND CONCAT(COALESCE(m2.order_id, 0), ':', IF(m2.sender_id = ${id}, m2.receiver_id, m2.sender_id)) =
+        CONCAT(COALESCE(m.order_id, 0), ':', IF(m.sender_id = ${id}, m.receiver_id, m.sender_id))
+      ORDER BY m2.created_at DESC, m2.message_id DESC LIMIT 1
+    ) AS preview,
+    SUM(IF(m.receiver_id = ${id} AND m.is_read = 0, 1, 0)) AS unread,
+    DATE_FORMAT(MAX(m.created_at), '%Y-%m-%dT%H:%i:%s.000Z') AS updated,
+    IF(m.order_id IS NULL, CONCAT('/messages?userId=', ou.user_id), CONCAT('/orders/', m.order_id)) AS href
+  FROM message m
+  LEFT JOIN user ou ON ou.user_id = IF(m.sender_id = ${id}, m.receiver_id, m.sender_id)
+  WHERE (m.sender_id = ${id} OR m.receiver_id = ${id}) AND m.archived_at IS NULL
+  GROUP BY cid, tp, title, oid, ouname, odname, oid2
+) q
+ORDER BY q.updated DESC
+LIMIT ${pageSize} OFFSET ${offset}
+`;
+    const rows = await mysqlQuery(convSql);
+    const conversations = (rows || []).map(r => ({
+      conversationId: r.cid,
+      type: r.tp,
+      title: r.title,
+      participant: r.oid ? { userId: r.oid, username: r.ouname, displayName: r.odname } : null,
+      orderId: r.oid2,
+      preview: r.preview,
+      unreadCount: Number(r.unread || 0),
+      updatedAt: r.updated,
+      href: r.href
+    }));
+
+    const notifSql = `SELECT COUNT(*) AS cnt FROM notification WHERE user_id = ${id} AND read_at IS NULL`;
+    const notifRow = await mysqlJson(notifSql, { optional: true });
+    const hasNotifications = (Number(notifRow?.cnt ?? 0) > 0);
+
+    const totalSql = `SELECT (SELECT COUNT(*) FROM (SELECT CONCAT(COALESCE(m2.order_id, 0), ':', IF(m2.sender_id = ${id}, m2.receiver_id, m2.sender_id)) AS x FROM message m2 WHERE (m2.sender_id = ${id} OR m2.receiver_id = ${id}) AND m2.archived_at IS NULL GROUP BY x) cc) AS mt, (SELECT COUNT(*) FROM message m3 WHERE m3.receiver_id = ${id} AND m3.is_read = 0 AND m3.archived_at IS NULL) AS mu, (SELECT COUNT(*) FROM notification n2 WHERE n2.user_id = ${id} AND n2.read_at IS NULL) AS nu`;
+    const totals = await mysqlJson(totalSql, { optional: true }) || {};
+    const total = Number(totals.mt ?? 0) + (hasNotifications ? 1 : 0);
+    const unreadTotal = Number(totals.mu ?? 0) + Number(totals.nu ?? 0);
+
+    const filtered = keyword ? conversations.filter(item => conversationHaystack(item).includes(keyword)) : conversations;
+    return { conversations: filtered, total: keyword ? filtered.length : total, unreadTotal };
+  }
   async function createReview(input) {
     const orderId = Number(input.orderId);
     const reviewerId = Number(input.reviewerId);
@@ -5035,7 +4999,13 @@ LIMIT 1
     }
   }
 
-  async function upsertUserProfile(userId, patch = {}) {
+    async function mysqlQuery(sql) {
+    const result = await mysqlJson(sql, { optional: true });
+    if (Array.isArray(result)) return result;
+    return [];
+  }
+
+async function upsertUserProfile(userId, patch = {}) {
     const existing = await pooledOne(`
 SELECT
   \`display_name\` AS displayName,
@@ -5931,6 +5901,60 @@ function normalizeDisputeUser(input) {
     displayName: normalizeOptionalString(input.displayName ?? input.display_name) ?? String(input.username ?? "")
   };
 }
+
+  async function updateUserJury(userId, enable) {
+    const uid = Number(userId);
+    const en = enable ? 1 : 0;
+    const pool = await mysqlPool();
+    // Update user_profile.is_jury
+    await pool.query(
+      "INSERT INTO user_profile (user_id, service_categories, is_jury) VALUES (?, CAST('[]' AS JSON), ?) ON DUPLICATE KEY UPDATE is_jury = ?",
+      [uid, en, en]
+    );
+    // Update user.skill_tags
+    const [rows] = await pool.query("SELECT skill_tags FROM user WHERE user_id = ?", [uid]);
+    let tags = [];
+    try { tags = JSON.parse(rows[0]?.skill_tags || "[]"); } catch(e) {}
+    if (enable) {
+      if (!tags.includes("陪审")) tags.push("陪审");
+    } else {
+      tags = tags.filter(function(t) { return t !== "陪审" && t !== "jury"; });
+    }
+    await pool.query("UPDATE user SET skill_tags = ? WHERE user_id = ?", [JSON.stringify(tags), uid]);
+    return { isJury: enable };
+  }
+
+  async function listJuryDisputes(userId, query = {}) {
+    const page = Math.max(1, Number(query.page || 1));
+    const pageSize = Math.min(50, Math.max(1, Number(query.pageSize || 20)));
+    const offset = (page - 1) * pageSize;
+    const uid = Number(userId);
+    const sql = "SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT(" +
+      "'disputeId', d.`dispute_id`," +
+      "'orderId', d.`order_id`," +
+      "'initiatorId', d.`initiator_id`," +
+      "'respondentId', d.`respondent_id`," +
+      "'type', d.`type`," +
+      "'reason', d.`reason`," +
+      "'status', d.`status`," +
+      "'finalResult', d.`final_result`," +
+      "'refundAmount', d.`refund_amount`," +
+      "'createdAt', DATE_FORMAT(d.`created_at`, '%Y-%m-%dT%H:%i:%s.000Z')," +
+      "'updatedAt', DATE_FORMAT(d.`updated_at`, '%Y-%m-%dT%H:%i:%s.000Z')," +
+      "'resolvedAt', DATE_FORMAT(d.`resolved_at`, '%Y-%m-%dT%H:%i:%s.000Z')" +
+    ")), JSON_ARRAY()) FROM `dispute` d WHERE d.`status` = 'jury_voting' AND d.`initiator_id` <> " + uid + " AND d.`respondent_id` <> " + uid + " ORDER BY d.`created_at` DESC LIMIT " + pageSize + " OFFSET " + offset;
+    const countSql = "SELECT COUNT(*) AS total FROM `dispute` WHERE `status` = 'jury_voting' AND `initiator_id` <> " + uid + " AND `respondent_id` <> " + uid;
+    const rows = await mysqlJson(sql, { optional: true });
+    const disputes = Array.isArray(rows) ? rows.map(normalizeDispute) : [];
+    const [countRows] = await (await mysqlPool()).query(countSql);
+    const total = countRows[0]?.total || 0;
+    return {
+      disputes: disputes,
+      pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize), hasNext: offset + pageSize < total, hasPrev: page > 1 }
+    };
+  }
+
+
 
 function normalizeNotification(input) {
   if (!input) {

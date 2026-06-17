@@ -17,6 +17,7 @@ import { handleUserRoutes } from "./users/routes.mjs";
 import { handleVerificationRoutes } from "./verification/routes.mjs";
 import { handleFileRoutes } from "./files/routes.mjs";
 import { handleSocialRoutes } from "./social/routes.mjs";
+import { handleJuryRoutes } from "./jury/routes.mjs";
 
 export function createBackendServer(options = {}) {
   const startedAt = options.startedAt ?? new Date();
@@ -71,6 +72,10 @@ export function createBackendServer(options = {}) {
 
       if (await handleFileRoutes({ request, response, url, authService, config })) {
         return;
+      }
+
+      if (await handleJuryRoutes({ request, response, url, authService })) {
+        return true;
       }
 
       if (await handleSocialRoutes({ request, response, url, authService })) {

@@ -6,7 +6,6 @@
 
   let overlay, sheet, chatArea, inputEl, sendBtn, isProcessing = false;
   let currentScene = 'all';
-  let currentConversationId = null;
   let initialized = false;
 
   const SCENE_LABELS = {
@@ -27,7 +26,6 @@
 
   const ESCAPE_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
   function esc(s) { return String(s).replace(/[&<>"]/g, c => ESCAPE_MAP[c]); }
-  function attr(s) { return esc(s).replace(/'/g, '&#39;'); }
 
   const MODAL_ASSET_BASE = (function () {
     const script = document.currentScript;
@@ -624,7 +622,7 @@
         </div>
         <p class="ai-modal-disclaimer">AI 回答仅供参考，不能替代平台规则和人工判断。<br>关键操作（接单、结算、纠纷裁决等）仍需你在页面中确认。</p>
         <div class="ai-modal-input-bar">
-          <textarea id="ai-modal-input" rows="1" placeholder="输入你的问题…"></textarea>
+          <textarea id="ai-modal-input" rows="1" placeholder="输入你的问题…" oninput="this.style.height='';this.style.height=Math.min(this.scrollHeight,100)+'px';"></textarea>
           <button class="ai-modal-send-btn" id="ai-modal-send" aria-label="发送">${icons.send}</button>
         </div>
       </div>
@@ -644,11 +642,9 @@
     document.getElementById('ai-modal-new').addEventListener('click', resetChat);
 
     sendBtn.addEventListener('click', sendMessage);
-    inputEl.addEventListener('input', resizeModalInput);
     inputEl.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
     });
-    chatArea.addEventListener('click', handleChatAction);
 
     document.querySelectorAll('#ai-modal-scene-bar .ai-modal-scene-chip').forEach(chip => {
       chip.addEventListener('click', function () {
@@ -660,6 +656,12 @@
       });
     });
 
+    document.querySelectorAll('#ai-modal-chat .sq-btn').forEach(btn => {
+      btn.addEventListener('click', function () {
+        inputEl.value = this.dataset.question;
+        sendMessage();
+      });
+    });
   }
 
   function closeModal() {
@@ -680,7 +682,6 @@
   }
 
   function resetChat() {
-    currentConversationId = null;
     const suggestedQs = [
       { q: '我想找一个信用高、今天发布的电脑维修需求', icon: 'search', bg: 'var(--secondary-light, #e0e7ff)', color: 'var(--secondary, #4f46e5)' },
       { q: '如何发起纠纷？需要什么条件？', icon: 'alert', bg: 'var(--warning-light, #fef3c7)', color: 'var(--warning, #d97706)' },
@@ -697,6 +698,30 @@
       <div class="suggested-qs"><div class="sq-label">试试问我</div><div class="sq-grid">${suggestedQs}</div></div>
     </div>`;
 
+    chatArea.querySelectorAll('.sq-btn').forEach(btn => {
+      btn.addEventListener('click', function () {
+        inputEl.value = this.dataset.question;
+        sendMessage();
+      });
+    });
+  }
+
+  // ── AI Response Engine ──
+  const aiResponses = {
+    '电脑维修': { text: '根据你的需求，我为你筛选了以下条件：', type: 'filter', tags: ['关键词=电脑维修', '信用分≥4.5', '发布时间=今天', '状态=待接单'], action: '查看匹配结果', resultCount: 3 },
+    '纠纷': { text: '发起纠纷需要满足以下条件，我为你整理了关键规则：', type: 'rules', rules: ['订单状态为"已完成"或"已确认"', '订单完成后 7 天内可发起', '需提供纠纷类型（服务未完成、质量不符、沟通问题等）', '需提供相关证据（聊天记录、图片等）', '纠纷发起后将冻结相关时间币，等待处理'], footer: '以上为平台规则摘要，具体操作请在"我的订单"中点击对应订单的"发起纠纷"按钮。' },
+    '冻结': { text: '你的时间币被冻结可能有以下几种原因：', type: 'rules', rules: ['正在进行中的订单——接单后对应时间币会被冻结，双方确认完成后自动释放', '纠纷处理中——纠纷订单涉及的时间币被临时冻结，等待管理员裁决', '系统风控——异常交易行为会触发临时冻结以便核查', '账户限制——如账户处于受限状态，部分功能和时间币可能被冻结'], footer: '如需查询具体冻结记录，请前往"我的钱包 → 冻结明细"查看。' },
+    '快递': { text: '我为你生成了一份任务草稿，你可以在此基础上修改：', type: 'draft', draftTitle: '代取快递并送货上门', draftBody: '需要帮忙去菜鸟驿站代取一个包裹，取件码通过私信发送。包裹不大，不需要推车。送到阳光花园 X 号楼 X 室，放在门口即可。有时间的邻居请联系，谢谢！', draftTags: ['快递代取', '轻量', '即时'], draftReward: '¥10-15' },
+    '发布': { text: '我为你生成了一份任务草稿，你可以在此基础上修改：', type: 'draft', draftTitle: '代取快递并送货上门', draftBody: '需要帮忙去菜鸟驿站代取一个包裹，取件码通过私信发送。包裹不大，不需要推车。送到阳光花园 X 号楼 X 室，放在门口即可。有时间的邻居请联系，谢谢！', draftTags: ['快递代取', '轻量', '即时'], draftReward: '¥10-15' },
+    default: { text: '好的，让我帮你梳理一下相关信息：', type: 'default', response: '我目前可以帮你解答平台规则相关问题、辅助筛选需求大厅的任务、帮忙生成发布文案草稿。\n\n你可以尝试问我：\n· 如何评价已完成订单？\n· 找一个今天发布的宠物照看需求\n· 发布一则社区活动通知应该怎么写\n· 陪审投票有什么作用？' }
+  };
+
+  function getResponse(query) {
+    const q = query.trim();
+    for (const [key, resp] of Object.entries(aiResponses)) {
+      if (q.includes(key)) return resp;
+    }
+    return aiResponses.default;
   }
 
   function buildMsgHTML(role, content) {
@@ -707,52 +732,44 @@
   }
 
   function buildAIResponseHTML(resp) {
-    const messageId = resp.messageId || resp.message?.messageId || '';
-    let html = `<div class="ai-modal-msg assistant" ${messageId ? `data-ai-message-id="${attr(messageId)}"` : ''}>
+    let html = `<div class="ai-modal-msg assistant">
       <div class="ai-modal-msg-avatar">${icons.sparkle.replace('width="16"','width="14"').replace('height="16"','height="14"')}</div>
       <div><div class="ai-modal-msg-bubble" data-ai-raw="${attr(resp.text || '')}"><div class="ai-rich-content">${renderAssistantContent(resp.text)}</div>`;
 
     if (resp.type === 'filter') {
-      const prompt = resp.prompt || resp.criteria?.prompt || '';
-      const tags = resp.tags || aiCriteriaTags(resp.criteria);
       html += `<div class="apply-filter-card">
-        <div class="filter-tags">${tags.map(t => `<span class="filter-tag">${esc(t)}</span>`).join('')}</div>
-        <button class="apply-filter-btn" data-ai-modal-action="results" data-prompt="${attr(prompt)}">
+        <div class="filter-tags">${resp.tags.map(t => `<span class="filter-tag">${t}</span>`).join('')}</div>
+        <button class="apply-filter-btn" onclick="window._aiModalNavigate&&window._aiModalNavigate('tasks.html')">
           ${icons.search.replace('width="14"','').replace('height="14"','')} 查看匹配结果（${resp.resultCount} 个任务）
         </button>
       </div>`;
     }
-    if ((resp.type === 'rules' || resp.type === 'blocked') && resp.rules) {
+    if (resp.type === 'rules' && resp.rules) {
       html += '<ul class="ai-rules-list">';
       resp.rules.forEach(r => { html += `<li>${esc(r)}</li>`; });
       html += '</ul>';
       if (resp.footer) html += `<p class="ai-rules-footer">${esc(resp.footer)}</p>`;
     }
     if (resp.type === 'draft') {
-      const draft = resp.draft || {};
-      const draftTitle = resp.draftTitle || draft.title || 'AI 草稿';
-      const draftBody = resp.draftBody || draft.description || '';
-      const draftTags = resp.draftTags || draft.tags || [];
-      const draftReward = resp.draftReward || draft.coinAmount || '';
       html += `<div class="draft-card">
-        <div class="draft-title">${esc(draftTitle)}</div>
-        <div class="draft-body">${esc(draftBody)}</div>
+        <div class="draft-title">${esc(resp.draftTitle)}</div>
+        <div class="draft-body">${esc(resp.draftBody)}</div>
         <div class="draft-tags">
-          ${draftTags.map(t => `<span class="filter-tag" style="background:var(--accent-subtle, rgba(99,102,241,0.08));color:var(--accent, #6366f1);">${esc(t)}</span>`).join('')}
-          ${draftReward ? `<span class="filter-tag" style="background:var(--warning-light, #fef3c7);color:var(--warning, #d97706);">悬赏 ${esc(draftReward)}</span>` : ''}
+          ${resp.draftTags.map(t => `<span class="filter-tag" style="background:var(--accent-subtle, rgba(99,102,241,0.08));color:var(--accent, #6366f1);">${t}</span>`).join('')}
+          <span class="filter-tag" style="background:var(--warning-light, #fef3c7);color:var(--warning, #d97706);">悬赏 ${esc(resp.draftReward)}</span>
         </div>
         <div class="draft-actions">
-          <button class="btn btn--primary btn--sm" data-ai-modal-action="draft" data-draft='${attr(JSON.stringify(draft))}'>确认并填入发布表单</button>
-          <button class="btn btn--ghost btn--sm" data-ai-modal-action="regenerate" data-question="帮我写一段发布代取快递任务的描述">重新生成</button>
+          <button class="btn btn--primary btn--sm" onclick="window._aiModalNavigate&&window._aiModalNavigate('post.html')">确认并填入发布表单</button>
+          <button class="btn btn--ghost btn--sm" onclick="document.getElementById('ai-modal-input').value='帮我写一段发布代取快递任务的描述';document.getElementById('ai-modal-send').click();">重新生成</button>
         </div>
       </div>`;
     }
 
     html += `</div>
       <div class="ai-modal-msg-actions">
-        <button class="ai-modal-msg-action-btn" data-ai-modal-action="copy">${icons.copy} 复制</button>
-        ${messageId ? `<button class="ai-modal-msg-action-btn" data-ai-modal-action="feedback" data-rating="useful">${icons.thumbsUp} 有用</button>
-        <button class="ai-modal-msg-action-btn" data-ai-modal-action="feedback" data-rating="useless">${icons.thumbsDown} 没用</button>` : ''}
+        <button class="ai-modal-msg-action-btn" onclick="navigator.clipboard?.writeText(this.closest('.ai-modal-msg').querySelector('.ai-modal-msg-bubble').textContent.trim());this.textContent='✓ 已复制';setTimeout(()=>this.textContent='${esc('复制')}',2000);">${icons.copy} 复制</button>
+        <button class="ai-modal-msg-action-btn" onclick="this.classList.toggle('active')">${icons.thumbsUp} 有用</button>
+        <button class="ai-modal-msg-action-btn" onclick="this.classList.toggle('active')">${icons.thumbsDown} 没用</button>
       </div></div></div>`;
     return html;
   }
@@ -1158,11 +1175,4 @@
   window.openAIModal = openModal;
   window.closeAIModal = closeModal;
   window._aiModalNavigate = function (url) { closeModal(); setTimeout(() => { window.location.href = url; }, 300); };
-
-  document.addEventListener('click', function (event) {
-    const trigger = event.target.closest('[data-ai-modal-scene]');
-    if (!trigger) return;
-    event.preventDefault();
-    openModal(trigger.dataset.aiModalScene || 'all');
-  });
 })();
