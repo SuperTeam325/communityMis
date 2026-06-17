@@ -1,8 +1,7 @@
+import { readFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { createBackendServer } from "../backend/src/app.mjs";
-import { createMemoryAuthStore } from "../backend/src/auth/store.mjs";
-import { createAuthController } from "../frontend/src/auth.mjs";
 import { createApiClient } from "../frontend/src/api/client.mjs";
-import { renderPrototypeHtml } from "../frontend/src/prototypeRenderer.mjs";
 import { routeById } from "../frontend/src/routes.mjs";
 
 const checks = [];
@@ -10,8 +9,11 @@ const checks = [];
 await run();
 
 async function run() {
-  checkStaticWiring();
-  await checkUserProfileApi();
+  await checkStaticWiring();
+  await checkAiApiLoop();
+  await runCommand("npm", ["run", "typecheck"], "typecheck passes for stage 05 SPA AI pages");
+  await runCommand("npm", ["run", "test:component"], "component tests pass including stage 05 AI coverage");
+  await runCommand("npm", ["run", "build"], "frontend build passes for stage 05");
 
   const failed = checks.filter((item) => !item.ok);
   for (const item of checks) {
@@ -23,74 +25,40 @@ async function run() {
   }
 }
 
-function checkStaticWiring() {
-  for (const id of ["profile", "settings", "user-public", "credit"]) {
-    const html = renderPrototypeHtml(routeById.get(id));
-    record(html.includes("/assets/app/prototype-shell.mjs"), `${id} page loads production shell`);
+async function checkStaticWiring() {
+  const aiPages = await readFile(new URL("../frontend/src/spa/pages/AiPages.tsx", import.meta.url), "utf8");
+  const app = await readFile(new URL("../frontend/src/spa/App.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../frontend/src/spa/styles.css", import.meta.url), "utf8");
+  const componentTest = await readFile(new URL("../tests/component/spa-stage-05.test.tsx", import.meta.url), "utf8");
+
+  for (const id of ["ai-assistant", "ai-results", "admin-ai-logs", "admin-ai-conversations", "admin-ai-feedback", "admin-ai-errors", "admin-ai-config"]) {
+    const route = routeById.get(id);
+    record(Boolean(route), `${id} route is registered`);
+    record(route?.source?.endsWith(".html"), `${id} keeps production route manifest source`);
   }
 
-  record(routeById.get("profile")?.surface === "user", "profile page remains protected by user route guard");
-  record(routeById.get("settings")?.surface === "user", "settings page remains protected by user route guard");
-  record(routeById.get("user-public")?.surface === "user", "public profile page remains behind logged-in user shell");
-  record(routeById.get("credit")?.surface === "user", "credit page remains behind logged-in user shell");
+  for (const symbol of ["AiAssistantPage", "AiResultsPage", "AdminAiLogsPage", "AdminAiConversationsPage", "AdminAiFeedbackPage", "AdminAiErrorsPage", "AdminAiConfigPage"]) {
+    record(aiPages.includes(`export function ${symbol}`), `${symbol} is implemented as an explicit SPA page`);
+    record(app.includes(symbol), `${symbol} is wired into App route switch`);
+  }
+
+  for (const apiName of ["chatStream", "requestFilter", "feedback", "aiCallLogs", "aiConversations", "resolveAiFeedback", "retryAiErrors", "updateAiConfig"]) {
+    record(aiPages.includes(apiName), `AI page uses ${apiName} API`);
+  }
+
+  for (const forbidden of ["window.location.reload()", "window.location.href =", "frontend/public/ui/js/ai-modal.js"]) {
+    record(!aiPages.includes(forbidden), `AI SPA pages do not use forbidden ${forbidden}`);
+  }
+
+  record(app.includes('to="/ai/assistant"'), "user shell exposes a persistent AI assistant entry");
+  record(styles.includes(".ai-layout") && styles.includes(".ai-subnav") && styles.includes(".admin-split"), "AI user and admin layouts have SPA styling");
+  record(componentTest.includes("AiAssistantPage") && componentTest.includes("AdminAiConfigPage"), "stage 05 component tests cover user and admin AI pages");
 }
 
-async function checkUserProfileApi() {
-  const store = createMemoryAuthStore({
-    seedUsers: [
-      {
-        userId: 5101,
-        username: "stage05_user",
-        password: "user123456",
-        phone: "13900005101",
-        displayName: "阶段五邻居",
-        bio: "初始简介",
-        skillTags: ["旧技能"],
-        serviceCategories: ["旧类别"],
-        role: "user",
-        status: 1,
-        initialBalance: 42
-      },
-      {
-        userId: 5102,
-        username: "stage05_reviewer",
-        password: "user123456",
-        displayName: "评价邻居",
-        role: "user",
-        status: 1,
-        initialBalance: 0
-      }
-    ],
-    seedReviews: [
-      {
-        reviewId: 9101,
-        orderId: 8101,
-        reviewerId: 5102,
-        targetId: 5101,
-        direction: "publisher_to_provider",
-        rating: 5,
-        comment: "服务响应快，沟通清楚。",
-        orderTitle: "维修门锁",
-        tags: ["响应快"],
-        createdAt: "2026-06-01T10:00:00.000Z"
-      },
-      {
-        reviewId: 9102,
-        orderId: 8102,
-        reviewerId: 5102,
-        targetId: 5101,
-        direction: "provider_to_publisher",
-        rating: 4,
-        comment: "需求描述清楚。",
-        orderTitle: "代取快递",
-        tags: ["描述清楚"],
-        createdAt: "2026-06-02T10:00:00.000Z"
-      }
-    ]
-  });
+async function checkAiApiLoop() {
   const server = createBackendServer({
-    authStore: store,
-    sessionSecret: "stage05-test-secret"
+    sessionSecret: "stage05-ai-test-secret",
+    env: { NODE_ENV: "test" }
   });
   const port = await listen(server);
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -103,106 +71,96 @@ async function checkUserProfileApi() {
   });
 
   try {
-    const login = await api.auth.login({
-      username: "stage05_user",
-      password: "user123456"
-    });
+    const login = await api.auth.login({ username: "user_a", password: "user123456" });
     record(Boolean(login.token), "stage 05 user can log in");
 
-    const me = await api.users.me(login.token);
-    record(me.user?.phone === "13900005101", "current profile includes private phone for the owner");
-    record(me.wallet?.balance === 42, "current profile includes wallet summary");
-    record(!JSON.stringify(me).includes("passwordHash"), "current profile DTO does not leak password hash");
-
-    const updated = await api.users.updateMe(login.token, {
-      displayName: "阶段五资料服务者",
-      phone: "13900005555",
-      bio: "可提供电脑维修、跑腿代取和邻里协助。",
-      skillTags: ["电脑维修", "跑腿代取"],
-      serviceCategories: ["家政维修", "跑腿代办"]
+    const chat = await api.ai.chat(login.token, {
+      message: "如何发起纠纷？",
+      scene: "rules"
     });
-    record(updated.user?.bio?.includes("电脑维修"), "logged-in user can update profile bio");
-    record(updated.user?.skillTags?.includes("跑腿代取"), "logged-in user can update skill tags");
+    record(Boolean(chat.message?.messageId), "AI chat returns persisted assistant message");
+    record(Boolean(chat.conversation?.conversationId), "AI chat returns conversation context");
 
-    const publicProfile = await api.users.public(updated.user.userId, login.token);
-    record(publicProfile.user?.skillTags?.includes("跑腿代取"), "public profile reflects updated skill tags");
-    record(!JSON.stringify(publicProfile).includes("13900005555"), "public profile does not expose phone number");
+    const conversations = await api.ai.conversations(login.token, { page: 1, pageSize: 5 });
+    record(Array.isArray(conversations.conversations) && conversations.conversations.length > 0, "AI conversations endpoint lists user history");
 
-    const credit = await api.users.credit(updated.user.userId, login.token);
-    record(credit.credit?.reviewCount === 2, "credit endpoint returns review count from existing reviews");
-    record(credit.credit?.averageRating === 4.5, "credit endpoint calculates average rating");
-    record(Array.isArray(credit.credit?.rules) && credit.credit.rules.length >= 3, "credit endpoint returns credit rules");
+    const conversation = await api.ai.conversation(login.token, chat.conversation.conversationId);
+    record(Array.isArray(conversation.conversation?.messages) || Array.isArray(conversation.messages), "AI conversation detail returns message history");
 
-    const settings = await api.settings.updateMe(login.token, {
-      notifications: { announcements: true },
-      privacy: { searchable: false },
-      preferences: { darkMode: "dark" }
+    const feedback = await api.ai.feedback(login.token, chat.message.messageId, {
+      rating: "useful",
+      comment: "阶段五校验反馈"
     });
-    record(settings.settings?.notifications?.announcements === true, "settings update saves notification preference");
-    record(settings.settings?.privacy?.searchable === false, "settings update saves privacy preference");
-    record(settings.settings?.preferences?.darkMode === "dark", "settings update saves general preference");
+    record(feedback.feedback?.rating === "useful", "AI message feedback can be submitted");
 
-    const storage = createMemoryStorage();
-    const controller = createAuthController({
-      api,
-      storage,
-      location: createMemoryLocation("/settings")
+    const filter = await api.ai.requestFilter(login.token, {
+      prompt: "找一个信用高的英语辅导需求",
+      scene: "request_filter"
     });
-    await controller.loginUser({
-      username: "stage05_user",
-      password: "user123456"
-    });
-    const controllerUpdate = await controller.updateUserProfile({
-      bio: "控制器保存的简介",
-      skillTags: ["控制器技能"]
-    });
-    record(controllerUpdate.user?.bio === "控制器保存的简介", "auth controller can save profile through real API");
-    record(controller.readProfileDraft(controllerUpdate.user)?.skillTags?.includes("控制器技能"), "auth controller refreshes local profile draft after profile save");
+    record(Array.isArray(filter.recommendations), "AI request filter returns recommendations array");
 
-    const anonymousMe = await requestJson(baseUrl, "GET", "/api/users/me");
-    record(anonymousMe.status === 401, "anonymous visitor cannot access current profile API");
+    const adminLogin = await api.adminAuth.login({ username: "admin_main", password: "admin123456" });
+    record(Boolean(adminLogin.token), "stage 05 admin can log in");
+
+    const logs = await api.admin.aiCallLogs(adminLogin.token, { page: 1, pageSize: 5, scene: "all", status: "all" });
+    record(Array.isArray(logs.callLogs), "admin AI call logs are queryable");
+
+    const adminConversations = await api.admin.aiConversations(adminLogin.token, { page: 1, pageSize: 5, scene: "all", status: "all" });
+    record(Array.isArray(adminConversations.conversations), "admin AI conversations are queryable");
+
+    const adminFeedback = await api.admin.aiFeedback(adminLogin.token, { page: 1, pageSize: 5, scene: "all", status: "all", rating: "all" });
+    record(adminFeedback.feedback?.some?.((item) => String(item.feedbackId) === String(feedback.feedback.feedbackId)), "admin AI feedback sees user feedback");
+
+    const resolved = await api.admin.resolveAiFeedback(adminLogin.token, feedback.feedback.feedbackId, {
+      resolution: "阶段五校验已处理"
+    });
+    record(resolved.feedback?.resolved === true, "admin can resolve AI feedback");
+
+    const report = await api.admin.aiFeedbackReport(adminLogin.token, { scene: "all", status: "all", rating: "all" });
+    record(Boolean(report.report), "admin can generate AI feedback report");
+
+    const errors = await api.admin.aiErrors(adminLogin.token, { page: 1, pageSize: 5, type: "all", status: "all" });
+    record(Array.isArray(errors.errors), "admin AI errors endpoint is queryable");
+
+    const retry = await api.admin.retryAiErrors(adminLogin.token, { filters: { type: "all", status: "all" } });
+    record(Array.isArray(retry.retries) && retry.summary?.retryCount !== undefined, "admin AI error retry endpoint returns queued retries summary");
+
+    const incident = await api.admin.createAiIncident(adminLogin.token, {
+      callIds: [],
+      title: "阶段五 AI 异常事件单",
+      note: "阶段五校验创建"
+    });
+    record(Boolean(incident.incident?.incidentId), "admin can create AI incident");
+
+    const config = await api.admin.aiConfig(adminLogin.token);
+    record(Boolean(config.config), "admin AI config is readable");
+
+    const updatedConfig = await api.admin.updateAiConfig(adminLogin.token, {
+      ...config.config,
+      rateLimitPerHour: Number(config.config.rateLimitPerHour ?? 60) + 1
+    });
+    record(updatedConfig.config?.rateLimitPerHour === Number(config.config.rateLimitPerHour ?? 60) + 1, "admin can update AI config");
   } finally {
     await close(server);
   }
 }
 
-async function requestJson(baseUrl, method, path, body = null, token = null) {
-  const headers = { accept: "application/json" };
-  if (body !== null) {
-    headers["content-type"] = "application/json";
-  }
-  if (token) {
-    headers.authorization = `Bearer ${token}`;
-  }
-  const response = await fetch(`${baseUrl}${path}`, {
-    method,
-    headers,
-    body: body === null ? undefined : JSON.stringify(body)
+function runCommand(command, args, message) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      cwd: new URL("..", import.meta.url),
+      stdio: "inherit",
+      shell: process.platform === "win32"
+    });
+    child.on("exit", (code) => {
+      record(code === 0, message);
+      resolve();
+    });
+    child.on("error", () => {
+      record(false, message);
+      resolve();
+    });
   });
-  return {
-    status: response.status,
-    body: await response.json()
-  };
-}
-
-function createMemoryStorage() {
-  const values = new Map();
-  return {
-    getItem: (key) => values.get(key) ?? null,
-    setItem: (key, value) => values.set(key, String(value)),
-    removeItem: (key) => values.delete(key)
-  };
-}
-
-function createMemoryLocation(pathname) {
-  return {
-    href: pathname,
-    pathname,
-    replace(nextPath) {
-      this.href = nextPath;
-      this.pathname = nextPath.split("?")[0];
-    }
-  };
 }
 
 function createCookieRuntime(fetchImpl) {

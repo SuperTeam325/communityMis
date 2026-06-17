@@ -14,7 +14,7 @@ import { OrdersPage, OrderDetailPage, ReviewPage } from "./pages/OrdersPages";
 import { DisputeCreatePage, DisputeDetailPage, JuryHallPage, JuryVotingPage } from "./pages/DisputesPages";
 import { WalletPage, WalletFreezePage } from "./pages/WalletPages";
 import { MessagesPage, NotificationsPage } from "./pages/MessagesPages";
-import { AiAssistantPage, AiResultsPage } from "./pages/AiPages";
+import { AiAssistantPage, AiResultsPage, AdminAiConfigPage, AdminAiConversationsPage, AdminAiErrorsPage, AdminAiFeedbackPage, AdminAiLogsPage } from "./pages/AiPages";
 import { ProfilePage, SettingsPage, UserPublicPage, CreditPage, HelpPage } from "./pages/ProfilePages";
 import { AdminDashboardPage, AdminGenericPage, AdminSystemPage } from "./pages/AdminPages";
 
@@ -111,6 +111,11 @@ function PageSwitch(props: PageProps) {
     case "credit": return <CreditPage api={props.api} />;
     case "help": return <HelpPage />;
     case "admin-dashboard": return <AdminDashboardPage api={props.api} />;
+    case "admin-ai-logs": return <AdminAiLogsPage api={props.api} />;
+    case "admin-ai-conversations": return <AdminAiConversationsPage api={props.api} />;
+    case "admin-ai-feedback": return <AdminAiFeedbackPage api={props.api} />;
+    case "admin-ai-errors": return <AdminAiErrorsPage api={props.api} />;
+    case "admin-ai-config": return <AdminAiConfigPage api={props.api} />;
     case "admin-system": return <AdminSystemPage api={props.api} />;
     case "admin-login": return <LoginPage api={props.api} admin />;
     default: return <AdminGenericPage api={props.api} route={props.route} />;
@@ -125,6 +130,7 @@ function UserShell({ route, children }: { route: AppRoute; children: React.React
         <Link className="logo" to="/feed">邻<span>帮</span></Link>
         <nav>{userNav.map((item) => <NavLink key={item.id} className={({ isActive }) => isActive || route.id === item.id ? "active" : ""} to={item.path}>{item.label}</NavLink>)}</nav>
         <div className="nav-right">
+          <Link className="ai-fab-link" to="/ai/assistant">AI</Link>
           <Link className="nav-avatar" to="/profile">
             {auth.session?.user.avatarUrl ? <img src={auth.session?.user.avatarUrl} alt="" /> : <span className="nav-avatar-placeholder">{(auth.session?.user.displayName ?? auth.session?.user.username ?? "").slice(0, 1)}</span>}
             <span>{auth.session?.user.displayName ?? auth.session?.user.username}</span>
