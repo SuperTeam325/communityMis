@@ -8586,7 +8586,7 @@ function conversationItemHtml(item) {
   return `
     <a class="conv-item ${unread > 0 ? "unread" : ""}" href="${escapeHtml(href)}" data-message-user-id="${escapeHtml(participant.userId ?? "")}" data-order-id="${escapeHtml(item.orderId ?? "")}" style="text-decoration:none;color:inherit;">
       <div class="conv-avatar">
-        <div class="avatar" style="background:${escapeHtml(avatarColor(participant.userId ?? item.orderId ?? 1))};display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:700;border-radius:50%;width:40px;height:40px;">${escapeHtml(firstCharacter(name))}</div>
+        <div class="avatar" style="background:${escapeHtml(avatarColor(participant.userId ?? item.orderId ?? 1))};display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:700;">${escapeHtml(firstCharacter(name))}</div>
       </div>
       <div class="conv-body">
         <div class="conv-top">

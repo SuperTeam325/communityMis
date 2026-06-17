@@ -60,6 +60,7 @@ export async function handleSocialRoutes({ request, response, url, authService }
       postId: parseId(communityPostLikeMatch[1], "POST_NOT_FOUND"),
       userId: context.user.userId
     });
+    if (request.method === "POST") notifyCommunityPostLike(authService.store, post, context.user.userId);
     sendJson(response, 200, { post: communityPostDto(post) });
     return true;
   }
@@ -110,6 +111,7 @@ export async function handleSocialRoutes({ request, response, url, authService }
       parentId: optionalId(body.parentId),
       content
     });
+    notifyCommunityPostComment(authService.store, postId, context.user.userId, body.parentId);
     sendJson(response, 201, { comment: commentDto(comment) });
     return true;
   }
@@ -125,6 +127,7 @@ export async function handleSocialRoutes({ request, response, url, authService }
       commentId: parseId(communityCommentLikeMatch[1], "COMMENT_NOT_FOUND"),
       userId: context.user.userId
     });
+    if (request.method === "POST") notifyCommunityCommentLike(authService.store, comment, context.user.userId);
     sendJson(response, 200, { comment: commentDto(comment) });
     return true;
   }
@@ -321,6 +324,7 @@ export async function handleSocialRoutes({ request, response, url, authService }
     authService.requireRole(context, ["user"]);
     const body = await readJsonBody(request, { maxBytes: 16 * 1024 });
     const comment = await createCommentPayload(authService.store, requestId, context.user.userId, body);
+    notifyRequestComment(authService.store, requestId, context.user.userId, body.parentId);
     sendJson(response, 201, { comment });
     return true;
   }
@@ -336,6 +340,7 @@ export async function handleSocialRoutes({ request, response, url, authService }
       commentId: parseId(likeMatch[1], "COMMENT_NOT_FOUND"),
       userId: context.user.userId
     });
+    if (request.method === "POST") notifyRequestCommentLike(authService.store, comment, context.user.userId);
     sendJson(response, 200, { comment });
     return true;
   }
@@ -843,4 +848,121 @@ function allowOnly(request, response, methods) {
     methodNotAllowed(response, methods);
     throw new HttpError(0, "HANDLED", "Response was already handled.");
   }
+}
+
+/* ===== Notification helpers ===== */
+
+async function safeNotify(store, input) {
+  if (typeof store.createNotification !== "function") return;
+  if (!input.userId || input.userId === input.actorId) return;
+  try { await store.createNotification(input); } catch {}
+}
+
+// 需求评论通知
+async function notifyRequestComment(store, requestId, userId, parentId) {
+  try {
+    const commenter = await store.findUserById(userId);
+    const name = commenter?.displayName ?? commenter?.username ?? String(userId);
+    const request = typeof store.findServiceRequestById === "function"
+      ? await store.findServiceRequestById(requestId) : null;
+    const title = request?.title ?? "";
+
+    // 通知需求发布者
+    if (request && request.publisherId !== userId) {
+      const msg = parentId ? "回复了你的需求下的评论" : "评论了你的需求";
+      await safeNotify(store, {
+        userId: request.publisherId, actorId: userId, type: "social",
+        title: "新的评论", content: name + " " + msg + "「" + title + "」",
+        businessType: "request", businessId: requestId
+      });
+    }
+    // 通知被回复者
+    if (parentId && typeof store.listRequestComments === "function") {
+      const comments = await store.listRequestComments(requestId);
+      const parent = comments.find(function(c) { return c.commentId === Number(parentId); });
+      if (parent && parent.userId !== userId && parent.userId !== request?.publisherId) {
+        await safeNotify(store, {
+          userId: parent.userId, actorId: userId, type: "social",
+          title: "评论被回复", content: name + " 回复了你的评论",
+          businessType: "request", businessId: requestId
+        });
+      }
+    }
+  } catch {}
+}
+
+// 社区帖子评论通知
+async function notifyCommunityPostComment(store, postId, userId, parentId) {
+  try {
+    const commenter = await store.findUserById(userId);
+    const name = commenter?.displayName ?? commenter?.username ?? String(userId);
+    const post = typeof store.findCommunityPostById === "function"
+      ? await store.findCommunityPostById(postId) : null;
+    const authorId = post?.authorId;
+
+    if (authorId && authorId !== userId) {
+      const msg = parentId ? "回复了你的帖子下的评论" : "评论了你的帖子";
+      await safeNotify(store, {
+        userId: authorId, actorId: userId, type: "social",
+        title: "新的评论", content: name + " " + msg + "「" + (post?.title ?? "") + "」",
+        businessType: "community_post", businessId: postId
+      });
+    }
+    if (parentId && typeof store.listCommunityPostComments === "function") {
+      const comments = await store.listCommunityPostComments(postId);
+      const parent = comments.find(function(c) { return c.commentId === Number(parentId); });
+      if (parent && parent.userId !== userId && parent.userId !== authorId) {
+        await safeNotify(store, {
+          userId: parent.userId, actorId: userId, type: "social",
+          title: "评论被回复", content: name + " 回复了你的评论",
+          businessType: "community_post", businessId: postId
+        });
+      }
+    }
+  } catch {}
+}
+
+// 帖子点赞通知
+async function notifyCommunityPostLike(store, post, userId) {
+  try {
+    const authorId = post?.authorId ?? post?.userId;
+    if (!authorId || authorId === userId) return;
+    const liker = await store.findUserById(userId);
+    const name = liker?.displayName ?? liker?.username ?? String(userId);
+    await safeNotify(store, {
+      userId: authorId, actorId: userId, type: "social",
+      title: "帖子被点赞", content: name + " 赞了你的帖子「" + (post?.title ?? "") + "」",
+      businessType: "community_post", businessId: post?.postId
+    });
+  } catch {}
+}
+
+// 帖子评论点赞通知
+
+async function notifyCommunityCommentLike(store, comment, likerId) {
+  try {
+    const authorId = comment?.userId;
+    if (!authorId || authorId === likerId) return;
+    const liker = await store.findUserById(likerId);
+    const name = liker?.displayName ?? liker?.username ?? "用户";
+    await safeNotify(store, {
+      userId: authorId, actorId: likerId, type: "social",
+      title: "评论被点赞", content: name + " 赞了你的评论",
+      businessType: "community_post_comment", businessId: comment?.commentId
+    });
+  } catch {}
+}
+
+async function notifyRequestCommentLike(store, comment, likerId) {
+  try {
+    const authorId = comment?.userId;
+    if (!authorId || authorId === likerId) return;
+    const liker = await store.findUserById(likerId);
+    const name = liker?.displayName ?? liker?.username ?? "用户";
+    await safeNotify(store, {
+      userId: authorId, actorId: likerId, type: "social",
+      title: "评论被点赞", content: name + " 赞了你的评论",
+      businessType: "request_comment", businessId: comment?.commentId
+    });
+  } catch {}
 }

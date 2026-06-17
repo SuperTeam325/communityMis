@@ -70,6 +70,7 @@ export function createMysqlAuthStore(options = {}) {
     listWalletFreezes,
     createWalletFreeze,
     listNotificationsForUserId,
+    createNotification,
     markNotificationRead,
     markAllNotificationsRead,
     listMessagesForUserId,
@@ -1634,6 +1635,21 @@ SELECT JSON_OBJECT('walletFound', @wallet_found, 'logId', @created_log_id);
     const freezePayload = await listWalletFreezes({ userId, page: 1, pageSize: 1 });
     return freezePayload.freezes.find((freeze) => freeze.freezeId === Number(result.logId)) ?? freezePayload.freezes[0] ?? null;
   }
+
+  async function createNotification(input) {
+    await pooledExecute(
+      'INSERT INTO `notification` (`user_id`, `type`, `title`, `content`, `business_type`, `business_id`) VALUES (?, ?, ?, ?, ?, ?)',
+      [
+        Number(input.userId),
+        String(input.type ?? "social"),
+        String(input.title ?? "").slice(0, 100),
+        String(input.content ?? "").slice(0, 500),
+        input.businessType ?? null,
+        input.businessId ?? null
+      ]
+    );
+  }
+
 
   async function listNotificationsForUserId(userId, query = {}) {
     const id = Number(userId);
@@ -5662,7 +5678,7 @@ function normalizeRequestComment(input) {
     content: String(input.content ?? ""),
     likeCount: Number(input.likeCount ?? input.like_count ?? 0),
     likedByViewer: Boolean(input.likedByViewer),
-    user: input.userJson ? normalizePublicUser(withProfileExtras(normalizeUser(input.userJson))) : null,
+    user: input.userJson ? normalizePublicUser(mergeProfileExtras(normalizeUser(input.userJson), null)) : null,
     createdAt: input.createdAt ?? input.created_at ?? null,
     updatedAt: input.updatedAt ?? input.updated_at ?? input.createdAt ?? input.created_at ?? null
   };
@@ -6025,7 +6041,7 @@ function normalizeCommunityPost(input) {
     collectCount: Number(input.collectCount ?? input.collect_count ?? 0),
     likedByViewer: Boolean(input.likedByViewer),
     collectedByViewer: Boolean(input.collectedByViewer),
-    author: input.authorJson ? normalizePublicUser(withProfileExtras(normalizeUser(input.authorJson))) : null,
+    author: input.authorJson ? normalizePublicUser(mergeProfileExtras(normalizeUser(input.authorJson), null)) : null,
     category: input.categoryJson ? normalizeCategory(input.categoryJson) : null,
     createdAt: input.createdAt ?? input.created_at ?? null,
     updatedAt: input.updatedAt ?? input.updated_at ?? input.createdAt ?? input.created_at ?? null
@@ -6041,7 +6057,7 @@ function normalizeCommunityPostComment(input) {
     content: String(input.content ?? ""),
     likeCount: Number(input.likeCount ?? input.like_count ?? 0),
     likedByViewer: Boolean(input.likedByViewer),
-    user: input.userJson ? normalizePublicUser(withProfileExtras(normalizeUser(input.userJson))) : null,
+    user: input.userJson ? normalizePublicUser(mergeProfileExtras(normalizeUser(input.userJson), null)) : null,
     createdAt: input.createdAt ?? input.created_at ?? null,
     updatedAt: input.updatedAt ?? input.updated_at ?? input.createdAt ?? input.created_at ?? null
   };
