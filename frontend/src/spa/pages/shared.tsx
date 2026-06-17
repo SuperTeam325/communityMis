@@ -180,6 +180,41 @@ export function dateText(value: unknown, fallback = "-"): string {
   return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+export function fullDateText(value: unknown, fallback = "-"): string {
+  if (!value) return fallback;
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return fallback;
+  return date.toLocaleString("zh-CN");
+}
+
+export function moneyText(value: unknown, fallback = "0.00"): string {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return fallback;
+  return amount.toFixed(2);
+}
+
+export function signedMoneyText(value: unknown, type?: unknown): string {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return moneyText(value);
+  const absolute = Math.abs(amount).toFixed(2);
+  const kind = String(type ?? "").toLowerCase();
+  if (amount < 0 || ["expense", "freeze"].includes(kind)) return `-${absolute}`;
+  if (amount > 0 || ["income", "release", "refund"].includes(kind)) return `+${absolute}`;
+  return absolute;
+}
+
+export function safeInternalHref(value: unknown, fallback = ""): string {
+  const href = text(value, "").trim();
+  if (!href || href.startsWith("//")) return fallback;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return fallback;
+  return href.startsWith("/") ? href : fallback;
+}
+
+export function pageFromParams(params: URLSearchParams, fallback = 1): number {
+  const value = Number(params.get("page") ?? fallback);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
 export function statusLabel(status: unknown): string {
   const map: Record<string, string> = {
     open: "待接单",
@@ -192,6 +227,11 @@ export function statusLabel(status: unknown): string {
     cancelled: "已取消"
   };
   return map[String(status ?? "")] ?? text(status);
+}
+
+export function labelFromMap(value: unknown, map: Record<string, string>, fallback = "-"): string {
+  const key = String(value ?? "");
+  return map[key] ?? text(value, fallback);
 }
 
 export function statusTone(status: unknown): string {

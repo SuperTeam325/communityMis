@@ -710,6 +710,97 @@ textarea {
   background: var(--accent-subtle);
 }
 
+.chip input {
+  margin-right: 6px;
+}
+
+.compact-filter {
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.message-shell {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+  gap: var(--space-lg);
+  align-items: start;
+}
+
+.message-list {
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.conversation-card {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: var(--space-md);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: var(--surface);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.conversation-card.active,
+.conversation-card:hover {
+  border-color: var(--accent-light);
+  background: var(--accent-subtle);
+}
+
+.conversation-title {
+  font-weight: 800;
+}
+
+.conversation-preview {
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.conversation-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.conversation-link {
+  justify-self: start;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.message-detail {
+  min-height: 320px;
+}
+
+.message-thread {
+  display: grid;
+  gap: var(--space-sm);
+  min-height: 120px;
+  align-content: end;
+}
+
+.finance-list {
+  display: grid;
+  gap: var(--space-md);
+}
+
+.finance-card {
+  align-items: start;
+}
+
+.finance-amount {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: 22px;
+}
+
 /* ── Notification card enhancements ── */
 .notif-card {
   position: relative;
@@ -765,6 +856,10 @@ textarea {
 
 /* ── Responsive ── */
 @media (max-width: 860px) {
+  .message-shell {
+    grid-template-columns: 1fr;
+  }
+
   .notif-shell {
     grid-template-columns: 1fr;
   }

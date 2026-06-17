@@ -32,6 +32,7 @@ const JURY_DISPUTE_DETAIL_RE = /^\/api\/jury\/disputes\/([^/]+)$/;
 const JURY_DISPUTE_VOTES_RE = /^\/api\/jury\/disputes\/([^/]+)\/votes$/;
 const ORDER_REVIEWS_RE = /^\/api\/orders\/([^/]+)\/reviews$/;
 const NOTIFICATION_READ_RE = /^\/api\/notifications\/([^/]+)\/read$/;
+const MESSAGE_READ_RE = /^\/api\/messages\/([^/]+)\/read$/;
 const PUBLIC_REQUEST_STATUSES = new Set(["open", "accepted", "completed"]);
 const ORDER_STATUSES = new Set(["accepted", "provider_confirmed", "payer_confirmed", "both_confirmed", "completed", "disputed"]);
 const ORDER_CONFIRMABLE_STATUSES = new Set(["accepted", "provider_confirmed", "payer_confirmed", "both_confirmed"]);
@@ -227,9 +228,26 @@ export async function handleRequestRoutes({ request, response, url, authService 
   }
 
   if (url.pathname === "/api/messages") {
-    allowOnly(request, response, ["GET"]);
+    allowOnly(request, response, ["GET", "POST"]);
     const context = await authService.authenticateRequest(request);
     authService.requireRole(context, ["user"]);
+    if (request.method === "POST") {
+      if (typeof authService.store.createMessage !== "function") {
+        throw new HttpError(500, "MESSAGE_STORE_UNAVAILABLE", "Message sending is not available.");
+      }
+      const body = await readJsonBody(request, { maxBytes: REQUEST_BODY_MAX_BYTES });
+      let message;
+      try {
+        message = await authService.store.createMessage({
+          ...normalizeMessageInput(body),
+          senderId: context.user.userId
+        });
+      } catch (error) {
+        throw messageError(error);
+      }
+      sendJson(response, 201, { message: messageDto(message) });
+      return true;
+    }
     sendJson(response, 200, await messageListPayload(authService.store, context.user.userId, url.searchParams));
     return true;
   }
@@ -620,6 +638,22 @@ export async function handleRequestRoutes({ request, response, url, authService 
     return true;
   }
 
+  const messageReadMatch = url.pathname.match(MESSAGE_READ_RE);
+  if (messageReadMatch) {
+    allowOnly(request, response, ["POST"]);
+    const context = await authService.authenticateRequest(request);
+    authService.requireRole(context, ["user"]);
+    if (typeof authService.store.markMessageRead !== "function") {
+      throw new HttpError(500, "MESSAGE_STORE_UNAVAILABLE", "Message read state is not available.");
+    }
+    const message = await authService.store.markMessageRead(context.user.userId, parsePositiveInt(messageReadMatch[1], "MESSAGE_NOT_FOUND"));
+    if (!message) {
+      throw new HttpError(404, "MESSAGE_NOT_FOUND", "Message was not found.");
+    }
+    sendJson(response, 200, { message: messageDto(message) });
+    return true;
+  }
+
   return false;
 }
 
@@ -757,6 +791,23 @@ function normalizeJuryVoteInput(input) {
   return {
     vote,
     reason: requiredText(input?.reason, 5, 500, "INVALID_JURY_REASON", "Jury vote reason is required.")
+  };
+}
+
+function normalizeMessageInput(input) {
+  const receiverId = parsePositiveInt(input?.receiverId ?? input?.receiver_id ?? input?.toUserId, "INVALID_RECEIVER_ID");
+  const content = optionalInputText(input?.content ?? input?.message ?? input?.body, 2000, "INVALID_MESSAGE_CONTENT") ?? "";
+  const attachments = normalizeAttachments(input?.attachments ?? input?.attachment ?? input?.files ?? input?.file);
+  if (!content && attachments.length === 0) {
+    throw new HttpError(400, "INVALID_MESSAGE_CONTENT", "Message content or attachment metadata is required.");
+  }
+  return {
+    receiverId,
+    content,
+    attachments,
+    orderId: input?.orderId === undefined || input?.orderId === null || input?.orderId === ""
+      ? null
+      : parsePositiveInt(input.orderId, "INVALID_ORDER_ID")
   };
 }
 
@@ -1815,6 +1866,22 @@ function conversationDto(item) {
   };
 }
 
+function messageDto(item) {
+  return {
+    messageId: item.messageId,
+    senderId: item.senderId,
+    receiverId: item.receiverId,
+    orderId: item.orderId ?? null,
+    content: item.content ?? "",
+    attachments: Array.isArray(item.attachments) ? item.attachments.map(attachmentDto) : [],
+    sender: item.sender ? publicPublisherDto(item.sender) : null,
+    receiver: item.receiver ? publicPublisherDto(item.receiver) : null,
+    isRead: Boolean(item.isRead ?? item.readAt),
+    readAt: item.readAt ?? null,
+    createdAt: item.createdAt
+  };
+}
+
 function reviewDto(item) {
   return {
     reviewId: item.reviewId,
@@ -2577,6 +2644,19 @@ function juryVoteError(error) {
   }
   if (error?.code === "JURY_VOTING_CLOSED") {
     return new HttpError(409, "JURY_VOTING_CLOSED", "This dispute is no longer accepting jury votes.");
+  }
+  return error;
+}
+
+function messageError(error) {
+  if (error?.code === "MESSAGE_PARTICIPANT_NOT_FOUND") {
+    return new HttpError(404, "MESSAGE_PARTICIPANT_NOT_FOUND", "Message participant was not found.");
+  }
+  if (error?.code === "MESSAGE_SELF_NOT_ALLOWED") {
+    return new HttpError(409, "MESSAGE_SELF_NOT_ALLOWED", "You cannot send a message to yourself.");
+  }
+  if (error?.code === "INVALID_MESSAGE") {
+    return new HttpError(400, "INVALID_MESSAGE_CONTENT", "Message content or attachment metadata is required.");
   }
   return error;
 }

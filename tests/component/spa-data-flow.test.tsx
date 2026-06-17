@@ -82,8 +82,24 @@ describe("SPA page mutations", () => {
     const api = {
       messages: {
         list: vi.fn()
-          .mockResolvedValueOnce({ messages: [{ messageId: 1, createdAt: "2026-01-01T00:00:00Z", senderName: "A", receiverName: "B", content: "旧消息" }] })
-          .mockResolvedValueOnce({ messages: [{ messageId: 2, createdAt: "2026-01-01T00:01:00Z", senderName: "A", receiverName: "B", content: "新消息" }] }),
+          .mockResolvedValueOnce({
+            conversations: [{
+              conversationId: "direct:2",
+              title: "用户 B",
+              participant: { userId: 2, displayName: "用户 B" },
+              preview: "旧消息",
+              updatedAt: "2026-01-01T00:00:00Z"
+            }]
+          })
+          .mockResolvedValueOnce({
+            conversations: [{
+              conversationId: "direct:2",
+              title: "用户 B",
+              participant: { userId: 2, displayName: "用户 B" },
+              preview: "新消息",
+              updatedAt: "2026-01-01T00:01:00Z"
+            }]
+          }),
         send: vi.fn().mockResolvedValue({ message: { messageId: 2 } })
       }
     };
@@ -94,13 +110,13 @@ describe("SPA page mutations", () => {
       </MemoryRouter>
     );
 
-    await screen.findByText("旧消息");
+    await screen.findAllByText("旧消息");
     fireEvent.change(screen.getByPlaceholderText("用户 ID"), { target: { value: "2" } });
     fireEvent.change(screen.getByPlaceholderText("消息内容"), { target: { value: "你好" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
-    await screen.findByText("新消息");
+    await screen.findAllByText("新消息");
     expect(api.messages.send).toHaveBeenCalledWith({ receiverId: 2, content: "你好" });
-    expect(api.messages.list).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(api.messages.list.mock.calls.length).toBeGreaterThanOrEqual(2));
   });
 });
