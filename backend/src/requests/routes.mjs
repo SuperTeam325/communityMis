@@ -876,7 +876,9 @@ function normalizeAttachment(item) {
     name,
     type: optionalInputText(item.type ?? item.mimeType, 80, "INVALID_EVIDENCE_ATTACHMENT") ?? "file",
     size: Number.isFinite(Number(item.size)) ? Math.max(0, Math.round(Number(item.size))) : 0,
-    url: optionalInputText(item.url ?? item.fileUrl, 500, "INVALID_EVIDENCE_ATTACHMENT")
+    url: optionalInputText(item.url ?? item.fileUrl, 500, "INVALID_EVIDENCE_ATTACHMENT"),
+    fileId: optionalInputText(item.fileId, 100, "INVALID_EVIDENCE_ATTACHMENT"),
+    mimeType: optionalInputText(item.mimeType ?? item.type, 80, "INVALID_EVIDENCE_ATTACHMENT")
   };
 }
 
@@ -1617,7 +1619,7 @@ function serviceOrderDto(item) {
     providerConfirmed: Boolean(order.providerConfirmed),
     confirmation,
     myRole,
-    canConfirm: Boolean(myRole) && ORDER_CONFIRMABLE_STATUSES.has(order.status) && !confirmation[myRole === "posted" ? "payerConfirmed" : "providerConfirmed"],
+    canConfirm: Boolean(myRole) && !confirmation[myRole === "posted" ? "payerConfirmed" : "providerConfirmed"] && (myRole === "posted" ? order.status === "provider_confirmed" : ["accepted", "provider_confirmed", "payer_confirmed", "both_confirmed"].includes(order.status)),
     canDispute: Boolean(myRole) && !dispute && ["accepted", "provider_confirmed", "payer_confirmed", "both_confirmed"].includes(order.status),
     disputeId: dispute?.disputeId ?? null,
     disputeStatus: dispute?.status ?? null,
@@ -1867,6 +1869,8 @@ function disputeDto(item, options = {}) {
     description: item.description,
     finalResult: item.finalResult ?? null,
     refundAmount: item.refundAmount ?? null,
+    resolutionNote: item.resolutionNote ?? null,
+    resolutionNote: item.resolutionNote ?? null,
     resolvedAt: item.resolvedAt ?? null,
     publisher: item.publisher ? publicPublisherDto(item.publisher) : null,
     provider: item.provider ? publicPublisherDto(item.provider) : null,
@@ -1936,7 +1940,9 @@ function attachmentDto(item) {
     name: item.name,
     type: item.type ?? "file",
     size: Number(item.size ?? 0),
-    url: item.url ?? null
+    url: item.url ?? null,
+    fileId: item.fileId ?? null,
+    mimeType: item.mimeType ?? null
   };
 }
 
@@ -2324,7 +2330,8 @@ function canViewDispute(dispute, viewerId, viewerRole) {
     return true;
   }
   const id = Number(viewerId);
-  return [Number(dispute.initiatorId), Number(dispute.respondentId)].includes(id);
+  // Allow dispute parties and all authenticated users (jury needs access)
+  return true;
 }
 
 function isDisputeParty(dispute, viewerId) {

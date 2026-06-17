@@ -1727,6 +1727,8 @@ function adminDisputeDto(item, options = {}) {
     finalResult,
     finalResultText: finalResult ? finalResultText(finalResult) : null,
     refundAmount: item.refundAmount === null || item.refundAmount === undefined ? null : roundMoney(item.refundAmount),
+    resolutionNote: item.resolutionNote ?? null,
+    resolutionNote: item.resolutionNote ?? null,
     providerPayout: finalResult ? roundMoney(Math.max(0, amount - Number(item.refundAmount ?? 0))) : null,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt ?? null,

@@ -14,7 +14,7 @@ export function MessagesPage({ api }: { api: ApiClient }) {
       </section>
       <StateView loading={state.loading} error={state.error} empty={rows.length === 0}>
         <DataTable columns={["时间", "发件人", "收件人", "内容", "状态"]} rows={rows.map((item) => [
-          text(item.createdAt),
+          new Date(String(item.createdAt)).toLocaleString("zh-CN"),
           text(item.senderName ?? item.senderId),
           text(item.receiverName ?? item.receiverId),
           text(item.content),
@@ -95,7 +95,7 @@ export function NotificationsPage({ api }: { api: ApiClient }) {
                   <p className="notif-desc">{text(item.content)}</p>
                   <div className="notif-meta">
                     <span className="badge-state">{text(item.type)}</span>
-                    <span className="notif-time">{text(item.createdAt)}</span>
+                    <span className="notif-time">{new Date(String(item.createdAt)).toLocaleString("zh-CN")}</span>
                   </div>
                 </div>
               </article>

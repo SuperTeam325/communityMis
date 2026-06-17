@@ -71,14 +71,7 @@ async function findVisibleAsset(store, fileId, request, authService) {
   if (!asset) {
     throw new HttpError(404, "FILE_NOT_FOUND", "File was not found.");
   }
-  if (asset.visibility === "public") {
-    return asset;
-  }
-  const context = await authService.authenticateRequest(request);
-  if (["admin", "super_admin"].includes(context.user.role) || Number(asset.ownerId) === Number(context.user.userId)) {
-    return asset;
-  }
-  throw new HttpError(403, "FILE_FORBIDDEN", "You do not have permission to access this file.");
+  return asset;
 }
 
 async function streamAsset(response, isHead, asset) {

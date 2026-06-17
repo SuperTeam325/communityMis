@@ -12,7 +12,7 @@ const runtimeConfig = window.__NEIGHBOR_CONFIG__ ?? {};
 document.documentElement.dataset.routeId = route.id;
 document.documentElement.dataset.routeSurface = route.surface;
 
-const api = createApiClient({
+const api = createApiClient({ allowBearer: true,
   baseUrl: requireApiBaseUrl(runtimeConfig.apiBaseUrl)
 });
 const auth = createAuthController({ api });
@@ -796,6 +796,24 @@ async function hydrateProfileRoute(session) {
     return;
   }
   applyProfileSummary(payload);
+  // Avatar edit
+  const avEl = document.querySelector(".edit-avatar");
+  if (avEl) {
+    const sess = auth.readSession("user");
+    if (sess) {
+      
+      
+      avEl.addEventListener("click", async () => {
+        const files = await chooseImageFiles(1);
+        if (files.length === 0) return;
+        try {
+          const up = await uploadFileAsset(sess, files[0], "avatar", { visibility: "public" });
+          if (up && up.fileId) { await api.users.avatar(sess.token, up.fileId); location.reload(); }
+        } catch (e) { alert("头像更新失败"); }
+      });
+    }
+  }
+
   installProfileActions(payload);
   await loadProfileRuntimePanels(payload);
 }
@@ -2566,7 +2584,7 @@ function applyCommunityPostDetail(post, comments = [], userSession = null) {
         <button class="action-btn" id="comment-focus-btn" type="button">${messageIcon()}评论</button>
         <button class="action-btn ${post.collectedByViewer ? "liked" : ""}" id="collect-post-btn" type="button">${shareIcon()}${post.collectedByViewer ? "已收藏" : "收藏"}</button>
         <a class="action-btn" href="/messages?userId=${encodeURIComponent(author.userId ?? "")}">${messageIcon()}私信</a>
-        <button class="action-btn" id="share-btn" type="button">${shareIcon()}分享</button>
+        <button class="action-btn" id="edit-post-btn" type="button" style="display:none;">编辑</button><button class="action-btn" id="delete-post-btn" type="button" style="display:none;color:var(--danger);">删除</button><button class="action-btn" id="share-btn" type="button">${shareIcon()}分享</button>
       </div>
     </div>
 
@@ -2690,7 +2708,7 @@ function installCommunityPostDetailActions(post, comments, userSession) {
   document.getElementById("comment-focus-btn")?.addEventListener("click", () => {
     document.getElementById("comment-input")?.focus();
   }, true);
-  document.getElementById("share-btn")?.addEventListener("click", () => copyCurrentLink("帖子链接已复制。"), true);
+  const uid=userSession?.user?.userId;if(uid&&Number(post.authorId)===Number(uid)){document.getElementById("edit-post-btn")?.style.setProperty("display","");document.getElementById("delete-post-btn")?.style.setProperty("display","");document.getElementById("edit-post-btn")?.addEventListener("click",()=>{const t=prompt("编辑标题",post.title||"");if(t===null)return;const ct=prompt("编辑内容",post.content||"");if(ct===null)return;fetch(window.__API_BASE_URL__+"/api/community-posts/"+post.postId,{method:"PUT",headers:{"Content-Type":"application/json","Authorization":"Bearer "+userSession.token,"X-CSRF-Token":document.cookie.split("; ").find(r=>r.startsWith("csrf_token="))?.split("=")[1]||""},body:JSON.stringify({title:t,content:ct})}).then(r=>r.ok?location.reload():r.json().then(d=>alert(d.error?.message))).catch(e=>alert(e.message))});document.getElementById("delete-post-btn")?.addEventListener("click",()=>{if(!confirm("确定删除？"))return;fetch(window.__API_BASE_URL__+"/api/community-posts/"+post.postId,{method:"DELETE",headers:{"Authorization":"Bearer "+userSession.token,"X-CSRF-Token":document.cookie.split("; ").find(r=>r.startsWith("csrf_token="))?.split("=")[1]||""}}).then(r=>r.ok?(location.href="/feed"):r.json().then(d=>alert(d.error?.message))).catch(e=>alert(e.message))})}document.getElementById("share-btn")?.addEventListener("click", () => copyCurrentLink("帖子链接已复制。"), true);
   document.getElementById("like-btn")?.addEventListener("click", interceptSubmit(async () => {
     if (!hasUserSession(userSession)) {
       navigateTo(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
@@ -3108,7 +3126,7 @@ function orderListActionHtml(order) {
     return `<div class="order-actions"><a class="btn btn--outline btn--sm" href="/disputes/${encodeURIComponent(order.disputeId)}">查看纠纷</a></div>`;
   }
   if (order.canConfirm) {
-    return `<div class="order-actions"><button class="btn btn--primary btn--sm" type="button" data-order-confirm="${escapeHtml(order.orderId)}">确认完成</button></div>`;
+    return `<div class="order-actions"><button class="btn btn--primary btn--sm" type="button" data-order-confirm="${escapeHtml(order.orderId)}">确认完成</button>${order.canDispute ? `<a class="btn btn--outline btn--sm" href="/disputes/new?order=${encodeURIComponent(order.orderId)}" style="margin-left:4px;">发起纠纷</a>` : ""}</div>`;
   }
   if (order.canDispute) {
     return `<div class="order-actions"><a class="btn btn--outline btn--sm" href="/disputes/new?order=${encodeURIComponent(order.orderId)}">发起纠纷</a></div>`;
@@ -3330,7 +3348,7 @@ function orderDetailConfirmActionHtml(order) {
     return `<a class="btn btn--primary" href="/disputes/${encodeURIComponent(order.disputeId)}">查看纠纷</a>`;
   }
   if (order.canConfirm) {
-    return `<button class="btn btn--primary" id="confirm-order" type="button" data-order-confirm="${escapeHtml(order.orderId)}">确认完成</button>`;
+    return `<button class="btn btn--primary" id="confirm-order" type="button" data-order-confirm="${escapeHtml(order.orderId)}">确认完成</button>${order.canDispute ? `<a class="btn btn--outline" href="/disputes/new?order=${encodeURIComponent(order.orderId)}" style="margin-left:8px;">发起纠纷</a>` : ""}`;
   }
   if (order.canDispute) {
     return `<a class="btn btn--outline" href="/disputes/new?order=${encodeURIComponent(order.orderId)}">发起纠纷</a>`;
@@ -3395,12 +3413,20 @@ async function hydrateDisputeCreateRoute(session) {
 }
 
 function installDisputeCreateControls(userSession, orderId) {
+  document.querySelectorAll(".dispute-type-option").forEach(function(opt) {
+    opt.addEventListener("click", function() {
+      document.querySelectorAll(".dispute-type-option").forEach(function(o) { o.classList.remove("selected"); });
+      opt.classList.add("selected");
+    });
+  });
+
   const button = document.getElementById("submit-btn");
   const textarea = document.getElementById("disp-desc");
   if (!button || !textarea || button.dataset.disputeBound === "true") {
     return;
   }
   button.dataset.disputeBound = "true";
+  button.disabled = false;
   installDisputeEvidenceUpload(userSession, orderId);
   button.addEventListener("click", interceptSubmit(async () => {
     if (button.disabled) {
@@ -3435,8 +3461,8 @@ function installDisputeEvidenceUpload(userSession, orderId) {
     return;
   }
   zone.dataset.uploadBound = "true";
-  zone.addEventListener("click", interceptSubmit(async () => {
-    const files = await selectImageFiles(8);
+  zone.addEventListener("click", async () => {
+    const files = await chooseImageFiles(8);
     if (files.length === 0) {
       return;
     }
@@ -3463,7 +3489,7 @@ function installDisputeEvidenceUpload(userSession, orderId) {
         text.textContent = restoreText || "点击上传证据截图";
       }
     }
-  }), true);
+  }, true);
 }
 
 function appendDisputeEvidenceFiles(files) {
@@ -3607,6 +3633,13 @@ async function hydrateJuryHallRoute(session) {
   }
 }
 
+function renderJuryVotingState(kind, message) {
+  const page = document.querySelector(".jury-page");
+  if (!page) { return; }
+  if (kind === "loading") { page.setAttribute("data-state", "loading"); return; }
+  page.innerHTML = '<div class="s ' + (kind === "error" ? "se" : "") + '"><strong>' + (kind === "loading" ? "加载中" : "无法投票") + '</strong><p>' + message + '</p>' + (kind === "error" ? '<a class="btn btn--outline" href="/orders">返回我的订单</a>' : "") + '</div>';
+}
+
 function renderJuryHallState(kind, message) {
   const list = document.getElementById("L");
   if (!list) {
@@ -3623,42 +3656,34 @@ function renderJuryHallState(kind, message) {
   list.querySelector("[data-jury-retry]")?.addEventListener("click", () => hydrateJuryHallRoute(auth.readSession("user")));
 }
 
+
 function juryHallCard(dispute) {
-  const reason = String(dispute.reason || "暂无纠纷说明").slice(0, 120);
-  return `<a href="/jury/voting?disputeId=${encodeURIComponent(dispute.disputeId)}" class="c">
-    <div class="ch">
-      <span class="ci">#${escapeHtml(dispute.disputeId)}</span>
-      <span class="ct">${escapeHtml(disputeTypeLabel(dispute.type))}</span>
-    </div>
-    <div class="cb">${escapeHtml(reason)}</div>
-    <div class="cf">
-      <span>订单 #${escapeHtml(dispute.orderId ?? "-")}</span>
-      <span>${escapeHtml(formatDateTime(dispute.updatedAt ?? dispute.createdAt))}</span>
-      <span class="ca">参与投票</span>
-    </div>
-  </a>`;
+  const reason = String(dispute.reason || "").slice(0, 120);
+  const isParty = Boolean(dispute.isParty);
+  const isResolved = dispute.status === "resolved" || dispute.status === "cancelled";
+  const isVoting = dispute.status === "jury_voting";
+  const href = "/disputes/" + encodeURIComponent(dispute.disputeId);
+  const actionLabel = isResolved ? "已完结" : (isParty ? "审理中" : (isVoting ? "参与投票" : "审理中"));
+  const actionClass = (!isResolved && !isParty && isVoting) ? "ca" : "";
+  const partyLabel = isParty ? " (我的纠纷)" : "";
+  return '<a href="' + href + '" class="c">' +
+    '<div class="ch">' +
+      '<span class="ci">#' + escapeHtml(dispute.disputeId) + '<span style="font-size:11px;color:var(--warning);font-weight:400;">' + partyLabel + '</span></span>' +
+      '<span class="ct">' + escapeHtml(disputeTypeLabel(dispute.type)) + '</span>' +
+    '</div>' +
+    '<div class="cb">' + escapeHtml(reason) + '</div>' +
+    '<div class="cf">' +
+      '<span>' + escapeHtml(disputeStatusLabel(dispute.status)) + '</span>' +
+      '<span>' + escapeHtml(formatDateTime(dispute.updatedAt ?? dispute.createdAt)) + '</span>' +
+      '<span class="' + actionClass + '">' + actionLabel + '</span>' +
+    '</div>' +
+  '</a>';
 }
 
-function renderJuryVotingState(kind, message) {
-  const page = document.querySelector(".jury-page");
-  if (!page) {
-    return;
-  }
-  // load static HTML
-  if (kind === "loading") {
-    page.setAttribute("data-state", "loading");
-    return;
-  }
-  page.innerHTML = `
-    <a class="jury-back" href="/orders">← 返回</a>
-    <div class="task-runtime-state" data-state="${escapeHtml(kind)}">
-      <strong>${escapeHtml(kind === "loading" ? "加载中" : "无法投票")}</strong>
-      <p>${escapeHtml(message)}</p>
-      ${kind === "error" ? '<a class="btn btn--outline" href="/orders">返回我的订单</a>' : ""}
-    </div>
-  `;
+function disputeStatusLabel(status) {
+  var map = { "pending": "待处理", "evidence_collecting": "证据收集", "jury_voting": "陪审投票中", "admin_review": "管理员审核", "resolved": "已解决", "cancelled": "已取消" };
+  return map[status] || status || "未知";
 }
-
 function applyJuryVotingPage(dispute, juryResult, userSession) {
   const page = document.querySelector(".jury-page");
   if (!page) {
@@ -3924,14 +3949,16 @@ function applyDisputeDetail(dispute, userSession) {
   const publisher = dispute.publisher ?? {};
   const provider = dispute.provider ?? {};
   const initiatorId = Number(dispute.initiator?.userId);
+  const isParty = userSession && (Number(userSession.user?.userId) === initiatorId || Number(userSession.user?.userId) === Number(dispute.respondent?.userId));
   body.innerHTML = `
-    <div class="status-banner in-progress">
+    <div class="status-banner ${["resolved","cancelled"].includes(dispute.status) ? "resolved" : "in-progress"}">
       <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
       <div class="sb-text">
         <h4>${escapeHtml(disputeStatusTitle(dispute.status))}</h4>
         <p>${escapeHtml(disputeStatusText(dispute.status))}</p>
       </div>
     </div>
+    ${dispute.resolutionNote ? `<div class="resolution-note" style="margin:var(--space-md) 0;padding:var(--space-lg);background:#f0fdf4;border:1px solid #22c55e;border-radius:var(--radius-md);"><strong style="color:#16a34a;">管理员结案评语</strong><p style="margin-top:4px;">${escapeHtml(dispute.resolutionNote)}</p></div>` : ""}
 
     <div class="dd-info">
       <div class="dd-no">#DSP-${escapeHtml(dispute.disputeId)}</div>
@@ -3953,13 +3980,14 @@ function applyDisputeDetail(dispute, userSession) {
       ${disputeProgressHtml(dispute.progress)}
     </div>
 
-    <div class="my-vote-section">
+${!["resolved","cancelled"].includes(dispute.status) && isParty ? `    <div class="my-vote-section">
       <h4>补充证据</h4>
       <div class="vote-extra" style="display:block;">
         <textarea id="new-evidence-content" placeholder="补充事实说明或对现有证据的回应..."></textarea>
       </div>
+      <button class="btn btn--outline btn--sm" id="upload-evidence-img" type="button" style="margin-right:8px;">上传截图</button>
       <button class="btn btn--primary btn--lg" id="submit-evidence-btn" style="margin-top:var(--space-lg);">提交证据</button>
-    </div>
+    </div>` : ""}
 
     ${disputeJuryResultPanel(dispute)}
 
@@ -3977,7 +4005,7 @@ function applyDisputeDetail(dispute, userSession) {
       <div class="ai-disclaimer">AI 摘要只整理事实和辅助建议，不能裁决、退款或修改纠纷状态。</div>
     </div>
   `;
-  installEvidenceSubmit(dispute, userSession);
+  if (!["resolved","cancelled"].includes(dispute.status) && isParty) { installEvidenceSubmit(dispute, userSession); }
   document.getElementById("dispute-ai-summary-btn")?.addEventListener("click", async (event) => {
     event.preventDefault();
     await loadDisputeAiSummary(event.currentTarget, userSession, dispute.disputeId);
@@ -4078,13 +4106,18 @@ function disputePartyPanel(role, user, dispute, isInitiator) {
 }
 
 function disputeEvidenceHtml(item) {
-  const attachments = Array.isArray(item.attachments) && item.attachments.length > 0 ? item.attachments : [{ name: item.content || "文字说明" }];
-  return attachments.map((attachment) => `
-    <div class="ev-file-item" title="${escapeHtml(item.content || "")}">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="9 3 9 21"/></svg>
-      <span>${escapeHtml(attachment.name)}</span>
-    </div>
-  `).join("");
+  const attachments = Array.isArray(item.attachments) && item.attachments.length > 0 ? item.attachments : [{ name: item.content || "" }];
+  return attachments.map((attachment) => {
+    const fid = attachment.fileId || "";
+    const url = attachment.url || (fid ? "/api/files/" + encodeURIComponent(fid) : "");
+    if (url) {
+      return '<a href="' + url + '" target="_blank" class="ev-file-img"><img src="' + url + '" style="max-width:100%;max-height:300px;border-radius:8px;display:block;" alt=""></a>';
+    }
+    if (url) {
+      return '<a class="ev-file-item" href="' + url + '" target="_blank"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="9 3 9 21"/></svg><span>' + escapeHtml(attachment.name) + '</span></a>';
+    }
+    return '<div class="ev-file-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="9 3 9 21"/></svg><span>' + escapeHtml(attachment.name) + '</span></div>';
+  }).join("");
 }
 
 function disputeProgressHtml(progress) {
@@ -4105,6 +4138,25 @@ function disputeProgressHtml(progress) {
 }
 
 function installEvidenceSubmit(dispute, userSession) {
+  const imgBtn = document.getElementById("upload-evidence-img");
+  let evidenceFiles = [];
+  if (imgBtn) {
+    imgBtn.addEventListener("click", async () => {
+      const files = await chooseImageFiles(5);
+      if (files.length === 0) return;
+      const t = imgBtn.textContent;
+      imgBtn.textContent = "上传中...";
+      try {
+        for (const file of files) {
+          const up = await uploadFileAsset(userSession, file, "dispute-evidence", { businessType: "dispute", businessId: dispute.disputeId || "", visibility: "private" });
+          evidenceFiles.push(up);
+        }
+        showInlineMessage(imgBtn, "已上传 " + files.length + " 张", "success");
+      } catch (e) { showInlineMessage(imgBtn, disputeErrorMessage(e), "error"); }
+      finally { imgBtn.textContent = t; }
+    });
+  }
+
   const button = document.getElementById("submit-evidence-btn");
   const textarea = document.getElementById("new-evidence-content");
   if (!button || !textarea) {
@@ -4119,8 +4171,9 @@ function installEvidenceSubmit(dispute, userSession) {
     const restore = setLoading(button, "提交中...");
     try {
       const result = await api.disputes.evidence(userSession.token, dispute.disputeId, {
-        evidenceType: "text",
-        content
+        evidenceType: evidenceFiles.length > 0 ? "file" : "text",
+        content,
+        ...(evidenceFiles.length > 0 ? { attachments: evidenceFiles.map(f => ({ name: f.originalName || "evidence", fileId: f.fileId, mimeType: f.mimeType || "image/png", size: f.size || 0 })) } : {})
       });
       applyDisputeDetail(result.dispute, userSession);
       showGlobalMessage("证据已提交。", "success");
@@ -4152,6 +4205,7 @@ async function hydrateReviewRoute(session) {
 }
 
 function applyReviewForm(order, reviewState, userSession) {
+  document.querySelector(".review-body .loading-overlay")?.remove();
   if (!order || !reviewState) {
     renderReviewState("error", "评价数据不可用，请稍后重试。");
     return;
@@ -9196,7 +9250,7 @@ function applyProfileSummary(payload) {
   const draft = auth.readProfileDraft(user);
   setElementText(".profile-name", displayName(user));
   setElementText(".profile-bio", user.bio || draft?.bio || profileDetails(user, draft));
-  setElementText(".avatar.lg", firstCharacter(displayName(user)));
+  setElementText(".avatar.lg", firstCharacter(displayName(user))); if (user.avatarFileId) { const a = document.querySelector(".avatar.lg"); if (a) { a.style.backgroundImage = "url(/api/files/" + encodeURIComponent(user.avatarFileId) + ")"; a.style.backgroundSize = "cover"; a.textContent = ""; } }
   setElementText(".credit-badge", credit.reviewCount > 0 ? `信誉 ${formatRating(credit.averageRating)}` : "暂无评价");
   setElementText(".wallet-balance", `⏂ ${formatAmount(wallet?.balance ?? 0)}`);
   setElementText(".wallet-card .wallet-label", wallet?.frozenBalance > 0 ? `我的钱包 · 冻结 ⏂ ${formatAmount(wallet.frozenBalance)}` : "我的钱包");
@@ -9786,6 +9840,7 @@ function clearLocalRuntimeCache() {
 }
 
 function applyPublicProfile(payload) {
+  document.querySelector(".loading-overlay")?.remove();
   const { user, credit } = payload;
   setElementText(".public-avatar", firstCharacter(displayName(user)));
   setElementText(".public-name", displayName(user));

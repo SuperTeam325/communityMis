@@ -335,8 +335,8 @@ FROM (
     c.\`description\`,
     c.\`sort_order\`,
     c.\`status\`,
-    DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
-    DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`updated_at\`
+    DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`created_at\`,
+    DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`updated_at\`
   FROM \`category\` c
   WHERE c.\`status\` = 1
   ORDER BY c.\`sort_order\` ASC, c.\`category_id\` ASC
@@ -630,8 +630,8 @@ FROM (
     sw.\`level\`,
     sw.\`status\`,
     sw.\`created_by\`,
-    DATE_FORMAT(sw.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
-    DATE_FORMAT(sw.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`updated_at\`
+    DATE_FORMAT(sw.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`created_at\`,
+    DATE_FORMAT(sw.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`updated_at\`
   FROM \`sensitive_word\` sw
   ${where.clause}
   ORDER BY sw.\`created_at\` DESC, sw.\`word_id\` DESC
@@ -759,7 +759,7 @@ LIMIT 1;
   }
 
   async function getSystemSettings() {
-    const row = await pooledOne("SELECT `config_value` AS configValue, DATE_FORMAT(`updated_at`, '%Y-%m-%dT%H:%i:%s.000Z') AS updatedAt FROM `system_config` WHERE `config_key` = 'system.settings' LIMIT 1");
+    const row = await pooledOne("SELECT `config_value` AS configValue, DATE_FORMAT(`updated_at`, '%Y-%m-%dT%H:%i:%s.000') AS updatedAt FROM `system_config` WHERE `config_key` = 'system.settings' LIMIT 1");
     const stored = row?.configValue && typeof row.configValue === "object" ? row.configValue : null;
     return normalizeSystemSettings(stored ? { ...stored, updatedAt: row.updatedAt ?? stored.updatedAt } : systemSettings);
   }
@@ -889,16 +889,16 @@ FROM (
     CAST(sr.\`coin_amount\` AS DOUBLE) AS \`coin_amount\`,
     sr.\`status\`,
     p.\`status\` AS \`publisher_status\`,
-    DATE_FORMAT(sr.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
-    DATE_FORMAT(sr.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`updated_at\`,
+    DATE_FORMAT(sr.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`created_at\`,
+    DATE_FORMAT(sr.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`updated_at\`,
     c.\`parent_id\` AS \`category_parent_id\`,
     c.\`name\` AS \`category_name\`,
     c.\`code\` AS \`category_code\`,
     c.\`description\` AS \`category_description\`,
     c.\`sort_order\` AS \`category_sort_order\`,
     c.\`status\` AS \`category_status\`,
-    DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`category_created_at\`,
-    DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`category_updated_at\`
+    DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`category_created_at\`,
+    DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`category_updated_at\`
   FROM \`service_request\` sr
   JOIN \`user\` p ON p.\`user_id\` = sr.\`publisher_id\`
   LEFT JOIN \`category\` c ON c.\`category_id\` = sr.\`category_id\`
@@ -955,8 +955,8 @@ SELECT JSON_OBJECT(
   'status', sr.\`status\`,
   'tags', JSON_ARRAY(),
   'visible', p.\`status\` = 1,
-  'createdAt', DATE_FORMAT(sr.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
-  'updatedAt', DATE_FORMAT(sr.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
+  'createdAt', DATE_FORMAT(sr.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000'),
+  'updatedAt', DATE_FORMAT(sr.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000'),
   'category', IF(c.\`category_id\` IS NULL, NULL, JSON_OBJECT(
     'categoryId', c.\`category_id\`,
     'parentId', c.\`parent_id\`,
@@ -965,8 +965,8 @@ SELECT JSON_OBJECT(
     'description', c.\`description\`,
     'sortOrder', c.\`sort_order\`,
     'status', c.\`status\`,
-    'createdAt', DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
-    'updatedAt', DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+    'createdAt', DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000'),
+    'updatedAt', DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000')
   ))
 )
 FROM \`service_request\` sr
@@ -1477,7 +1477,7 @@ FROM (
     CAST(tl.\`amount\` AS DOUBLE) AS \`amount\`,
     CAST(tl.\`balance_after\` AS DOUBLE) AS \`balance_after\`,
     tl.\`remark\`,
-    DATE_FORMAT(tl.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    DATE_FORMAT(tl.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`created_at\`,
     so.\`request_id\`,
     d.\`dispute_id\`,
     sr.\`title\` AS \`related_title\`,
@@ -1543,8 +1543,8 @@ FROM (
     sr.\`title\` AS \`related_title\`,
     IF(d.\`dispute_id\` IS NOT NULL, 'dispute', 'order') AS \`business_type\`,
     IF(d.\`dispute_id\` IS NOT NULL, d.\`dispute_id\`, tl.\`order_id\`) AS \`business_id\`,
-    DATE_FORMAT(tl.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
-    IF(so.\`status\` = 'completed', DATE_FORMAT(so.\`completed_at\`, '%Y-%m-%dT%H:%i:%s.000Z'), NULL) AS \`released_at\`
+    DATE_FORMAT(tl.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`created_at\`,
+    IF(so.\`status\` = 'completed', DATE_FORMAT(so.\`completed_at\`, '%Y-%m-%dT%H:%i:%s.000'), NULL) AS \`released_at\`
   FROM \`transaction_log\` tl
   LEFT JOIN \`service_order\` so ON so.\`order_id\` = tl.\`order_id\`
   LEFT JOIN \`service_request\` sr ON sr.\`request_id\` = so.\`request_id\`
@@ -1760,7 +1760,7 @@ FROM (
       ORDER BY m2.created_at DESC, m2.message_id DESC LIMIT 1)
     ) AS preview,
     SUM(IF(m.receiver_id = ${id} AND m.is_read = 0, 1, 0)) AS unread,
-    DATE_FORMAT(MAX(m.created_at), '%Y-%m-%dT%H:%i:%s.000Z') AS updated,
+    DATE_FORMAT(MAX(m.created_at), '%Y-%m-%dT%H:%i:%s.000') AS updated,
     IF(m.order_id IS NULL, CONCAT('/messages?userId=', ou.user_id), CONCAT('/orders/', m.order_id)) AS href
   FROM message m
   LEFT JOIN user ou ON ou.user_id = IF(m.sender_id = ${id}, m.receiver_id, m.sender_id)
@@ -1961,7 +1961,7 @@ SELECT
   @provider_id := so.\`provider_id\`,
   @coin_amount := so.\`coin_amount\`,
   @authorized := IF(sr.\`publisher_id\` = @initiator_id OR so.\`provider_id\` = @initiator_id, 1, 0),
-  @status_allowed := IF(so.\`status\` IN ('accepted', 'payer_confirmed', 'both_confirmed', 'disputed'), 1, 0),
+  @status_allowed := IF(so.\`status\` IN ('accepted', 'provider_confirmed', 'payer_confirmed', 'both_confirmed', 'disputed'), 1, 0),
   @respondent_id := IF(sr.\`publisher_id\` = @initiator_id, so.\`provider_id\`, sr.\`publisher_id\`)
 FROM \`service_order\` so
 JOIN \`service_request\` sr ON sr.\`request_id\` = so.\`request_id\`
@@ -2071,9 +2071,15 @@ SELECT JSON_OBJECT(
 
   async function findDisputeById(disputeId) {
     const disputes = await listDisputes(`d.\`dispute_id\` = ${Number(disputeId)}`);
-    return disputes[0] ?? null;
+    const dispute = disputes[0] ?? null;
+    if (dispute) {
+      try {
+        const row = await pooledOne('SELECT resolution_note AS resolutionNote FROM dispute WHERE dispute_id = ?', [Number(disputeId)]);
+        dispute.resolutionNote = row?.resolutionNote ?? null;
+      } catch {}
+    }
+    return dispute;
   }
-
   async function findDisputeByOrderId(orderId) {
     const disputes = await listDisputes(`d.\`order_id\` = ${Number(orderId)}`);
     return disputes[0] ?? null;
@@ -2186,7 +2192,7 @@ FROM (
     de.\`evidence_type\`,
     de.\`content\`,
     de.\`file_url\`,
-    DATE_FORMAT(de.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    DATE_FORMAT(de.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`created_at\`,
     u.\`username\` AS \`uploader_username\`
   FROM \`dispute_evidence\` de
   JOIN \`user\` u ON u.\`user_id\` = de.\`uploader_id\`
@@ -2324,10 +2330,10 @@ FROM (
     jv.\`juror_id\`,
     jv.\`vote\`,
     jv.\`reason\`,
-    DATE_FORMAT(jv.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    DATE_FORMAT(jv.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`created_at\`,
     u.\`username\` AS \`juror_username\`,
     u.\`skill_tags\` AS \`juror_skill_tags\`,
-    DATE_FORMAT(u.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`juror_created_at\`
+    DATE_FORMAT(u.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`juror_created_at\`
   FROM \`jury_vote\` jv
   JOIN \`user\` u ON u.\`user_id\` = jv.\`juror_id\`
   WHERE jv.\`dispute_id\` = ${Number(disputeId)}
@@ -2402,18 +2408,18 @@ FROM (
     d.\`status\`,
     d.\`final_result\`,
     CAST(d.\`refund_amount\` AS DOUBLE) AS \`refund_amount\`,
-    DATE_FORMAT(d.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
-    DATE_FORMAT(d.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`updated_at\`,
-    IF(d.\`resolved_at\` IS NULL, NULL, DATE_FORMAT(d.\`resolved_at\`, '%Y-%m-%dT%H:%i:%s.000Z')) AS \`resolved_at\`,
+    DATE_FORMAT(d.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`created_at\`,
+    DATE_FORMAT(d.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`updated_at\`,
+    IF(d.\`resolved_at\` IS NULL, NULL, DATE_FORMAT(d.\`resolved_at\`, '%Y-%m-%dT%H:%i:%s.000')) AS \`resolved_at\`,
     so.\`request_id\`,
     so.\`provider_id\`,
     so.\`status\` AS \`order_status\`,
     so.\`payer_confirmed\`,
     so.\`provider_confirmed\`,
     CAST(so.\`coin_amount\` AS DOUBLE) AS \`coin_amount\`,
-    DATE_FORMAT(so.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`order_created_at\`,
-    DATE_FORMAT(so.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`order_updated_at\`,
-    IF(so.\`completed_at\` IS NULL, NULL, DATE_FORMAT(so.\`completed_at\`, '%Y-%m-%dT%H:%i:%s.000Z')) AS \`completed_at\`,
+    DATE_FORMAT(so.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`order_created_at\`,
+    DATE_FORMAT(so.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`order_updated_at\`,
+    IF(so.\`completed_at\` IS NULL, NULL, DATE_FORMAT(so.\`completed_at\`, '%Y-%m-%dT%H:%i:%s.000')) AS \`completed_at\`,
     sr.\`publisher_id\`,
     sr.\`category_id\`,
     sr.\`title\`,
@@ -2422,8 +2428,8 @@ FROM (
     CAST(sr.\`estimated_hours\` AS DOUBLE) AS \`estimated_hours\`,
     CAST(sr.\`coin_amount\` AS DOUBLE) AS \`request_coin_amount\`,
     sr.\`status\` AS \`request_status\`,
-    DATE_FORMAT(sr.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`request_created_at\`,
-    DATE_FORMAT(sr.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`request_updated_at\`,
+    DATE_FORMAT(sr.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`request_created_at\`,
+    DATE_FORMAT(sr.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`request_updated_at\`,
     initiator.\`username\` AS \`initiator_username\`,
     respondent.\`username\` AS \`respondent_username\`,
     publisher.\`username\` AS \`publisher_username\`,
@@ -2484,7 +2490,7 @@ FROM (
     r.\`rating\`,
     r.\`comment\`,
     sr.\`title\` AS \`order_title\`,
-    DATE_FORMAT(r.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    DATE_FORMAT(r.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`created_at\`,
     reviewer.\`username\` AS \`reviewer_username\`,
     reviewer.\`username\` AS \`reviewer_display_name\`,
     target.\`username\` AS \`target_username\`,
@@ -2572,8 +2578,8 @@ FROM (
     u.\`skill_tags\`,
     u.\`role\`,
     u.\`status\`,
-    DATE_FORMAT(u.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
-    DATE_FORMAT(u.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`updated_at\`,
+    DATE_FORMAT(u.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`created_at\`,
+    DATE_FORMAT(u.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`updated_at\`,
     w.\`wallet_id\`,
     CAST(w.\`balance\` AS DOUBLE) AS \`balance\`,
     CAST(w.\`frozen_balance\` AS DOUBLE) AS \`frozen_balance\`,
@@ -2777,7 +2783,7 @@ FROM (
     CAST(tl.\`amount\` AS DOUBLE) AS \`amount\`,
     CAST(tl.\`balance_after\` AS DOUBLE) AS \`balance_after\`,
     tl.\`remark\`,
-    DATE_FORMAT(tl.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    DATE_FORMAT(tl.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`created_at\`,
     so.\`request_id\`,
     d.\`dispute_id\`,
     sr.\`title\` AS \`related_title\`,
@@ -3477,8 +3483,8 @@ FROM (
     c.\`role_type\`,
     c.\`scene\`,
     c.\`status\`,
-    DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
-    DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`updated_at\`,
+    DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`created_at\`,
+    DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`updated_at\`,
     (
       SELECT m.\`content\`
       FROM \`ai_message\` m
@@ -3544,8 +3550,8 @@ FROM (
     c.\`role_type\`,
     c.\`scene\`,
     c.\`status\`,
-    DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
-    DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`updated_at\`,
+    DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`created_at\`,
+    DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`updated_at\`,
     (SELECT m.\`content\` FROM \`ai_message\` m WHERE m.\`conversation_id\` = c.\`conversation_id\` ORDER BY m.\`created_at\` DESC, m.\`message_id\` DESC LIMIT 1) AS \`preview\`,
     (SELECT COUNT(*) FROM \`ai_message\` m WHERE m.\`conversation_id\` = c.\`conversation_id\`) AS \`message_count\`,
     (SELECT COUNT(*) FROM \`ai_message\` m WHERE m.\`conversation_id\` = c.\`conversation_id\` AND m.\`sensitive_hit\` = 1) AS \`sensitive_hit_count\`,
@@ -3719,7 +3725,7 @@ SELECT JSON_OBJECT(
 FROM (
   SELECT
     l.*,
-    DATE_FORMAT(l.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    DATE_FORMAT(l.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`created_at\`,
     ${aiExceptionCaseSql("l")} AS \`exception_type\`,
     ${aiExceptionRiskCaseSql(aiExceptionCaseSql("l"))} AS \`risk_level\`,
     COALESCE(l.\`error_message\`, (SELECT m.\`content\` FROM \`ai_message\` m WHERE m.\`conversation_id\` = l.\`conversation_id\` ORDER BY m.\`created_at\` DESC, m.\`message_id\` DESC LIMIT 1) AS \`reason\`,
@@ -3780,7 +3786,7 @@ SELECT JSON_OBJECT(
   'userId', \`user_id\`,
   'rating', \`rating\`,
   'comment', \`comment\`,
-  'createdAt', DATE_FORMAT(\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+  'createdAt', DATE_FORMAT(\`created_at\`, '%Y-%m-%dT%H:%i:%s.000')
 )
 FROM \`ai_feedback\`
 WHERE \`message_id\` = ${messageId}
@@ -3826,7 +3832,7 @@ SELECT JSON_OBJECT(
 FROM (
   SELECT
     f.*,
-    DATE_FORMAT(f.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS \`created_at\`,
+    DATE_FORMAT(f.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS \`created_at\`,
     IF(u.\`user_id\` IS NULL, NULL, ${userJsonObjectSql("u")}) AS \`user_json\`,
     ${aiMessageJsonObjectSql("m")} AS \`message_json\`,
     ${aiConversationJsonObjectSql("c")} AS \`conversation_json\`,
@@ -3865,7 +3871,7 @@ SELECT JSON_OBJECT(
   'userId', f.\`user_id\`,
   'rating', f.\`rating\`,
   'comment', f.\`comment\`,
-  'createdAt', DATE_FORMAT(f.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+  'createdAt', DATE_FORMAT(f.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000')
 )
 FROM \`ai_feedback\` f
 WHERE f.\`feedback_id\` = ${id}
@@ -3892,7 +3898,7 @@ LIMIT 1;
 SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
   'key', \`config_key\`,
   'value', \`config_value\`,
-  'updatedAt', DATE_FORMAT(\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+  'updatedAt', DATE_FORMAT(\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000')
 )), JSON_ARRAY())
 FROM \`ai_config\`
 WHERE \`config_key\` LIKE 'ai.%';
@@ -3989,14 +3995,14 @@ SELECT
   \`purpose\`,
   \`recipient\`,
   \`code_hash\` AS codeHash,
-  DATE_FORMAT(\`expires_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS expiresAt,
+  DATE_FORMAT(\`expires_at\`, '%Y-%m-%dT%H:%i:%s.000') AS expiresAt,
   \`attempt_count\` AS attemptCount,
   \`send_status\` AS sendStatus,
   \`provider_message_id\` AS providerMessageId,
-  IF(\`sent_at\` IS NULL, NULL, DATE_FORMAT(\`sent_at\`, '%Y-%m-%dT%H:%i:%s.000Z')) AS sentAt,
+  IF(\`sent_at\` IS NULL, NULL, DATE_FORMAT(\`sent_at\`, '%Y-%m-%dT%H:%i:%s.000')) AS sentAt,
   \`provider_error\` AS providerError,
-  IF(\`used_at\` IS NULL, NULL, DATE_FORMAT(\`used_at\`, '%Y-%m-%dT%H:%i:%s.000Z')) AS usedAt,
-  DATE_FORMAT(\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS createdAt
+  IF(\`used_at\` IS NULL, NULL, DATE_FORMAT(\`used_at\`, '%Y-%m-%dT%H:%i:%s.000')) AS usedAt,
+  DATE_FORMAT(\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS createdAt
 FROM \`verification_code\`
 WHERE \`verification_token\` = ?
 LIMIT 1
@@ -4014,9 +4020,9 @@ SELECT
   \`purpose\`,
   \`recipient\`,
   \`code_hash\` AS codeHash,
-  DATE_FORMAT(\`expires_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS expiresAt,
+  DATE_FORMAT(\`expires_at\`, '%Y-%m-%dT%H:%i:%s.000') AS expiresAt,
   \`attempt_count\` AS attemptCount,
-  IF(\`used_at\` IS NULL, NULL, DATE_FORMAT(\`used_at\`, '%Y-%m-%dT%H:%i:%s.000Z')) AS usedAt
+  IF(\`used_at\` IS NULL, NULL, DATE_FORMAT(\`used_at\`, '%Y-%m-%dT%H:%i:%s.000')) AS usedAt
 FROM \`verification_code\`
 WHERE \`verification_token\` = ?
   AND \`channel\` = ?
@@ -4093,7 +4099,7 @@ SELECT
   \`mime_type\` AS mimeType,
   \`size_bytes\` AS sizeBytes,
   COALESCE(\`visibility\`, 'private') AS visibility,
-  DATE_FORMAT(\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS createdAt
+  DATE_FORMAT(\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS createdAt
 FROM \`file_asset\`
 WHERE \`file_id\` = ?
 LIMIT 1
@@ -4134,8 +4140,8 @@ SELECT
   p.\`like_count\` AS likeCount,
   p.\`comment_count\` AS commentCount,
   p.\`collect_count\` AS collectCount,
-  DATE_FORMAT(p.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS createdAt,
-  DATE_FORMAT(p.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS updatedAt,
+  DATE_FORMAT(p.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS createdAt,
+  DATE_FORMAT(p.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000') AS updatedAt,
   ${userJsonObjectSql("u", "up")} AS authorJson,
   IF(c.\`category_id\` IS NULL, NULL, ${categoryJsonObjectSql("c")}) AS categoryJson,
   ${viewerId === null ? "0" : "EXISTS(SELECT 1 FROM `community_post_like` l WHERE l.`post_id` = p.`post_id` AND l.`user_id` = ?)"} AS likedByViewer,
@@ -4185,8 +4191,8 @@ SELECT
   p.\`like_count\` AS likeCount,
   p.\`comment_count\` AS commentCount,
   p.\`collect_count\` AS collectCount,
-  DATE_FORMAT(p.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS createdAt,
-  DATE_FORMAT(p.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS updatedAt,
+  DATE_FORMAT(p.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS createdAt,
+  DATE_FORMAT(p.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000') AS updatedAt,
   ${userJsonObjectSql("u", "up")} AS authorJson,
   IF(c.\`category_id\` IS NULL, NULL, ${categoryJsonObjectSql("c")}) AS categoryJson,
   ${viewerId === null ? "0" : "EXISTS(SELECT 1 FROM `community_post_like` l WHERE l.`post_id` = p.`post_id` AND l.`user_id` = ?)"} AS likedByViewer,
@@ -4282,8 +4288,8 @@ SELECT
   c.\`parent_id\` AS parentId,
   c.\`content\`,
   c.\`like_count\` AS likeCount,
-  DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS createdAt,
-  DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS updatedAt,
+  DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS createdAt,
+  DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000') AS updatedAt,
   ${userJsonObjectSql("u", "up")} AS userJson,
   ${viewerId === null ? "0" : "EXISTS(SELECT 1 FROM `community_post_comment_like` l WHERE l.`comment_id` = c.`comment_id` AND l.`user_id` = ?)"} AS likedByViewer
 FROM \`community_post_comment\` c
@@ -4346,7 +4352,7 @@ SELECT
   uc.\`user_id\` AS userId,
   uc.\`target_type\` AS targetType,
   uc.\`target_id\` AS targetId,
-  DATE_FORMAT(uc.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS createdAt
+  DATE_FORMAT(uc.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS createdAt
 FROM \`user_collection\` uc
 ${where}
 ORDER BY uc.\`created_at\` DESC
@@ -4449,8 +4455,8 @@ SELECT
   m.\`business_id\` AS businessId,
   m.\`content\`,
   m.\`is_read\` AS isRead,
-  IF(m.\`read_at\` IS NULL, NULL, DATE_FORMAT(m.\`read_at\`, '%Y-%m-%dT%H:%i:%s.000Z')) AS readAt,
-  DATE_FORMAT(m.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS createdAt
+  IF(m.\`read_at\` IS NULL, NULL, DATE_FORMAT(m.\`read_at\`, '%Y-%m-%dT%H:%i:%s.000')) AS readAt,
+  DATE_FORMAT(m.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS createdAt
 FROM \`message\` m
 WHERE ((m.\`sender_id\` = ? AND m.\`receiver_id\` = ?) OR (m.\`sender_id\` = ? AND m.\`receiver_id\` = ?))
   AND ${orderClause}
@@ -4515,8 +4521,8 @@ SELECT
   m.\`business_id\` AS businessId,
   m.\`content\`,
   m.\`is_read\` AS isRead,
-  IF(m.\`read_at\` IS NULL, NULL, DATE_FORMAT(m.\`read_at\`, '%Y-%m-%dT%H:%i:%s.000Z')) AS readAt,
-  DATE_FORMAT(m.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS createdAt
+  IF(m.\`read_at\` IS NULL, NULL, DATE_FORMAT(m.\`read_at\`, '%Y-%m-%dT%H:%i:%s.000')) AS readAt,
+  DATE_FORMAT(m.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS createdAt
 FROM \`message\` m
 WHERE m.\`message_id\` = ?
   ${viewerId === null ? "" : "AND (m.`sender_id` = ? OR m.`receiver_id` = ?)"}
@@ -4538,8 +4544,8 @@ SELECT
   c.\`parent_id\` AS parentId,
   c.\`content\`,
   c.\`like_count\` AS likeCount,
-  DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS createdAt,
-  DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS updatedAt,
+  DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS createdAt,
+  DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000') AS updatedAt,
   ${userJsonObjectSql("u")} AS userJson,
   ${viewerId === null ? "0" : "EXISTS(SELECT 1 FROM `request_comment_like` l WHERE l.`comment_id` = c.`comment_id` AND l.`user_id` = ?)"} AS likedByViewer
 FROM \`request_comment\` c
@@ -4612,8 +4618,8 @@ SELECT
   c.\`parent_id\` AS parentId,
   c.\`content\`,
   c.\`like_count\` AS likeCount,
-  DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS createdAt,
-  DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS updatedAt,
+  DATE_FORMAT(c.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS createdAt,
+  DATE_FORMAT(c.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000') AS updatedAt,
   ${userJsonObjectSql("u")} AS userJson,
   ${viewerId === null ? "0" : "EXISTS(SELECT 1 FROM `request_comment_like` l WHERE l.`comment_id` = c.`comment_id` AND l.`user_id` = ?)"} AS likedByViewer
 FROM \`request_comment\` c
@@ -4857,9 +4863,9 @@ SELECT
   \`user_id\` AS userId,
   \`role\`,
   \`csrf_token\` AS csrfToken,
-  DATE_FORMAT(\`expires_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS expiresAt,
-  DATE_FORMAT(\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS createdAt,
-  IF(\`revoked_at\` IS NULL, NULL, DATE_FORMAT(\`revoked_at\`, '%Y-%m-%dT%H:%i:%s.000Z')) AS revokedAt,
+  DATE_FORMAT(\`expires_at\`, '%Y-%m-%dT%H:%i:%s.000') AS expiresAt,
+  DATE_FORMAT(\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS createdAt,
+  IF(\`revoked_at\` IS NULL, NULL, DATE_FORMAT(\`revoked_at\`, '%Y-%m-%dT%H:%i:%s.000')) AS revokedAt,
   \`ip_address\` AS ipAddress,
   \`user_agent\` AS userAgent
 FROM \`auth_session\`
@@ -4897,9 +4903,9 @@ SELECT
   \`user_id\` AS userId,
   \`role\`,
   \`csrf_token\` AS csrfToken,
-  DATE_FORMAT(\`expires_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS expiresAt,
-  DATE_FORMAT(\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z') AS createdAt,
-  IF(\`revoked_at\` IS NULL, NULL, DATE_FORMAT(\`revoked_at\`, '%Y-%m-%dT%H:%i:%s.000Z')) AS revokedAt,
+  DATE_FORMAT(\`expires_at\`, '%Y-%m-%dT%H:%i:%s.000') AS expiresAt,
+  DATE_FORMAT(\`created_at\`, '%Y-%m-%dT%H:%i:%s.000') AS createdAt,
+  IF(\`revoked_at\` IS NULL, NULL, DATE_FORMAT(\`revoked_at\`, '%Y-%m-%dT%H:%i:%s.000')) AS revokedAt,
   \`ip_address\` AS ipAddress,
   \`user_agent\` AS userAgent
 FROM \`auth_session\`
@@ -5186,8 +5192,8 @@ function userJsonObjectSql(alias, profileAlias = null) {
     'isJury', ${profile("is_jury", "0")},
     'role', ${alias}.\`role\`,
     'status', ${alias}.\`status\`,
-    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
-    'updatedAt', DATE_FORMAT(${alias}.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000'),
+    'updatedAt', DATE_FORMAT(${alias}.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000')
   )`;
 }
 
@@ -5198,8 +5204,8 @@ function walletJsonObjectSql(alias) {
     'balance', CAST(${alias}.\`balance\` AS DOUBLE),
     'frozenBalance', CAST(${alias}.\`frozen_balance\` AS DOUBLE),
     'version', ${alias}.\`version\`,
-    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
-    'updatedAt', DATE_FORMAT(${alias}.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000'),
+    'updatedAt', DATE_FORMAT(${alias}.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000')
   )`;
 }
 
@@ -5212,9 +5218,9 @@ function serviceOrderJsonObjectSql(alias) {
     'payerConfirmed', ${alias}.\`payer_confirmed\`,
     'providerConfirmed', ${alias}.\`provider_confirmed\`,
     'coinAmount', CAST(${alias}.\`coin_amount\` AS DOUBLE),
-    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
-    'updatedAt', DATE_FORMAT(${alias}.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
-    'completedAt', IF(${alias}.\`completed_at\` IS NULL, NULL, DATE_FORMAT(${alias}.\`completed_at\`, '%Y-%m-%dT%H:%i:%s.000Z'))
+    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000'),
+    'updatedAt', DATE_FORMAT(${alias}.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000'),
+    'completedAt', IF(${alias}.\`completed_at\` IS NULL, NULL, DATE_FORMAT(${alias}.\`completed_at\`, '%Y-%m-%dT%H:%i:%s.000'))
   )`;
 }
 
@@ -5225,8 +5231,8 @@ function aiConversationJsonObjectSql(alias) {
     'roleType', ${alias}.\`role_type\`,
     'scene', ${alias}.\`scene\`,
     'status', ${alias}.\`status\`,
-    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
-    'updatedAt', DATE_FORMAT(${alias}.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000'),
+    'updatedAt', DATE_FORMAT(${alias}.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000')
   )`;
 }
 
@@ -5239,7 +5245,7 @@ function aiMessageJsonObjectSql(alias) {
     'businessType', ${alias}.\`business_type\`,
     'businessId', ${alias}.\`business_id\`,
     'sensitiveHit', ${alias}.\`sensitive_hit\`,
-    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000')
   )`;
 }
 
@@ -5254,7 +5260,7 @@ function aiCallLogJsonObjectSql(alias) {
     'durationMs', ${alias}.\`duration_ms\`,
     'status', ${alias}.\`status\`,
     'errorMessage', ${alias}.\`error_message\`,
-    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000')
   )`;
 }
 
@@ -5267,7 +5273,7 @@ function transactionLogJsonObjectSql(alias) {
     'amount', CAST(${alias}.\`amount\` AS DOUBLE),
     'balanceAfter', IF(${alias}.\`balance_after\` IS NULL, NULL, CAST(${alias}.\`balance_after\` AS DOUBLE)),
     'remark', ${alias}.\`remark\`,
-    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000')
   )`;
 }
 
@@ -5393,7 +5399,7 @@ function auditLogJsonObjectSql(alias) {
     'targetId', ${alias}.\`target_id\`,
     'ipAddress', ${alias}.\`ip_address\`,
     'detail', ${alias}.\`detail\`,
-    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000')
   )`;
 }
 
@@ -5406,8 +5412,8 @@ function categoryJsonObjectSql(alias) {
     'description', ${alias}.\`description\`,
     'sortOrder', ${alias}.\`sort_order\`,
     'status', ${alias}.\`status\`,
-    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
-    'updatedAt', DATE_FORMAT(${alias}.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000'),
+    'updatedAt', DATE_FORMAT(${alias}.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000')
   )`;
 }
 
@@ -5422,8 +5428,8 @@ function sensitiveWordJsonObjectSql(alias) {
     'status', ${alias}.\`status\`,
     'hitCount', 0,
     'createdBy', ${alias}.\`created_by\`,
-    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z'),
-    'updatedAt', DATE_FORMAT(${alias}.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000'),
+    'updatedAt', DATE_FORMAT(${alias}.\`updated_at\`, '%Y-%m-%dT%H:%i:%s.000')
   )`;
 }
 
@@ -5436,8 +5442,8 @@ function notificationJsonObjectSql(alias) {
     'content', ${alias}.\`content\`,
     'businessType', ${alias}.\`business_type\`,
     'businessId', ${alias}.\`business_id\`,
-    'readAt', IF(${alias}.\`read_at\` IS NULL, NULL, DATE_FORMAT(${alias}.\`read_at\`, '%Y-%m-%dT%H:%i:%s.000Z')),
-    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000Z')
+    'readAt', IF(${alias}.\`read_at\` IS NULL, NULL, DATE_FORMAT(${alias}.\`read_at\`, '%Y-%m-%dT%H:%i:%s.000')),
+    'createdAt', DATE_FORMAT(${alias}.\`created_at\`, '%Y-%m-%dT%H:%i:%s.000')
   )`;
 }
 
@@ -5914,7 +5920,9 @@ function normalizeDisputeEvidence(input) {
       name: attachmentName,
       type: "file",
       size: 0,
-      url: fileUrl
+      fileId: (fileUrl && fileUrl.includes("/api/files/")) ? fileUrl.split("/").filter(Boolean).pop() : null,
+      url: fileUrl,
+      mimeType: (attachmentName && attachmentName.match(/.(png|jpg|jpeg|gif|webp)$/i)) ? "image/" + attachmentName.match(/.(png|jpg|jpeg|gif|webp)$/i)[1] : null
     }] : []),
     uploader: normalizeDisputeUser(input.uploader),
     createdAt: input.createdAt ?? input.created_at ?? null
@@ -5969,9 +5977,9 @@ function normalizeDisputeUser(input) {
       "'status', d.`status`," +
       "'finalResult', d.`final_result`," +
       "'refundAmount', d.`refund_amount`," +
-      "'createdAt', DATE_FORMAT(d.`created_at`, '%Y-%m-%dT%H:%i:%s.000Z')," +
-      "'updatedAt', DATE_FORMAT(d.`updated_at`, '%Y-%m-%dT%H:%i:%s.000Z')," +
-      "'resolvedAt', DATE_FORMAT(d.`resolved_at`, '%Y-%m-%dT%H:%i:%s.000Z')" +
+      "'createdAt', DATE_FORMAT(d.`created_at`, '%Y-%m-%dT%H:%i:%s.000')," +
+      "'updatedAt', DATE_FORMAT(d.`updated_at`, '%Y-%m-%dT%H:%i:%s.000')," +
+      "'resolvedAt', DATE_FORMAT(d.`resolved_at`, '%Y-%m-%dT%H:%i:%s.000')" +
     ")), JSON_ARRAY()) FROM `dispute` d WHERE d.`status` = 'jury_voting' AND d.`initiator_id` <> " + uid + " AND d.`respondent_id` <> " + uid + " ORDER BY d.`created_at` DESC LIMIT " + pageSize + " OFFSET " + offset;
     const countSql = "SELECT COUNT(*) AS total FROM `dispute` WHERE `status` = 'jury_voting' AND `initiator_id` <> " + uid + " AND `respondent_id` <> " + uid;
     const rows = await mysqlJson(sql, { optional: true });
@@ -6945,7 +6953,7 @@ function normalizeAiConfig(input = {}) {
     requireConfirm: true,
     alertThreshold: 90,
     conversationRetentionDays: 180,
-    updatedAt: "2026-06-01T09:00:00.000Z"
+    updatedAt: "2026-06-01T09:00:00.000"
   };
   return mergeAiConfig(base, input);
 }
@@ -7085,7 +7093,7 @@ function normalizeSystemSettings(input = {}) {
     autoBackup: true,
     aiHighRiskBlock: true,
     safetyNotice: "高风险动作必须由管理员二次确认并写入审计日志。",
-    updatedAt: "2026-06-01T09:00:00.000Z"
+    updatedAt: "2026-06-01T09:00:00.000"
   };
   return mergeSystemSettings(base, input);
 }

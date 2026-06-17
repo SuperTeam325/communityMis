@@ -132,6 +132,36 @@ export async function handleSocialRoutes({ request, response, url, authService }
     return true;
   }
 
+
+  // PUT/DELETE community post (before GET avoid allowOnly conflict)
+  {
+    const m = url.pathname.match(COMMUNITY_POST_DETAIL_RE);
+    if (m && (request.method === "PUT" || request.method === "DELETE")) {
+      const context = await authService.authenticateRequest(request);
+      authService.requireRole(context, ["user"]);
+      const postId = parseId(m[1], "POST_NOT_FOUND");
+      const pool = await getFeedPool();
+      const [owner] = await pool.execute("SELECT author_id AS authorId FROM community_post WHERE post_id = ? AND status = 'published'", [postId]);
+      if (!owner.length) throw new HttpError(404, "POST_NOT_FOUND", "Post was not found.");
+      if (Number(owner[0].authorId) !== Number(context.user.userId)) throw new HttpError(403, "FORBIDDEN", "Only the author can perform this action.");
+      if (request.method === "DELETE") {
+        await pool.execute("UPDATE community_post SET status = 'deleted' WHERE post_id = ?", [postId]);
+        sendJson(response, 200, { postId, status: "deleted" });
+        return true;
+      }
+      const body = await readJsonBody(request, { maxBytes: 16 * 1024 });
+      const updates = [], params = [];
+      if (body.title) { updates.push("title = ?"); params.push(String(body.title).trim()); }
+      if (body.content) { updates.push("content = ?"); params.push(String(body.content).trim()); }
+      if (updates.length) { params.push(postId); await pool.execute("UPDATE community_post SET " + updates.join(", ") + " WHERE post_id = ?", params); }
+      const [rows] = await pool.execute("SELECT p.post_id AS postId, p.author_id AS authorId, p.title, p.content, p.created_at AS createdAt, u.username AS authorName FROM community_post p JOIN user u ON u.user_id = p.author_id WHERE p.post_id = ?", [postId]);
+      const r = rows[0];
+      const post = { postId: r.postId, authorId: r.authorId, title: r.title, content: r.content, createdAt: r.createdAt, author: { userId: r.authorId, username: r.authorName, displayName: r.authorName }, tags: [], imageFileIds: [], likeCount: 0, commentCount: 0 };
+      sendJson(response, 200, { post: communityPostDto(post) });
+      return true;
+    }
+  }
+
   const communityPostDetailMatch = url.pathname.match(COMMUNITY_POST_DETAIL_RE);
   if (communityPostDetailMatch) {
     allowOnly(request, response, ["GET"]);
@@ -159,7 +189,8 @@ export async function handleSocialRoutes({ request, response, url, authService }
       createdAt: r.createdAt,
       author: { userId: r.authorId, username: r.authorName, displayName: r.authorName }
     };
-    sendJson(response, 200, { post: communityPostDto(post), comments: [] });
+const _comments = typeof authService.store.listCommunityPostComments === "function" ? await authService.store.listCommunityPostComments(postId, viewer?.user?.userId ?? null) : [];
+    let _imgs=[];try{const pool=await getFeedPool();const[r2]=await pool.execute("SELECT cpi.file_id AS fileId FROM community_post_image cpi WHERE cpi.post_id=? ORDER BY cpi.sort_order ASC",[postId]);_imgs=(r2||[]).map(r=>({fileId:r.fileId,url:"/api/files/"+encodeURIComponent(r.fileId)}));}catch(e){} post.imageFileIds=_imgs.map(r=>r.fileId); sendJson(response,200,{post:communityPostDto(post),comments:_comments});
     return true;
   }
 
@@ -821,7 +852,7 @@ async function simpleCommunityPosts(store, viewerId, keyword) {
            LEFT(p.content, 200) AS content, p.tags_json AS tags,
            p.like_count AS likeCount, p.comment_count AS commentCount,
            p.created_at AS createdAt,
-           u.username AS authorName, u.username AS authorDisplay
+           u.username AS authorName, u.username AS authorDisplay, COALESCE((SELECT JSON_ARRAYAGG(cpi.file_id) FROM community_post_image cpi WHERE cpi.post_id = p.post_id), JSON_ARRAY()) AS imageFileIds
     FROM community_post p
     JOIN user u ON u.user_id = p.author_id
     ${where}
@@ -833,7 +864,7 @@ async function simpleCommunityPosts(store, viewerId, keyword) {
     postId: r.postId,
     title: r.title,
     content: r.content,
-    tags: typeof r.tags === 'string' ? JSON.parse(r.tags) : (r.tags ?? []),
+    tags: typeof r.tags === "string" ? JSON.parse(r.tags) : (r.tags ?? []), imageFileIds: Array.isArray(r.imageFileIds) ? r.imageFileIds.map(String) : [],
     likeCount: r.likeCount ?? 0,
     commentCount: r.commentCount ?? 0,
     createdAt: r.createdAt,

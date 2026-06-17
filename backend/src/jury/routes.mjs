@@ -11,15 +11,15 @@ export async function handleJuryRoutes({ request, response, url, authService }) 
     let disputes = [];
     if (typeof authService.store.listAdminDisputes === "function") {
       const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10) || 1);
-      const result = await authService.store.listAdminDisputes({ status: "jury_voting", page, pageSize: 50 });
-      disputes = (result.disputes || []).filter(function(d) {
-        return Number(d.initiatorId) !== Number(context.user.userId) && Number(d.respondentId) !== Number(context.user.userId);
-      }).map(function(item) {
+      const result = await authService.store.listAdminDisputes({ page, pageSize: 50 });
+      disputes = (result.disputes || []).map(function(item) {
+        const isParty = Number(item.initiatorId) === Number(context.user.userId) || Number(item.respondentId) === Number(context.user.userId);
         return {
           disputeId: item.disputeId, orderId: item.orderId, initiatorId: item.initiatorId,
           respondentId: item.respondentId, type: item.type, reason: item.reason,
           status: item.status, finalResult: item.finalResult, refundAmount: item.refundAmount,
-          createdAt: item.createdAt, updatedAt: item.updatedAt
+          createdAt: item.createdAt, updatedAt: item.updatedAt,
+          isParty: isParty
         };
       });
     }
