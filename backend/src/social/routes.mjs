@@ -657,7 +657,8 @@ function publicUser(user) {
     userId: user.userId,
     username: user.username,
     displayName: user.displayName ?? user.username,
-    avatarFileId: user.avatarFileId ?? null
+    avatarFileId: user.avatarFileId ?? null,
+    avatarUrl: user.avatarFileId ? `/api/files/${encodeURIComponent(user.avatarFileId)}` : null
   };
 }
 

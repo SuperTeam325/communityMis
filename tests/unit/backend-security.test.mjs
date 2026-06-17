@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createBackendServer } from "../../backend/src/app.mjs";
 import { loadBackendConfig } from "../../backend/src/config.mjs";
+import { createOpenAiAdapter } from "../../backend/src/ai/openai-adapter.mjs";
 import { createMemoryAuthStore } from "../../backend/src/auth/store.mjs";
 import { hashVerificationCode } from "../../backend/src/verification/routes.mjs";
 import { sendEmailCode } from "../../backend/src/verification/providers.mjs";
@@ -52,6 +53,32 @@ describe("production configuration", () => {
     expect(config.cookie.secure).toBe(true);
     expect(config.corsOrigins).toEqual(["https://mis.example.com"]);
     expect(config.registrationVerification).toBe("email");
+  });
+
+  test("normalizes configured CORS URLs to origins", () => {
+    const config = loadBackendConfig({
+      env: {
+        NODE_ENV: "production",
+        AUTH_STORE: "mysql",
+        AUTH_SESSION_SECRET: "test-secret-with-enough-entropy",
+        CORS_ORIGIN: "https://mis.example.com/app/, https://admin.example.com/",
+        AUTH_COOKIE_SECURE: "true",
+        DB_HOST: "127.0.0.1",
+        DB_USER: "community_mis",
+        DB_NAME: "community_mis",
+        UPLOAD_ROOT: "/tmp/community-mis",
+        SMTP_HOST: "smtp.example.com",
+        SMTP_PORT: "587",
+        SMTP_USER: "mailer",
+        SMTP_PASS: "pass",
+        SMTP_FROM: "noreply@example.com",
+        OPENAI_BASE_URL: "https://api.example.com/v1",
+        OPENAI_API_KEY: "key",
+        OPENAI_MODEL: "model"
+      }
+    });
+
+    expect(config.corsOrigins).toEqual(["https://mis.example.com", "https://admin.example.com"]);
   });
 });
 
@@ -159,6 +186,30 @@ describe("SMTP provider hardening", () => {
 });
 
 describe("CORS and rate limits", () => {
+  test("adds local frontend origin in development even when CORS is inherited", () => {
+    const config = loadBackendConfig({
+      env: {
+        NODE_ENV: "development",
+        CORS_ORIGIN: "https://mis.example.com",
+        FRONTEND_PORT: "5174",
+        FRONTEND_PUBLIC_HOST: "localhost:5174"
+      }
+    });
+
+    expect(config.corsOrigins).toEqual(expect.arrayContaining([
+      "https://mis.example.com",
+      "http://127.0.0.1:5174",
+      "http://localhost:5174"
+    ]));
+
+    const response = fakeResponse();
+    applyCorsHeaders({
+      headers: { origin: "http://127.0.0.1:5174" }
+    }, response, config);
+
+    expect(response.getHeader("access-control-allow-origin")).toBe("http://127.0.0.1:5174");
+  });
+
   test("rejects unexpected request origins", () => {
     const response = fakeResponse();
     expect(() => applyCorsHeaders({
@@ -365,6 +416,229 @@ describe("upload validation", () => {
   });
 });
 
+describe("AI assistant resilience", () => {
+  test("falls back to local rules when the provider rejects the configured request", async () => {
+    const fetchImpl = vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      expect(body.model).toBe("provider-model");
+      return new Response(JSON.stringify({ error: { code: "model_not_found" } }), {
+        status: 400,
+        headers: { "content-type": "application/json" }
+      });
+    });
+    const adapter = createOpenAiAdapter({
+      openai: {
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "unit-key",
+        model: "provider-model",
+        timeoutMs: 1000
+      }
+    }, { fetchImpl });
+
+    const result = await adapter.complete({
+      prompt: "如何发起纠纷？",
+      scene: "rules",
+      config: { model: "local-rule-assistant", timeoutMs: 3000 },
+      fallback: {
+        answer: "本地规则答案",
+        bullets: ["只能由订单参与方发起纠纷。"],
+        guidance: "请从订单详情进入纠纷流程。"
+      }
+    });
+
+    expect(result).toMatchObject({
+      answer: "本地规则答案",
+      fallback: true,
+      providerError: {
+        code: "AI_PROVIDER_ERROR",
+        details: { status: 400, providerCode: "model_not_found" }
+      }
+    });
+  });
+
+  test("uses the provider model when runtime config keeps the local rule default", async () => {
+    const fetchImpl = vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      expect(body.model).toBe("deepseek-v4-pro");
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: "DeepSeek provider answer" } }]
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    });
+    const adapter = createOpenAiAdapter({
+      openai: {
+        baseUrl: "https://api.deepseek.com",
+        apiKey: "unit-key",
+        model: "deepseek-v4-pro",
+        timeoutMs: 1000
+      }
+    }, { fetchImpl });
+
+    const result = await adapter.complete({
+      prompt: "如何发起纠纷？",
+      scene: "rules",
+      config: { model: "local-rule-assistant" },
+      fallback: { answer: "本地规则答案" }
+    });
+
+    expect(result).toMatchObject({
+      answer: "DeepSeek provider answer",
+      fallback: false,
+      model: "deepseek-v4-pro"
+    });
+  });
+
+  test("streams OpenAI-compatible provider chunks", async () => {
+    const fetchImpl = vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      expect(body.model).toBe("deepseek-v4-pro");
+      expect(body.stream).toBe(true);
+      return new Response([
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Deep\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Seek\"}}]}\n\n",
+        "data: [DONE]\n\n"
+      ].join(""), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" }
+      });
+    });
+    const adapter = createOpenAiAdapter({
+      openai: {
+        baseUrl: "https://api.deepseek.com",
+        apiKey: "unit-key",
+        model: "deepseek-v4-pro",
+        timeoutMs: 1000
+      }
+    }, { fetchImpl });
+
+    const events = [];
+    for await (const event of adapter.stream({
+      prompt: "如何发起纠纷？",
+      scene: "rules",
+      config: { model: "local-rule-assistant" },
+      fallback: { answer: "本地规则答案" }
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: "start", model: "deepseek-v4-pro" },
+      { type: "delta", content: "Deep", model: "deepseek-v4-pro" },
+      { type: "delta", content: "Seek", model: "deepseek-v4-pro" }
+    ]);
+  });
+
+  test("accepts chat messages array payloads", async () => {
+    const server = createBackendServer({
+      authStore: createMemoryAuthStore(),
+      sessionSecret: "unit-ai-chat-secret",
+      config: testConfig()
+    });
+    const baseUrl = await listen(server);
+    const jar = new Map();
+
+    const login = await cookieRequest(baseUrl, jar, "/api/auth/login", {
+      method: "POST",
+      body: { username: "user_a", password: "user123456" }
+    });
+    expect(login.status).toBe(200);
+
+    const chat = await cookieRequest(baseUrl, jar, "/api/ai/chat", {
+      method: "POST",
+      body: {
+        scene: "rules",
+        messages: [
+          { role: "assistant", content: "你好，我是 AI 助手。" },
+          { role: "user", content: "如何发起纠纷？" }
+        ]
+      }
+    });
+
+    expect(chat.status).toBe(200);
+    expect(chat.body.type).toBe("rules");
+    expect(chat.body.answer).toContain("纠纷");
+  });
+
+  test("returns a local answer from the chat endpoint when provider returns 502", async () => {
+    const server = createBackendServer({
+      authStore: createMemoryAuthStore(),
+      sessionSecret: "unit-ai-provider-fallback-secret",
+      config: testConfig(),
+      aiAdapter: {
+        async complete() {
+          const error = new Error("AI provider returned an error.");
+          error.code = "AI_PROVIDER_ERROR";
+          error.details = { status: 502, providerCode: "bad_gateway" };
+          throw error;
+        }
+      }
+    });
+    const baseUrl = await listen(server);
+    const jar = new Map();
+
+    const login = await cookieRequest(baseUrl, jar, "/api/auth/login", {
+      method: "POST",
+      body: { username: "user_a", password: "user123456" }
+    });
+    expect(login.status).toBe(200);
+
+    const chat = await cookieRequest(baseUrl, jar, "/api/ai/chat", {
+      method: "POST",
+      body: { message: "如何发起纠纷？", scene: "rules" }
+    });
+
+    expect(chat.status).toBe(200);
+    expect(chat.body.answer).toContain("纠纷");
+    expect(chat.body.fallback).toBe(true);
+    expect(chat.body.providerError).toMatchObject({
+      code: "AI_PROVIDER_ERROR",
+      details: { status: 502, providerCode: "bad_gateway" }
+    });
+  });
+
+  test("streams chat responses as NDJSON and persists the final AI message", async () => {
+    const store = createMemoryAuthStore();
+    const server = createBackendServer({
+      authStore: store,
+      sessionSecret: "unit-ai-chat-stream-secret",
+      config: testConfig(),
+      aiAdapter: {
+        async *stream() {
+          yield { type: "start", model: "unit-stream-model" };
+          yield { type: "delta", content: "流式 " };
+          yield { type: "delta", content: "回答" };
+        }
+      }
+    });
+    const baseUrl = await listen(server);
+    const jar = new Map();
+
+    const login = await cookieRequest(baseUrl, jar, "/api/auth/login", {
+      method: "POST",
+      body: { username: "user_a", password: "user123456" }
+    });
+    expect(login.status).toBe(200);
+
+    const stream = await cookieStreamRequest(baseUrl, jar, "/api/ai/chat/stream", {
+      method: "POST",
+      body: {
+        scene: "rules",
+        messages: [{ role: "user", content: "如何发起纠纷？" }]
+      }
+    });
+
+    expect(stream.status).toBe(200);
+    expect(stream.contentType).toContain("application/x-ndjson");
+    expect(stream.events.map((event) => event.type)).toEqual(["start", "delta", "delta", "done"]);
+    expect(stream.events.filter((event) => event.type === "delta").map((event) => event.content).join("")).toBe("流式 回答");
+    const done = stream.events.at(-1);
+    expect(done.payload.answer).toBe("流式 回答");
+    expect(done.payload.message.content).toBe("流式 回答");
+  });
+});
+
 function testConfig() {
   return {
     nodeEnv: "test",
@@ -438,6 +712,30 @@ async function cookieRequest(baseUrl, jar, requestPath, options = {}, behavior =
   return {
     status: response.status,
     body: await response.json()
+  };
+}
+
+async function cookieStreamRequest(baseUrl, jar, requestPath, options = {}, behavior = {}) {
+  const headers = new Headers(options.headers ?? {});
+  headers.set("accept", "application/x-ndjson");
+  const cookie = Array.from(jar.entries()).map(([key, value]) => `${key}=${value}`).join("; ");
+  if (cookie) headers.set("cookie", cookie);
+  if (options.body !== undefined && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
+  if (behavior.csrf !== false && jar.has("csrf_token") && ["POST", "PUT", "PATCH", "DELETE"].includes(String(options.method ?? "GET").toUpperCase())) {
+    headers.set("x-csrf-token", decodeURIComponent(jar.get("csrf_token")));
+  }
+  const response = await fetch(`${baseUrl}${requestPath}`, {
+    method: options.method ?? "GET",
+    headers,
+    body: options.rawBody ?? (options.body === undefined ? undefined : JSON.stringify(options.body))
+  });
+  const text = await response.text();
+  return {
+    status: response.status,
+    contentType: response.headers.get("content-type") ?? "",
+    events: text.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
   };
 }
 

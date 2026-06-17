@@ -39,7 +39,22 @@ export async function sendEmailCode(config, input, code, options = {}) {
     if (error instanceof HttpError) {
       throw error;
     }
-    console.error("SMTP sendRawMail failed:", error.message, "code:", error.code, "stack:", error.stack?.split("\n")[0] ?? "");
+    const smtpInfo = `${smtp.host}:${smtp.port} (secure=${smtp.secure})`;
+    console.error(`SMTP sendRawMail failed to ${smtpInfo}:`, error.message, "code:", error.code, "stack:", error.stack?.split("\n")[0] ?? "");
+
+    if (error.code === "SMTP_535") {
+      console.error("[SMTP hint] Authentication failed (535). Check that SMTP_PASS is the authorization code (not login password) and SMTP_USER is the full email address.");
+    }
+
+    if (error.code === undefined && error.message === "SMTP connection closed.") {
+      const hint = smtp.port === 465 && !smtp.secure
+        ? "  Port 465 requires SMTP_SECURE=true (SSL)."
+        : smtp.port === 587 && smtp.secure
+          ? "  Port 587 with SMTP_SECURE=true uses SSL, but QQ SMTP expects STARTTLS on port 587. Try SMTP_SECURE=false."
+          : "  Check that SMTP_PORT and SMTP_SECURE match the provider's requirements.";
+      console.error(`[SMTP hint]${hint}`);
+    }
+
     const providerError = new HttpError(502, "SMTP_PROVIDER_ERROR", "SMTP provider failed to send verification code.");
     providerError.providerError = error.code ?? "SMTP_SEND_FAILED";
     throw providerError;

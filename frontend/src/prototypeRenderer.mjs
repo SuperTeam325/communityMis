@@ -62,7 +62,7 @@ export function stripDemoBusinessContent(html, route) {
 }
 
 export function buildRouteIndexHtml(options = {}) {
-  const userRoutes = routes.filter((item) => item.surface === "user" || item.surface === "userAuth");
+  const userRoutes = routes.filter((item) => item.surface === "user" || item.surface === "userAuth" || item.surface === "public");
   const adminRoutes = routes.filter((item) => item.surface === "admin" || item.surface === "adminAuth");
   const tokensCss = assetPath("/css/tokens.css", options);
   const shellCss = assetPath("/assets/styles/shell.css", options);

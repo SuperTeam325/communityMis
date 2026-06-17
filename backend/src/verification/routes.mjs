@@ -107,9 +107,25 @@ async function sendVerification(store, config, input, providers = {}) {
 }
 
 async function dispatchCode(config, input, code, providers = {}) {
+  const shortHash = hashVerificationCode(code).slice(0, 12);
+
   if (!config?.isProduction) {
-    return { status: "sent", messageId: `dev-${hashVerificationCode(code).slice(0, 12)}` };
+    console.log(`[dev] Verification code for ${input.recipient} (${input.purpose}): ${code}`);
+
+    try {
+      const result = await (providers.sendEmailCode ?? sendEmailCode)(config, input, code);
+      console.log(`[dev] Email sent to ${input.recipient}, messageId: ${result.messageId}`);
+      return result;
+    } catch (error) {
+      if (error?.code === "SMTP_NOT_CONFIGURED") {
+        console.log(`[dev] SMTP not configured, code only available in console.`);
+      } else {
+        console.error(`[dev] Failed to send email to ${input.recipient}:`, error.message);
+      }
+      return { status: "sent", messageId: `dev-${shortHash}` };
+    }
   }
+
   return (providers.sendEmailCode ?? sendEmailCode)(config, input, code);
 }
 

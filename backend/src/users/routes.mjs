@@ -11,8 +11,8 @@ export async function handleUserRoutes({ request, response, url, authService }) 
     const context = await authService.authenticateRequest(request);
     authService.requireRole(context, ["user", "admin", "super_admin"]);
     const body = await readJsonBody(request);
-    const fileId = parseInt(body.fileId, 10);
-    if (!Number.isFinite(fileId) || fileId <= 0) {
+    const fileId = String(body.fileId ?? "").trim();
+    if (!fileId) {
       throw new HttpError(400, "INVALID_FILE_ID", "A valid file ID is required.");
     }
     if (typeof authService.store.updateUserAvatar !== "function") {
@@ -204,6 +204,7 @@ function privateProfileDto(user) {
     skillTags: user.skillTags ?? [],
     serviceCategories: user.serviceCategories ?? [],
     avatarFileId: user.avatarFileId ?? null,
+    avatarUrl: user.avatarFileId ? "/api/files/" + encodeURIComponent(user.avatarFileId) : null,
     isJury: Boolean(user.isJury),
     role: user.role,
     status: user.status,
@@ -221,6 +222,7 @@ function publicProfileDto(user, credit = null) {
     skillTags: user.skillTags ?? [],
     serviceCategories: user.serviceCategories ?? [],
     avatarFileId: user.avatarFileId ?? null,
+    avatarUrl: user.avatarFileId ? "/api/files/" + encodeURIComponent(user.avatarFileId) : null,
     isJury: Boolean(user.isJury),
     createdAt: user.createdAt,
     credit: credit ? {

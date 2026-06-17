@@ -77,10 +77,10 @@ function RouteFrame(props: PageProps) {
     </Suspense>
   );
 
-  if (route.surface === "admin") {
+  if (route.layout === "adminShell") {
     return <AdminShell route={route}>{page}</AdminShell>;
   }
-  if (route.surface === "user") {
+  if (route.layout === "userShell") {
     return <UserShell route={route}>{page}</UserShell>;
   }
   return page;
@@ -126,7 +126,12 @@ function UserShell({ route, children }: { route: AppRoute; children: React.React
       <header className="top-nav">
         <a className="logo" href="/feed">邻<span>帮</span></a>
         <nav>{userNav.map((item) => <a key={item.id} className={route.id === item.id ? "active" : ""} href={item.path}>{item.label}</a>)}</nav>
-        <div className="nav-right"><span>{auth.session?.user.displayName ?? auth.session?.user.username}</span></div>
+        <div className="nav-right">
+          <a className="nav-avatar" href="/profile">
+            {auth.session?.user.avatarUrl ? <img src={auth.session?.user.avatarUrl} alt="" /> : <span className="nav-avatar-placeholder">{(auth.session?.user.displayName ?? auth.session?.user.username ?? "").slice(0, 1)}</span>}
+            <span>{auth.session?.user.displayName ?? auth.session?.user.username}</span>
+          </a>
+        </div>
       </header>
       <main className="page">{children}</main>
       <nav className="bottom-nav">{userNav.map((item) => <a key={item.id} className={route.id === item.id ? "active" : ""} href={item.path}>{item.label}</a>)}</nav>
