@@ -561,6 +561,34 @@ describe("AI assistant resilience", () => {
     expect(chat.body.answer).toContain("纠纷");
   });
 
+  test("filters user AI conversation history by scene", async () => {
+    const store = createMemoryAuthStore();
+    const rules = store.createAiConversation({ userId: 1001, scene: "rules", status: "active" });
+    const draft = store.createAiConversation({ userId: 1001, scene: "request_draft", status: "active" });
+    store.createAiMessage({ conversationId: rules.conversationId, senderType: "ai", content: "规则会话" });
+    store.createAiMessage({ conversationId: draft.conversationId, senderType: "ai", content: "草稿会话" });
+    const server = createBackendServer({
+      authStore: store,
+      sessionSecret: "unit-ai-conversation-scene-filter-secret",
+      config: testConfig()
+    });
+    const baseUrl = await listen(server);
+    const jar = new Map();
+
+    const login = await cookieRequest(baseUrl, jar, "/api/auth/login", {
+      method: "POST",
+      body: { username: "user_a", password: "user123456" }
+    });
+    expect(login.status).toBe(200);
+
+    const filtered = await cookieRequest(baseUrl, jar, "/api/ai/conversations?scene=rules&pageSize=20");
+
+    expect(filtered.status).toBe(200);
+    expect(filtered.body.conversations.map((item) => item.scene)).toEqual(["rules"]);
+    expect(filtered.body.conversations.map((item) => item.conversationId)).toEqual([rules.conversationId]);
+    expect(filtered.body.pagination.total).toBe(1);
+  });
+
   test("returns a local answer from the chat endpoint when provider returns 502", async () => {
     const server = createBackendServer({
       authStore: createMemoryAuthStore(),
@@ -596,6 +624,114 @@ describe("AI assistant resilience", () => {
       code: "AI_PROVIDER_ERROR",
       details: { status: 502, providerCode: "bad_gateway" }
     });
+  });
+
+  test("request draft endpoint uses provider generated structured draft", async () => {
+    const server = createBackendServer({
+      authStore: createMemoryAuthStore(),
+      sessionSecret: "unit-ai-draft-provider-secret",
+      config: testConfig(),
+      aiAdapter: {
+        complete: vi.fn(async (input) => {
+          expect(input.scene).toBe("request_draft");
+          expect(input.prompt).toContain("只输出 JSON");
+          expect(input.prompt).toContain("电脑维修");
+          return {
+            scene: "request_draft",
+            type: "model",
+            answer: JSON.stringify({
+              title: "周末电脑维修协助",
+              description: "需要一位熟悉 Windows 电脑的邻居周末上门协助排查无法联网的问题，帮忙检查网络设置、路由器连接和常见软件配置。希望服务前先沟通大致时间，完成后一起确认电脑可以正常联网。",
+              categoryId: 11,
+              categoryName: "维修",
+              tags: ["电脑维修", "上门协助"],
+              estimatedHours: 1.5,
+              coinAmount: 18,
+              location: "3 号楼",
+              checklist: ["确认上门时间", "确认网络恢复后再完成订单"]
+            }),
+            fallback: false,
+            model: "unit-draft-model"
+          };
+        })
+      }
+    });
+    const baseUrl = await listen(server);
+    const jar = new Map();
+
+    const login = await cookieRequest(baseUrl, jar, "/api/auth/login", {
+      method: "POST",
+      body: { username: "user_a", password: "user123456" }
+    });
+    expect(login.status).toBe(200);
+
+    const draft = await cookieRequest(baseUrl, jar, "/api/ai/request-draft", {
+      method: "POST",
+      body: {
+        prompt: "帮我写一个电脑维修需求草稿",
+        title: "电脑维修",
+        location: "3 号楼"
+      }
+    });
+
+    expect(draft.status).toBe(200);
+    expect(draft.body.fallback).toBe(false);
+    expect(draft.body.model).toBe("unit-draft-model");
+    expect(draft.body.draft).toMatchObject({
+      title: "周末电脑维修协助",
+      description: expect.stringContaining("熟悉 Windows 电脑"),
+      categoryName: "维修",
+      estimatedHours: 1.5,
+      coinAmount: 18,
+      location: "3 号楼"
+    });
+    expect(draft.body.message.content).toContain("熟悉 Windows 电脑");
+  });
+
+  test("chat request_draft scene routes to provider draft generation", async () => {
+    const server = createBackendServer({
+      authStore: createMemoryAuthStore(),
+      sessionSecret: "unit-ai-chat-draft-provider-secret",
+      config: testConfig(),
+      aiAdapter: {
+        complete: vi.fn(async (input) => ({
+          scene: input.scene,
+          type: "model",
+          answer: JSON.stringify({
+            title: "代取快递上门协助",
+            description: "需要邻居今天傍晚帮忙到南门驿站代取一个小件快递并送到 5 号楼大厅，请接单前确认取件码、预计到达时间和交接方式。",
+            categoryId: 11,
+            categoryName: "跑腿",
+            tags: ["代取快递"],
+            estimatedHours: 0.5,
+            coinAmount: 8,
+            location: "5 号楼大厅",
+            checklist: ["确认取件码", "确认交接地点"]
+          }),
+          fallback: false,
+          model: "unit-draft-model"
+        }))
+      }
+    });
+    const baseUrl = await listen(server);
+    const jar = new Map();
+
+    const login = await cookieRequest(baseUrl, jar, "/api/auth/login", {
+      method: "POST",
+      body: { username: "user_a", password: "user123456" }
+    });
+    expect(login.status).toBe(200);
+
+    const chat = await cookieRequest(baseUrl, jar, "/api/ai/chat", {
+      method: "POST",
+      body: { scene: "request_draft", message: "帮我写一段发布代取快递任务的描述" }
+    });
+
+    expect(chat.status).toBe(200);
+    expect(chat.body.type).toBe("draft");
+    expect(chat.body.scene).toBe("request_draft");
+    expect(chat.body.draft.description).toContain("南门驿站");
+    expect(chat.body.fallback).toBe(false);
   });
 
   test("streams chat responses as NDJSON and persists the final AI message", async () => {

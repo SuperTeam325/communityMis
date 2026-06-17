@@ -30,6 +30,32 @@ describe("stage 05 SPA AI user and admin surfaces", () => {
     await waitFor(() => expect(api.ai.feedback).toHaveBeenCalledWith("9001", { rating: "useful" }));
   });
 
+  test("AI assistant loads messages when opened with a conversation query", async () => {
+    const api = apiStub();
+    window.history.replaceState({}, "", "/ai/assistant?conversationId=conv-1");
+    render(<MemoryRouter><AiAssistantPage api={api as any} /></MemoryRouter>);
+
+    await screen.findByText("规则问题");
+    await screen.findByText("规则回答");
+    expect(api.ai.conversation).toHaveBeenCalledWith("conv-1");
+  });
+
+  test("AI assistant history scene chips reload conversations with the selected scene", async () => {
+    const api = apiStub();
+    window.history.replaceState({}, "", "/ai/assistant");
+    render(<MemoryRouter><AiAssistantPage api={api as any} /></MemoryRouter>);
+
+    await screen.findAllByText("英语辅导需求");
+    fireEvent.click(screen.getByRole("button", { name: "发布" }));
+
+    await waitFor(() => expect(api.ai.conversations).toHaveBeenLastCalledWith({
+      page: 1,
+      pageSize: 12,
+      scene: "request_draft"
+    }));
+    expect(window.location.search).toContain("scene=request_draft");
+  });
+
   test("AI results page hydrates from query and renders safe business links", async () => {
     const api = apiStub();
     window.history.replaceState({}, "", "/ai/results?prompt=%E8%8B%B1%E8%AF%AD");
@@ -63,6 +89,12 @@ describe("stage 05 SPA AI user and admin surfaces", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "生成周报" }));
     await waitFor(() => expect(api.admin.aiFeedbackReport).toHaveBeenCalled());
+    await screen.findByText("AI 用户反馈周报");
+    await waitFor(() => expect(screen.getAllByText(/回答不准确/).length).toBeGreaterThanOrEqual(2));
+
+    fireEvent.click(screen.getByRole("button", { name: "查看会话" }));
+    await waitFor(() => expect(api.admin.aiConversation).toHaveBeenCalledWith("conv-1"));
+    await screen.findByText("管理员查看的会话消息");
   });
 
   test("admin AI errors batch retry and incident creation use selected call ids", async () => {
@@ -119,13 +151,11 @@ function apiStub() {
         pagination: { page: 1, pageSize: 12, total: 1, totalPages: 1, hasNext: false, hasPrev: false }
       }),
       conversation: vi.fn().mockResolvedValue({
-        conversation: {
-          ...conversation,
-          messages: [
-            { messageId: "m-1", senderType: "user", content: "规则问题", createdAt: "2026-06-01T10:00:00.000Z" },
-            { messageId: "m-2", senderType: "ai", content: "规则回答", createdAt: "2026-06-01T10:01:00.000Z" }
-          ]
-        }
+        conversation,
+        messages: [
+          { messageId: "m-1", conversationId: "conv-1", senderType: "user", content: "规则问题", createdAt: "2026-06-01T10:00:00.000Z" },
+          { messageId: "m-2", conversationId: "conv-1", senderType: "ai", content: "规则回答", createdAt: "2026-06-01T10:01:00.000Z" }
+        ]
       }),
       chatStream: vi.fn(async (_payload, handlers) => {
         handlers.onEvent?.({ type: "start", conversation: { conversationId: "conv-2" } });
@@ -178,7 +208,12 @@ function apiStub() {
         pagination: { page: 1, pageSize: 20, total: 1, totalPages: 1, hasNext: false, hasPrev: false }
       }),
       aiConversations: vi.fn().mockResolvedValue({ conversations: [conversation], summary: { total: 1 }, pagination: { page: 1, pageSize: 20, total: 1, totalPages: 1, hasNext: false, hasPrev: false } }),
-      aiConversation: vi.fn().mockResolvedValue({ conversation, messages: [] }),
+      aiConversation: vi.fn().mockResolvedValue({
+        conversation,
+        messages: [
+          { messageId: "admin-m-1", conversationId: "conv-1", senderType: "ai", content: "管理员查看的会话消息", createdAt: "2026-06-01T10:02:00.000Z" }
+        ]
+      }),
       aiFeedback: vi.fn().mockResolvedValue({
         summary: { pending: 1 },
         feedback: [{
@@ -199,7 +234,15 @@ function apiStub() {
       }),
       resolveAiFeedback: vi.fn().mockResolvedValue({ feedback: { feedbackId: "7001", resolved: true } }),
       batchResolveAiFeedback: vi.fn().mockResolvedValue({ updated: 1 }),
-      aiFeedbackReport: vi.fn().mockResolvedValue({ report: { total: 1 } }),
+      aiFeedbackReport: vi.fn().mockResolvedValue({
+        report: {
+          title: "AI 用户反馈周报",
+          content: "AI 用户反馈周报\n回答不准确",
+          rows: [{ feedbackId: "7001", rating: "useless" }]
+        },
+        summary: { total: 1, negativeCount: 1, pendingCount: 1 },
+        generatedAt: "2026-06-01T11:00:00.000Z"
+      }),
       aiErrors: vi.fn().mockResolvedValue({
         summary: { failed: 1 },
         errors: [{

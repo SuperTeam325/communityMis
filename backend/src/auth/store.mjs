@@ -2503,8 +2503,10 @@ export function createMemoryAuthStore(options = {}) {
     const id = Number(userId);
     const page = positiveInteger(query.page, 1);
     const pageSize = Math.min(50, positiveInteger(query.pageSize, 20));
+    const scene = normalizeOptionalString(query.scene) ?? "all";
     const filtered = Array.from(aiConversations.values())
       .filter((item) => Number(item.userId) === id)
+      .filter((item) => scene === "all" || item.scene === scene)
       .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime() || right.conversationId - left.conversationId);
     const offset = (page - 1) * pageSize;
     return {

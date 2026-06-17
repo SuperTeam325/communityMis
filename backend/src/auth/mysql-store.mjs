@@ -3457,6 +3457,12 @@ LIMIT 1;
     const pageSize = Math.min(50, positiveInteger(query.pageSize, 20));
     const offset = (page - 1) * pageSize;
     const id = Number(userId);
+    const scene = normalizeOptionalString(query.scene);
+    const where = [`c.\`user_id\` = ${id}`];
+    if (scene && scene !== "all") {
+      where.push(`c.\`scene\` = ${sqlString(scene)}`);
+    }
+    const whereSql = where.join(" AND ");
     const sql = `
 SELECT JSON_OBJECT(
   'items', COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
@@ -3473,7 +3479,7 @@ SELECT JSON_OBJECT(
   'total', (
     SELECT COUNT(*)
     FROM \`ai_conversation\` c
-    WHERE c.\`user_id\` = ${id}
+    WHERE ${whereSql}
   )
 )
 FROM (
@@ -3498,7 +3504,7 @@ FROM (
       WHERE m.\`conversation_id\` = c.\`conversation_id\`
     ) AS \`message_count\`
   FROM \`ai_conversation\` c
-  WHERE c.\`user_id\` = ${id}
+  WHERE ${whereSql}
   ORDER BY c.\`updated_at\` DESC, c.\`conversation_id\` DESC
   LIMIT ${pageSize} OFFSET ${offset}
 ) q;
