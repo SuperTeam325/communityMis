@@ -54,6 +54,32 @@ export function PageHeader({ title, action }: { title: string; action?: React.Re
   );
 }
 
+export type PaginationData = {
+  page?: number;
+  pageSize?: number;
+  total?: number;
+  totalPages?: number;
+  hasNext?: boolean;
+  hasPrev?: boolean;
+};
+
+export function PaginationControls({ pagination, onPageChange }: {
+  pagination?: unknown;
+  onPageChange: (page: number) => void;
+}) {
+  const pageInfo = asRecord(pagination);
+  if (Number(pageInfo.totalPages ?? 0) <= 1) return null;
+  const page = Number(pageInfo.page ?? 1);
+  const totalPages = Number(pageInfo.totalPages ?? 1);
+  return (
+    <nav className="pagination-row" aria-label="分页">
+      <button className="btn btn--secondary" disabled={!pageInfo.hasPrev} onClick={() => onPageChange(Math.max(1, page - 1))}>上一页</button>
+      <span>第 {page} / {totalPages} 页，共 {Number(pageInfo.total ?? 0)} 条</span>
+      <button className="btn btn--secondary" disabled={!pageInfo.hasNext} onClick={() => onPageChange(Math.min(totalPages, page + 1))}>下一页</button>
+    </nav>
+  );
+}
+
 export function DataTable({ columns, rows }: { columns: string[]; rows: React.ReactNode[][] }) {
   return (
     <div className="table-wrap">
@@ -133,9 +159,47 @@ export function asArray<T = Record<string, unknown>>(value: unknown, key: string
   return [];
 }
 
+export function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+export function numberValue(value: unknown, fallback = 0): number {
+  const next = Number(value);
+  return Number.isFinite(next) ? next : fallback;
+}
+
 export function text(value: unknown, fallback = "-"): string {
   if (value === undefined || value === null || value === "") return fallback;
   return String(value);
+}
+
+export function dateText(value: unknown, fallback = "-"): string {
+  if (!value) return fallback;
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return fallback;
+  return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+export function statusLabel(status: unknown): string {
+  const map: Record<string, string> = {
+    open: "待接单",
+    accepted: "已接单",
+    payer_confirmed: "需求方已确认",
+    provider_confirmed: "服务方已确认",
+    both_confirmed: "待结算",
+    completed: "已完成",
+    disputed: "纠纷中",
+    cancelled: "已取消"
+  };
+  return map[String(status ?? "")] ?? text(status);
+}
+
+export function statusTone(status: unknown): string {
+  const value = String(status ?? "");
+  if (["completed"].includes(value)) return "success";
+  if (["accepted", "payer_confirmed", "provider_confirmed", "both_confirmed"].includes(value)) return "warning";
+  if (["disputed", "cancelled"].includes(value)) return "danger";
+  return "neutral";
 }
 
 export function useQueryParams() {
