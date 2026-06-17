@@ -310,12 +310,12 @@
 
 <script>
 const logs = [
-  { id:'AI-4832', user:'赵姐', scene:'智能筛选', status:'ok', statusLabel:'成功', duration:'0.8s', tokens:'1,240', feedback:'positive', fbLabel:'👍 有用', time:'14:22:08' },
+  { id:'AI-4832', user:'用户己', scene:'智能筛选', status:'ok', statusLabel:'成功', duration:'0.8s', tokens:'1,240', feedback:'positive', fbLabel:'👍 有用', time:'14:22:08' },
   { id:'AI-4831', user:'小明', scene:'纠纷发起', status:'warn', statusLabel:'超时 (3.2s)', duration:'3.2s', tokens:'2,180', feedback:'none', fbLabel:'—', time:'13:51:33' },
-  { id:'AI-4823', user:'admin_张三', scene:'纠纷摘要', status:'ok', statusLabel:'成功', duration:'1.1s', tokens:'3,420', feedback:'neutral', fbLabel:'➖ 一般', time:'13:20:45' },
+  { id:'AI-4823', user:'admin_管理员甲', scene:'纠纷摘要', status:'ok', statusLabel:'成功', duration:'1.1s', tokens:'3,420', feedback:'neutral', fbLabel:'➖ 一般', time:'13:20:45' },
   { id:'AI-4815', user:'李华', scene:'智能问答', status:'ok', statusLabel:'成功', duration:'0.6s', tokens:'890', feedback:'positive', fbLabel:'👍 有用', time:'11:08:12' },
-  { id:'AI-4810', user:'陈阿姨', scene:'内容生成', status:'ok', statusLabel:'成功', duration:'1.4s', tokens:'1,870', feedback:'positive', fbLabel:'👍 有用', time:'10:45:30' },
-  { id:'AI-4803', user:'王大壮', scene:'操作引导', status:'err', statusLabel:'错误 500', duration:'0.2s', tokens:'0', feedback:'negative', fbLabel:'👎 无用', time:'09:12:55' },
+  { id:'AI-4810', user:'用户丁', scene:'内容生成', status:'ok', statusLabel:'成功', duration:'1.4s', tokens:'1,870', feedback:'positive', fbLabel:'👍 有用', time:'10:45:30' },
+  { id:'AI-4803', user:'用户丙', scene:'操作引导', status:'err', statusLabel:'错误 500', duration:'0.2s', tokens:'0', feedback:'negative', fbLabel:'👎 无用', time:'09:12:55' },
   { id:'AI-4798', user:'林小红', scene:'智能问答', status:'ok', statusLabel:'成功', duration:'0.7s', tokens:'560', feedback:'none', fbLabel:'—', time:'08:30:18' },
   { id:'AI-4790', user:'周老师', scene:'订单摘要', status:'ok', statusLabel:'成功', duration:'1.8s', tokens:'2,640', feedback:'positive', fbLabel:'👍 有用', time:'07:55:01' },
   { id:'AI-4785', user:'小明', scene:'内容生成', status:'warn', statusLabel:'超时 (5.1s)', duration:'5.1s', tokens:'0', feedback:'negative', fbLabel:'👎 无用', time:'07:32:44' },
@@ -366,7 +366,7 @@ function renderTable(data) {
           </div>
           <div>
             <h5>💬 对话摘要</h5>
-            <div class="msg-log">${l.scene === '智能筛选' ? '用户: 帮我找一个信用高、今天发布的电脑维修需求\nAI: 正在为您筛选...\nAI: 为您找到 3 条匹配结果，按信用分排序如下：\n1. 周老师 ★4.9 — 笔记本电脑清灰 (30分钟前)\n2. 小明 ★4.8 — 台式机无法开机 (2小时前)' : l.scene === '纠纷摘要' ? '管理员: 请分析 #DSP-240528-003 纠纷\nAI: 正在分析纠纷订单...\nAI: 已生成摘要：双方主张、关键证据、陪审建议、风险提示。请管理员手动裁决。' : l.scene === '内容生成' ? '用户: 帮我写一个保洁服务需求描述\nAI: 为您生成以下草稿：\n标题：全屋保洁 — 2小时深度清洁\n描述：需要经验丰富的保洁阿姨...' : l.status === 'err' ? '用户: 请问如何发起纠纷？\n[错误 — 无响应]' : '对话片段已记录'}</div>
+            <div class="msg-log">${l.scene === '智能筛选' ? '用户: 帮我找一个信用高、今天发布的电脑维修需求\nAI: 正在为您筛选...\nAI: 为您找到 3 条匹配结果，按信用分排序如下：\n1. 周老师 ★4.9 — 笔记本电脑清灰 (30分钟前)\n2. 小明 ★4.8 — 台式机无法开机 (2小时前)' : l.scene === '纠纷摘要' ? '管理员: 请分析 #DSP-LIVE528-003 纠纷\nAI: 正在分析纠纷订单...\nAI: 已生成摘要：双方主张、关键证据、陪审建议、风险提示。请管理员手动裁决。' : l.scene === '内容生成' ? '用户: 帮我写一个保洁服务需求描述\nAI: 为您生成以下草稿：\n标题：全屋保洁 — 2小时深度清洁\n描述：需要经验丰富的保洁阿姨...' : l.status === 'err' ? '用户: 请问如何发起纠纷？\n[错误 — 无响应]' : '对话片段已记录'}</div>
           </div>
         </div>
       </td>

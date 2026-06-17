@@ -766,22 +766,22 @@
         <div class="audit-entry">
           <span class="ae-time">06-04 09:15</span>
           <span class="ae-action">UPDATE</span>
-          <span class="ae-detail">temperature: 0.7 → 0.5（张三 · 192.168.1.100）</span>
+          <span class="ae-detail">temperature: 0.7 → 0.5（管理员甲 · 192.168.1.100）</span>
         </div>
         <div class="audit-entry">
           <span class="ae-time">06-01 14:30</span>
           <span class="ae-action">UPDATE</span>
-          <span class="ae-detail">ratePerDay: 150 → 200（张三 · 192.168.1.100）</span>
+          <span class="ae-detail">ratePerDay: 150 → 200（管理员甲 · 192.168.1.100）</span>
         </div>
         <div class="audit-entry">
           <span class="ae-time">05-28 11:00</span>
           <span class="ae-action">TOGGLE</span>
-          <span class="ae-detail">admin 场景开关: off → on（张三 · 192.168.1.100）</span>
+          <span class="ae-detail">admin 场景开关: off → on（管理员甲 · 192.168.1.100）</span>
         </div>
         <div class="audit-entry">
           <span class="ae-time">05-20 16:45</span>
           <span class="ae-action">UPDATE</span>
-          <span class="ae-detail">logRetention: 60 → 90（张三 · 192.168.1.100）</span>
+          <span class="ae-detail">logRetention: 60 → 90（管理员甲 · 192.168.1.100）</span>
         </div>
         <div class="audit-entry">
           <span class="ae-time">05-15 09:22</span>
@@ -906,7 +906,7 @@ function saveConfig() {
     const list = document.querySelector('.audit-preview');
     const entry = document.createElement('div');
     entry.className = 'audit-entry';
-    entry.innerHTML = `<span class="ae-time">${time}</span><span class="ae-action">UPDATE</span><span class="ae-detail">${changeSummary}${extra}（张三 · 192.168.1.100）</span>`;
+    entry.innerHTML = `<span class="ae-time">${time}</span><span class="ae-action">UPDATE</span><span class="ae-detail">${changeSummary}${extra}（管理员甲 · 192.168.1.100）</span>`;
     const firstEntry = list.querySelector('.audit-entry');
     list.insertBefore(entry, firstEntry);
 

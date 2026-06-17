@@ -182,16 +182,16 @@
 <script>
   // Order data
   var orders = [
-    { id: 'ORD-240603-042', title: '帮李阿姨代购日用品', status: 'done', myRole:'accepted', counterparty:'李阿姨', amount: 35.00, time: '2024-06-03', canConfirm:false, canReview:true },
-    { id: 'ORD-240603-041', title: '请小王帮忙遛狗', status: 'done', myRole:'posted', counterparty:'小王', amount: 20.00, time: '2024-06-03', canConfirm:false, canReview:true },
-    { id: 'ORD-240602-039', title: '帮赵姐组装书柜', status: 'done', myRole:'accepted', counterparty:'赵姐', amount: 45.00, time: '2024-06-02', canConfirm:false, canReview:true },
-    { id: 'ORD-240601-038', title: '请陈师傅修水龙头', status: 'done', myRole:'posted', counterparty:'陈师傅', amount: 30.00, time: '2024-06-01', canConfirm:false, canReview:true },
-    { id: 'ORD-240530-036', title: '代取快递送到 5 号楼', status: 'done', myRole:'accepted', counterparty:'刘姐', amount: 10.00, time: '2024-05-30', canConfirm:false, canReview:false },
-    { id: 'ORD-240528-035', title: '帮忙搬矿泉水到 7 楼', status: 'done', myRole:'accepted', counterparty:'物业', amount: 12.00, time: '2024-05-28', canConfirm:false, canReview:false },
-    { id: 'ORD-240526-034', title: '请邻居帮忙打扫阳台', status: 'done', myRole:'posted', counterparty:'小陈', amount: 25.00, time: '2024-05-26', canConfirm:false, canReview:false },
-    { id: 'ORD-240524-032', title: '辅导初三数学 2 小时', status: 'disputed', myRole:'accepted', counterparty:'张姐', amount: 40.00, time: '2024-05-24', canConfirm:false, canDispute:true, disputeId:'DSP-240528-003' },
-    { id: 'ORD-240650-048', title: '帮忙更换厨房水龙头', status: 'accepted', myRole:'posted', counterparty:'刘师傅', amount: 45.00, time: '2024-06-04', canConfirm:true, canCancel:true },
-    { id: 'ORD-240651-049', title: '代取宠物医院药', status: 'pending', myRole:'posted', counterparty:'—', amount: 25.00, time: '2024-06-04', canCancel:true }
+    { id: 'ORD-LIVE603-042', title: '帮用户乙代购日用品', status: 'done', myRole:'accepted', counterparty:'用户乙', amount: 35.00, time: '2024-06-03', canConfirm:false, canReview:true },
+    { id: 'ORD-LIVE603-041', title: '请用户庚帮忙遛狗', status: 'done', myRole:'posted', counterparty:'用户庚', amount: 20.00, time: '2024-06-03', canConfirm:false, canReview:true },
+    { id: 'ORD-LIVE602-039', title: '帮用户己组装书柜', status: 'done', myRole:'accepted', counterparty:'用户己', amount: 45.00, time: '2024-06-02', canConfirm:false, canReview:true },
+    { id: 'ORD-LIVE601-038', title: '请陈师傅修水龙头', status: 'done', myRole:'posted', counterparty:'陈师傅', amount: 30.00, time: '2024-06-01', canConfirm:false, canReview:true },
+    { id: 'ORD-LIVE530-036', title: '代取快递送到 5 号楼', status: 'done', myRole:'accepted', counterparty:'刘姐', amount: 10.00, time: '2024-05-30', canConfirm:false, canReview:false },
+    { id: 'ORD-LIVE528-035', title: '帮忙搬矿泉水到 7 楼', status: 'done', myRole:'accepted', counterparty:'物业', amount: 12.00, time: '2024-05-28', canConfirm:false, canReview:false },
+    { id: 'ORD-LIVE526-034', title: '请邻居帮忙打扫阳台', status: 'done', myRole:'posted', counterparty:'小陈', amount: 25.00, time: '2024-05-26', canConfirm:false, canReview:false },
+    { id: 'ORD-LIVE524-032', title: '辅导初三数学 2 小时', status: 'disputed', myRole:'accepted', counterparty:'张姐', amount: 40.00, time: '2024-05-24', canConfirm:false, canDispute:true, disputeId:'DSP-LIVE528-003' },
+    { id: 'ORD-LIVE650-048', title: '帮忙更换厨房水龙头', status: 'accepted', myRole:'posted', counterparty:'刘师傅', amount: 45.00, time: '2024-06-04', canConfirm:true, canCancel:true },
+    { id: 'ORD-LIVE651-049', title: '代取宠物医院药', status: 'pending', myRole:'posted', counterparty:'—', amount: 25.00, time: '2024-06-04', canCancel:true }
   ];
 
   function statusLabel(s) {
@@ -322,8 +322,6 @@
 
 <script src="../js/ai-modal.js"></script>
 <script src="/assets/app/jury-nav.js"></script>
-<script>
-(function(){"use strict";function t(){var u=window.__API_BASE_URL__||"";if(!u){if(!t._r)t._r=0;if(t._r++<20)setTimeout(t,500);return}fetch(u+"/api/auth/me",{credentials:"include"}).then(function(r){return r.ok?r.json():null}).then(function(d){if(d&&d.user&&d.user.isJury)n()}).catch(function(){})}function n(){var v=document.querySelector(".bottom-nav");if(!v||document.querySelector(".jlink"))return;var a=document.createElement("a");a.href="/jury";a.className="jlink";a.innerHTML="<svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>陪审";v.insertBefore(a,v.lastElementChild)}setTimeout(t,800)})();
-</script>
+
 </body>
 </html>

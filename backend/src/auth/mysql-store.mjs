@@ -1134,6 +1134,7 @@ SET @current_payer_confirmed = 0;
 SET @current_provider_confirmed = 0;
 SET @next_payer_confirmed = 0;
 SET @next_provider_confirmed = 0;
+SET @confirmation_changed = 0;
 SET @should_settle = 0;
 SET @settled = 0;
 SET @wallets_found = 1;
@@ -1163,14 +1164,20 @@ SELECT
     1,
     0
   ),
-  @status_allowed := IF(so.\`status\` IN ('accepted', 'payer_confirmed', 'both_confirmed'), 1, 0)
+  @status_allowed := IF(so.\`status\` IN ('accepted', 'payer_confirmed', 'provider_confirmed'), 1, 0)
 FROM \`service_order\` so
 JOIN \`service_request\` sr ON sr.\`request_id\` = so.\`request_id\`
 WHERE so.\`order_id\` = @order_id
 FOR UPDATE;
 SET @next_payer_confirmed = IF(@actor_role = 'payer', 1, COALESCE(@current_payer_confirmed, 0));
 SET @next_provider_confirmed = IF(@actor_role = 'provider', 1, COALESCE(@current_provider_confirmed, 0));
-SET @should_settle = IF(@authorized = 1 AND @status_allowed = 1 AND @next_payer_confirmed = 1 AND @next_provider_confirmed = 1, 1, 0);
+SET @confirmation_changed = IF(
+  (@actor_role = 'payer' AND COALESCE(@current_payer_confirmed, 0) = 0)
+    OR (@actor_role = 'provider' AND COALESCE(@current_provider_confirmed, 0) = 0),
+  1,
+  0
+);
+SET @should_settle = IF(@authorized = 1 AND @status_allowed = 1 AND @confirmation_changed = 1 AND @next_payer_confirmed = 1 AND @next_provider_confirmed = 1, 1, 0);
 SET @first_wallet_user_id = LEAST(@payer_id, @provider_id);
 SET @second_wallet_user_id = GREATEST(@payer_id, @provider_id);
 SELECT @first_wallet_balance := CAST(w.\`balance\` AS DECIMAL(10,2))
@@ -1253,7 +1260,8 @@ SET
   \`provider_confirmed\` = @next_provider_confirmed,
   \`status\` = CASE
     WHEN @settled = 1 THEN 'completed'
-    WHEN @next_payer_confirmed = 1 THEN 'payer_confirmed'
+    WHEN @next_provider_confirmed = 1 AND @next_payer_confirmed = 0 THEN 'provider_confirmed'
+    WHEN @next_payer_confirmed = 1 AND @next_provider_confirmed = 0 THEN 'payer_confirmed'
     ELSE 'accepted'
   END,
   \`completed_at\` = CASE WHEN @settled = 1 THEN @settled_at ELSE \`completed_at\` END,
@@ -1261,6 +1269,7 @@ SET
 WHERE \`order_id\` = @order_id
   AND @authorized = 1
   AND @status_allowed = 1
+  AND @confirmation_changed = 1
   AND (@should_settle = 0 OR @settled = 1)
 LIMIT 1;
 SET @order_updated = ROW_COUNT();

@@ -409,6 +409,18 @@
     });
   });
 
+  // Header 滚动阴影
+  const header = document.getElementById('feedHeader');
+  window.addEventListener('scroll', () => {
+    if (window.scrollY > 10) {
+      header.classList.add('scrolled');
+    } else {
+      header.classList.remove('scrolled');
+    }
+  });
+</script>
 <script type="module" src="/assets/app/main.mjs"></script>
+<script src="/assets/app/jury-nav.js"></script>
+
 </body>
 </html>

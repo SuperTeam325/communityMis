@@ -109,6 +109,10 @@ export function createBackendServer(options = {}) {
         return;
       }
       response.errorCode = error?.code ?? "INTERNAL_ERROR";
+      if (!(error instanceof HttpError)) {
+        const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
+        console.error(`[${request.method} ${url.pathname}] Unhandled error:`, error.message, error.stack ?? "");
+      }
       sendError(response, error, { exposeStack: !config.isProduction });
     }
   });

@@ -240,6 +240,7 @@ export function createApiClient(options = {}) {
       })
     },
     jury: {
+      disputes: (token, params = {}) => request(withQuery("/api/jury/disputes", params), { token }),
       dispute: (token, disputeId) => request(`/api/jury/disputes/${encodeURIComponent(disputeId)}`, { token }),
       vote: (token, disputeId, payload) => request(`/api/jury/disputes/${encodeURIComponent(disputeId)}/votes`, {
         method: "POST",

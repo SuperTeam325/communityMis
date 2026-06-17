@@ -549,24 +549,6 @@
     });
   }
 
-  // ── AI Response Engine ──
-  const aiResponses = {
-    '电脑维修': { text: '根据你的需求，我为你筛选了以下条件：', type: 'filter', tags: ['关键词=电脑维修', '信用分≥4.5', '发布时间=今天', '状态=待接单'], action: '查看匹配结果', resultCount: 3 },
-    '纠纷': { text: '发起纠纷需要满足以下条件，我为你整理了关键规则：', type: 'rules', rules: ['订单状态为"已完成"或"已确认"', '订单完成后 7 天内可发起', '需提供纠纷类型（服务未完成、质量不符、沟通问题等）', '需提供相关证据（聊天记录、图片等）', '纠纷发起后将冻结相关时间币，等待处理'], footer: '以上为平台规则摘要，具体操作请在"我的订单"中点击对应订单的"发起纠纷"按钮。' },
-    '冻结': { text: '你的时间币被冻结可能有以下几种原因：', type: 'rules', rules: ['正在进行中的订单——接单后对应时间币会被冻结，双方确认完成后自动释放', '纠纷处理中——纠纷订单涉及的时间币被临时冻结，等待管理员裁决', '系统风控——异常交易行为会触发临时冻结以便核查', '账户限制——如账户处于受限状态，部分功能和时间币可能被冻结'], footer: '如需查询具体冻结记录，请前往"我的钱包 → 冻结明细"查看。' },
-    '快递': { text: '我为你生成了一份任务草稿，你可以在此基础上修改：', type: 'draft', draftTitle: '代取快递并送货上门', draftBody: '需要帮忙去菜鸟驿站代取一个包裹，取件码通过私信发送。包裹不大，不需要推车。送到阳光花园 X 号楼 X 室，放在门口即可。有时间的邻居请联系，谢谢！', draftTags: ['快递代取', '轻量', '即时'], draftReward: '¥10-15' },
-    '发布': { text: '我为你生成了一份任务草稿，你可以在此基础上修改：', type: 'draft', draftTitle: '代取快递并送货上门', draftBody: '需要帮忙去菜鸟驿站代取一个包裹，取件码通过私信发送。包裹不大，不需要推车。送到阳光花园 X 号楼 X 室，放在门口即可。有时间的邻居请联系，谢谢！', draftTags: ['快递代取', '轻量', '即时'], draftReward: '¥10-15' },
-    default: { text: '好的，让我帮你梳理一下相关信息：', type: 'default', response: '我目前可以帮你解答平台规则相关问题、辅助筛选需求大厅的任务、帮忙生成发布文案草稿。\n\n你可以尝试问我：\n· 如何评价已完成订单？\n· 找一个今天发布的宠物照看需求\n· 发布一则社区活动通知应该怎么写\n· 陪审投票有什么作用？' }
-  };
-
-  function getResponse(query) {
-    const q = query.trim();
-    for (const [key, resp] of Object.entries(aiResponses)) {
-      if (q.includes(key)) return resp;
-    }
-    return aiResponses.default;
-  }
-
   function buildMsgHTML(role, content) {
     return `<div class="ai-modal-msg ${role}">
       <div class="ai-modal-msg-avatar">${role === 'user' ? icons.user : icons.sparkle.replace('width="16"','width="14"').replace('height="16"','height="14"')}</div>
@@ -574,47 +556,46 @@
     </div>`;
   }
 
-  function buildAIResponseHTML(resp) {
-    let html = `<div class="ai-modal-msg assistant">
+  function buildAIResponseHTML(content) {
+    return `<div class="ai-modal-msg assistant">
       <div class="ai-modal-msg-avatar">${icons.sparkle.replace('width="16"','width="14"').replace('height="16"','height="14"')}</div>
-      <div><div class="ai-modal-msg-bubble"><p>${esc(resp.text)}</p>`;
-
-    if (resp.type === 'filter') {
-      html += `<div class="apply-filter-card">
-        <div class="filter-tags">${resp.tags.map(t => `<span class="filter-tag">${t}</span>`).join('')}</div>
-        <button class="apply-filter-btn" onclick="window._aiModalNavigate&&window._aiModalNavigate('tasks.html')">
-          ${icons.search.replace('width="14"','').replace('height="14"','')} 查看匹配结果（${resp.resultCount} 个任务）
-        </button>
-      </div>`;
-    }
-    if (resp.type === 'rules' && resp.rules) {
-      html += '<ul class="ai-rules-list">';
-      resp.rules.forEach(r => { html += `<li>${esc(r)}</li>`; });
-      html += '</ul>';
-      if (resp.footer) html += `<p class="ai-rules-footer">${esc(resp.footer)}</p>`;
-    }
-    if (resp.type === 'draft') {
-      html += `<div class="draft-card">
-        <div class="draft-title">${esc(resp.draftTitle)}</div>
-        <div class="draft-body">${esc(resp.draftBody)}</div>
-        <div class="draft-tags">
-          ${resp.draftTags.map(t => `<span class="filter-tag" style="background:var(--accent-subtle, rgba(99,102,241,0.08));color:var(--accent, #6366f1);">${t}</span>`).join('')}
-          <span class="filter-tag" style="background:var(--warning-light, #fef3c7);color:var(--warning, #d97706);">悬赏 ${esc(resp.draftReward)}</span>
-        </div>
-        <div class="draft-actions">
-          <button class="btn btn--primary btn--sm" onclick="window._aiModalNavigate&&window._aiModalNavigate('post.html')">确认并填入发布表单</button>
-          <button class="btn btn--ghost btn--sm" onclick="document.getElementById('ai-modal-input').value='帮我写一段发布代取快递任务的描述';document.getElementById('ai-modal-send').click();">重新生成</button>
-        </div>
-      </div>`;
-    }
-
-    html += `</div>
+      <div><div class="ai-modal-msg-bubble"><p>${esc(content)}</p></div>
       <div class="ai-modal-msg-actions">
         <button class="ai-modal-msg-action-btn" onclick="navigator.clipboard?.writeText(this.closest('.ai-modal-msg').querySelector('.ai-modal-msg-bubble').textContent.trim());this.textContent='✓ 已复制';setTimeout(()=>this.textContent='${esc('复制')}',2000);">${icons.copy} 复制</button>
         <button class="ai-modal-msg-action-btn" onclick="this.classList.toggle('active')">${icons.thumbsUp} 有用</button>
         <button class="ai-modal-msg-action-btn" onclick="this.classList.toggle('active')">${icons.thumbsDown} 没用</button>
       </div></div></div>`;
-    return html;
+  }
+
+  function apiBaseUrl() {
+    return String(window.__NEIGHBOR_CONFIG__?.apiBaseUrl || window.__API_BASE_URL__ || '').replace(/\/$/, '');
+  }
+
+  function readCookie(name) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = document.cookie.match(new RegExp(`(?:^|; )${escaped}=([^;]*)`));
+    return match ? decodeURIComponent(match[1]) : '';
+  }
+
+  async function requestAIReply(message) {
+    const headers = { 'content-type': 'application/json' };
+    const csrfToken = readCookie('csrf_token');
+    if (csrfToken) headers['x-csrf-token'] = csrfToken;
+    const response = await fetch(`${apiBaseUrl()}/api/ai/chat`, {
+      method: 'POST',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify({
+        message,
+        scene: currentScene === 'all' ? 'general' : currentScene,
+        source: 'global-modal'
+      })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload?.error?.message || 'AI 服务暂时不可用，请稍后重试。');
+    }
+    return payload.answer || payload.message?.content || payload.content || '已收到你的问题。';
   }
 
   function showTyping() {
@@ -631,7 +612,7 @@
     if (el) el.remove();
   }
 
-  function sendMessage() {
+  async function sendMessage() {
     const query = inputEl.value.trim();
     if (!query || isProcessing) return;
     isProcessing = true;
@@ -645,17 +626,19 @@
     inputEl.style.height = '';
     chatArea.scrollTop = chatArea.scrollHeight;
 
-    setTimeout(() => {
-      showTyping();
-      setTimeout(() => {
-        hideTyping();
-        const resp = getResponse(query);
-        chatArea.insertAdjacentHTML('beforeend', buildAIResponseHTML(resp));
-        chatArea.scrollTop = chatArea.scrollHeight;
-        isProcessing = false;
-        sendBtn.disabled = false;
-      }, 1000 + Math.random() * 700);
-    }, 250);
+    showTyping();
+    try {
+      const reply = await requestAIReply(query);
+      hideTyping();
+      chatArea.insertAdjacentHTML('beforeend', buildAIResponseHTML(reply));
+    } catch (error) {
+      hideTyping();
+      chatArea.insertAdjacentHTML('beforeend', buildAIResponseHTML(error?.message || 'AI 服务暂时不可用，请稍后重试。'));
+    } finally {
+      chatArea.scrollTop = chatArea.scrollHeight;
+      isProcessing = false;
+      sendBtn.disabled = false;
+    }
   }
 
   // Expose to window

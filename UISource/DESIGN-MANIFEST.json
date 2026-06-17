@@ -10,6 +10,7 @@
       "css/tokens.css",
       "export_pptx.py",
       "index.html",
+      "jury.html",
       "js/ai-modal.js",
       "mpyx2yft-新增内容.md",
       "mpyy1llw-项目设计.md",
@@ -56,6 +57,7 @@
     ],
     "html": [
       "index.html",
+      "jury.html",
       "screens/admin-ai-config.html",
       "screens/admin-ai-conversations.html",
       "screens/admin-ai-errors.html",
@@ -117,6 +119,11 @@
       "file": "index.html",
       "role": "launcher-overview",
       "implementationNote": "Use this as the navigation/overview entry only; implement each linked screen file as its own route/surface."
+    },
+    {
+      "file": "jury.html",
+      "role": "product-screen",
+      "implementationNote": "Preserve visual hierarchy, responsive behavior, and interactive states from this screen."
     },
     {
       "file": "screens/admin-ai-config.html",

@@ -325,16 +325,16 @@
 
 <script>
   const transactions = [
-    { id:'TX-20260605-0914', time:'2026-06-05 09:14', type:'freeze', order:'ORD-240650-048', title:'帮忙更换厨房水龙头', user:'陈雨 / 刘师傅', amount:'-45.00', status:'pending', risk:'low', reason:'需求方确认下单后冻结报酬', audit:'AUD-6318', next:'等待服务方完成并由需求方确认，预计 24 小时内释放给服务方。' },
-    { id:'TX-20260604-1826', time:'2026-06-04 18:26', type:'release', order:'ORD-240603-042', title:'帮李阿姨代购日用品', user:'李阿姨 / 周可', amount:'+35.00', status:'settled', risk:'low', reason:'双方确认完成，冻结金额释放给服务方', audit:'AUD-6307', next:'已完成入账，无需人工处理。' },
-    { id:'TX-20260604-1703', time:'2026-06-04 17:03', type:'refund', order:'ORD-240528-003', title:'辅导初三数学 2 小时', user:'张姐 / 小林', amount:'+12.00', status:'settled', risk:'mid', reason:'纠纷调解后按 30% 比例退回需求方', audit:'AUD-6299', next:'已写入终审裁决。建议关注双方 7 日内是否重复申诉。' },
-    { id:'TX-20260604-1658', time:'2026-06-04 16:58', type:'expense', order:'ORD-240603-041', title:'请小王帮忙遛狗', user:'赵琳 / 小王', amount:'-20.00', status:'settled', risk:'low', reason:'订单完成后从需求方冻结账户扣减', audit:'AUD-6294', next:'正常支出记录。' },
-    { id:'TX-20260604-1420', time:'2026-06-04 14:20', type:'freeze', order:'ORD-240524-032', title:'辅导初三数学 2 小时', user:'张姐 / 小林', amount:'-40.00', status:'review', risk:'high', reason:'纠纷处理中，系统保持时间币冻结', audit:'AUD-6288', next:'等待管理员终审。高风险原因：双方证据冲突且存在重复投诉。' },
-    { id:'TX-20260603-1938', time:'2026-06-03 19:38', type:'income', order:'ORD-240602-039', title:'帮赵姐组装书柜', user:'赵姐 / 王晨', amount:'+45.00', status:'settled', risk:'low', reason:'订单完成，服务方获得报酬', audit:'AUD-6273', next:'正常收入记录。' },
-    { id:'TX-20260603-1216', time:'2026-06-03 12:16', type:'freeze', order:'ORD-240651-049', title:'代取宠物医院药', user:'陈雨 / 待接单', amount:'-25.00', status:'pending', risk:'low', reason:'发布者预留任务预算，待接单后进入订单冻结', audit:'AUD-6259', next:'若 48 小时无人接单，冻结将自动退回可用余额。' },
-    { id:'TX-20260602-1045', time:'2026-06-02 10:45', type:'refund', order:'ORD-240520-007', title:'代取处方药并送上门', user:'王爷爷 / 李四', amount:'+50.00', status:'review', risk:'high', reason:'疑似重复退款请求，需人工核查', audit:'AUD-6244', next:'请核对终审记录与支付链路，确认是否存在重复释放。' },
-    { id:'TX-20260601-1730', time:'2026-06-01 17:30', type:'income', order:'ORD-240530-036', title:'代取快递送到 5 号楼', user:'刘姐 / 周同学', amount:'+10.00', status:'settled', risk:'low', reason:'订单完成，服务方获得报酬', audit:'AUD-6222', next:'正常收入记录。' },
-    { id:'TX-20260601-0930', time:'2026-06-01 09:30', type:'expense', order:'ORD-240601-038', title:'请陈师傅修水龙头', user:'陈雨 / 陈师傅', amount:'-30.00', status:'settled', risk:'low', reason:'订单完成后支付给服务方', audit:'AUD-6209', next:'正常支出记录。' }
+    { id:'TX-20260605-0914', time:'2026-06-05 09:14', type:'freeze', order:'ORD-LIVE650-048', title:'帮忙更换厨房水龙头', user:'陈雨 / 刘师傅', amount:'-45.00', status:'pending', risk:'low', reason:'需求方确认下单后冻结报酬', audit:'AUDIT', next:'等待服务方完成并由需求方确认，预计 24 小时内释放给服务方。' },
+    { id:'TX-20260604-1826', time:'2026-06-04 18:26', type:'release', order:'ORD-LIVE603-042', title:'帮用户乙代购日用品', user:'用户乙 / 周可', amount:'+35.00', status:'settled', risk:'low', reason:'双方确认完成，冻结金额释放给服务方', audit:'AUDIT', next:'已完成入账，无需人工处理。' },
+    { id:'TX-20260604-1703', time:'2026-06-04 17:03', type:'refund', order:'ORD-LIVE528-003', title:'辅导初三数学 2 小时', user:'张姐 / 小林', amount:'+12.00', status:'settled', risk:'mid', reason:'纠纷调解后按 30% 比例退回需求方', audit:'AUDIT', next:'已写入终审裁决。建议关注双方 7 日内是否重复申诉。' },
+    { id:'TX-20260604-1658', time:'2026-06-04 16:58', type:'expense', order:'ORD-LIVE603-041', title:'请用户庚帮忙遛狗', user:'赵琳 / 用户庚', amount:'-20.00', status:'settled', risk:'low', reason:'订单完成后从需求方冻结账户扣减', audit:'AUDIT', next:'正常支出记录。' },
+    { id:'TX-20260604-1420', time:'2026-06-04 14:20', type:'freeze', order:'ORD-LIVE524-032', title:'辅导初三数学 2 小时', user:'张姐 / 小林', amount:'-40.00', status:'review', risk:'high', reason:'纠纷处理中，系统保持时间币冻结', audit:'AUDIT', next:'等待管理员终审。高风险原因：双方证据冲突且存在重复投诉。' },
+    { id:'TX-20260603-1938', time:'2026-06-03 19:38', type:'income', order:'ORD-LIVE602-039', title:'帮用户己组装书柜', user:'用户己 / 王晨', amount:'+45.00', status:'settled', risk:'low', reason:'订单完成，服务方获得报酬', audit:'AUDIT', next:'正常收入记录。' },
+    { id:'TX-20260603-1216', time:'2026-06-03 12:16', type:'freeze', order:'ORD-LIVE651-049', title:'代取宠物医院药', user:'陈雨 / 待接单', amount:'-25.00', status:'pending', risk:'low', reason:'发布者预留任务预算，待接单后进入订单冻结', audit:'AUDIT', next:'若 48 小时无人接单，冻结将自动退回可用余额。' },
+    { id:'TX-20260602-1045', time:'2026-06-02 10:45', type:'refund', order:'ORD-LIVE520-007', title:'代取处方药并送上门', user:'王爷爷 / 管理员乙', amount:'+50.00', status:'review', risk:'high', reason:'疑似重复退款请求，需人工核查', audit:'AUDIT', next:'请核对终审记录与支付链路，确认是否存在重复释放。' },
+    { id:'TX-20260601-1730', time:'2026-06-01 17:30', type:'income', order:'ORD-LIVE530-036', title:'代取快递送到 5 号楼', user:'刘姐 / 周同学', amount:'+10.00', status:'settled', risk:'low', reason:'订单完成，服务方获得报酬', audit:'AUDIT', next:'正常收入记录。' },
+    { id:'TX-20260601-0930', time:'2026-06-01 09:30', type:'expense', order:'ORD-LIVE601-038', title:'请陈师傅修水龙头', user:'陈雨 / 陈师傅', amount:'-30.00', status:'settled', risk:'low', reason:'订单完成后支付给服务方', audit:'AUDIT', next:'正常支出记录。' }
   ];
 
   const typeMeta = {

@@ -453,7 +453,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
         <div class="notif-main">
-          <h2 class="notif-title">赵姐接受了你的任务「帮忙遛狗 30 分钟」</h2>
+          <h2 class="notif-title">用户己接受了你的任务「帮忙遛狗 30 分钟」</h2>
           <p class="notif-desc">订单已进入待服务状态。请在私信中确认牵引绳位置、服务时间和完成确认方式。</p>
           <div class="notif-meta"><span class="badge badge--success">订单更新</span><span class="time">10 分钟前</span></div>
         </div>
@@ -465,7 +465,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
         </div>
         <div class="notif-main">
-          <h2 class="notif-title">纠纷 #DSP-240528-003 有新的证据补充</h2>
+          <h2 class="notif-title">纠纷 #DSP-LIVE528-003 有新的证据补充</h2>
           <p class="notif-desc">对方上传了服务前后照片，陪审投票将在 24 小时后截止。AI 摘要仅供参考，最终以人工裁决为准。</p>
           <div class="notif-meta"><span class="badge badge--danger">纠纷</span><span class="time">1 小时前</span></div>
         </div>
@@ -489,7 +489,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
         </div>
         <div class="notif-main">
-          <h2 class="notif-title">刘奶奶确认完成，+5.0 时间币已到账</h2>
+          <h2 class="notif-title">用户戊确认完成，+5.0 时间币已到账</h2>
           <p class="notif-desc">对应订单 #240601-B1 已完成结算，评价入口将在 7 天内保持开放。</p>
           <div class="notif-meta"><span class="badge badge--reward">时间币</span><span class="time">昨天 16:45</span></div>
         </div>
@@ -555,7 +555,7 @@
       <h2>今日摘要</h2>
       <div class="digest-list">
         <div class="digest-row"><strong>订单需要确认</strong><span>1 个任务已被接单，建议先确认服务时间。</span></div>
-        <div class="digest-row"><strong>纠纷进入证据期</strong><span>#DSP-240528-003 新增照片证据，陪审投票还剩 24 小时。</span></div>
+        <div class="digest-row"><strong>纠纷进入证据期</strong><span>#DSP-LIVE528-003 新增照片证据，陪审投票还剩 24 小时。</span></div>
         <div class="digest-row"><strong>AI 筛选完成</strong><span>代取快递条件已匹配 3 个候选任务。</span></div>
       </div>
     </section>
@@ -674,8 +674,6 @@
   updateUnreadCount();
 </script>
 <script src="/assets/app/jury-nav.js"></script>
-<script>
-(function(){"use strict";function t(){var u=window.__API_BASE_URL__||"";if(!u){if(!t._r)t._r=0;if(t._r++<20)setTimeout(t,500);return}fetch(u+"/api/auth/me",{credentials:"include"}).then(function(r){return r.ok?r.json():null}).then(function(d){if(d&&d.user&&d.user.isJury)n()}).catch(function(){})}function n(){var v=document.querySelector(".bottom-nav");if(!v||document.querySelector(".jlink"))return;var a=document.createElement("a");a.href="/jury";a.className="jlink";a.innerHTML="<svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>陪审";v.insertBefore(a,v.lastElementChild)}setTimeout(t,800)})();
-</script>
+
 </body>
 </html>

@@ -200,7 +200,7 @@ export function ProfilePage({ api }: { api: ApiClient }) {
           </div>
           <h2 className="profile-name" style={NAME_STYLE}>{text(user?.displayName ?? user?.username)}</h2>
           <p className="profile-bio" style={BIO_STYLE}>{text(user?.bio, "暂无简介")}</p>
-          {user?.skillTags && asArray<string>(user.skillTags, "").length > 0 && (
+          {!!user?.skillTags && asArray<string>(user.skillTags, "").length > 0 && (
             <div style={SKILL_TAGS_STYLE}>
               {asArray<string>(user.skillTags, "").map((tag: string) => (
                 <span key={tag} className="badge badge--accent" style={TAG_STYLE}>{tag}</span>
@@ -481,14 +481,14 @@ export function UserPublicPage({ api }: { api: ApiClient }) {
           <div className="avatar xl" style={AVATAR_XL_STYLE}>{text(user?.displayName ?? user?.username).slice(0, 1)}</div>
           <h2 style={NAME_STYLE}>{text(user?.displayName ?? user?.username)}</h2>
           <p style={BIO_STYLE}>{text(user?.bio, "暂无简介")}</p>
-          {user?.skillTags && asArray<string>(user.skillTags, "").length > 0 && (
+          {!!user?.skillTags && asArray<string>(user.skillTags, "").length > 0 && (
             <div style={SKILL_TAGS_STYLE}>
               {asArray<string>(user.skillTags, "").map((tag: string) => (
                 <span key={tag} className="badge badge--accent" style={TAG_STYLE}>{tag}</span>
               ))}
             </div>
           )}
-          {credit?.averageRating && (
+          {!!credit?.averageRating && (
             <div className="credit-badge" style={CREDIT_BADGE_STYLE}>
               <span>{creditStars(credit.averageRating)}</span>
               <span>信誉 {text(credit.averageRating)}</span>
@@ -565,14 +565,14 @@ export function CreditPage({ api }: { api: ApiClient }) {
                     <span style={{ fontSize: 12, color: "var(--muted)" }}>{timeAgo(review.createdAt)}</span>
                   </div>
                   <p style={{ color: "var(--fg)", lineHeight: 1.6 }}>{text(review.comment, "用户未填写评价内容")}</p>
-                  {review.orderTitle && <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>订单: {text(review.orderTitle)}</p>}
-                  {review.direction && <span className="badge badge--accent" style={{ fontSize: 11, marginTop: 4, display: "inline-block" }}>{text(review.direction)}</span>}
+                  {!!review.orderTitle && <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>订单: {text(review.orderTitle)}</p>}
+                  {!!review.direction && <span className="badge badge--accent" style={{ fontSize: 11, marginTop: 4, display: "inline-block" }}>{text(review.direction)}</span>}
                 </article>
               ))}
             </div>
           </StateView>
         </section>
-        {credit?.rules && (
+        {!!credit?.rules && (
           <section className="panel">
             <h3 style={{ fontSize: 16, fontWeight: 700 }}>规则说明</h3>
             <ul style={{ paddingLeft: 20, fontSize: 13, color: "var(--muted)", lineHeight: 1.8 }}>
