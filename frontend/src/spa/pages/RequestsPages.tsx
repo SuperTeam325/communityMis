@@ -115,11 +115,13 @@ export function TasksPage({ api }: { api: ApiClient }) {
 export function PostPage({ api }: { api: ApiClient }) {
   const navigate = useNavigate();
   const mutation = useMutationTracker();
+  const { params } = useQueryParams();
+  const initialDraft = React.useMemo(() => draftDescriptionFromQuery(params.get("draft")), []);
   const categoriesState = useAsync(() => api.categories.list(), [api]);
   const tagsState = useAsync(() => api.tags.list(), [api]);
   const categories = asArray<Record<string, unknown>>(categoriesState.data, "categories");
   const tags = asArray<Record<string, unknown>>(tagsState.data, "tags");
-  const [draft, setDraft] = React.useState("");
+  const [draft, setDraft] = React.useState(initialDraft);
   const [files, setFiles] = React.useState<Array<{ fileId: string; name: string }>>([]);
   const [selectedTags, setSelectedTags] = React.useState<string[]>([]);
   const [draftBusy, setDraftBusy] = React.useState(false);
@@ -187,12 +189,24 @@ export function PostPage({ api }: { api: ApiClient }) {
           })}
         </div>
         <div className="action-row">
-          <button className="btn btn--secondary" type="button" disabled={draftBusy} onClick={async () => {
+          <button className="btn btn--secondary" type="button" disabled={draftBusy} onClick={async (event) => {
             setDraftBusy(true);
             setDraftError("");
             try {
-              const result = await api.ai.requestDraft({ prompt: "帮我写一个社区互助需求草稿" });
-              setDraft(text(result.draft ?? result.content ?? result.message, ""));
+              const form = new FormData(event.currentTarget.form ?? undefined);
+              const title = text(form.get("title"), "");
+              const description = text(form.get("description"), "");
+              const result = await api.ai.requestDraft({
+                prompt: [title, description].filter(Boolean).join("\n") || "帮我写一个社区互助需求草稿",
+                title,
+                description,
+                categoryId: form.get("categoryId"),
+                estimatedHours: Number(form.get("estimatedHours") || 0) || undefined,
+                coinAmount: Number(form.get("coinAmount") || 0) || undefined,
+                location: form.get("location"),
+                tags: selectedTags.length > 0 ? selectedTags : String(form.get("tags") ?? "").split(/[，,]/).map((item) => item.trim()).filter(Boolean)
+              });
+              setDraft(draftDescription(result));
             } catch (reason) {
               setDraftError(friendlyError(reason));
             } finally {
@@ -222,6 +236,26 @@ export function PostPage({ api }: { api: ApiClient }) {
       ) : null}
     </>
   );
+}
+
+function draftDescription(value: unknown): string {
+  if (typeof value === "string") return value;
+  const record = asRecord(value);
+  const draft = asRecord(record.draft);
+  const message = asRecord(record.message);
+  return text(
+    draft.description ?? draft.content ?? draft.answer ?? record.description ?? record.content ?? record.answer ?? message.content ?? record.message,
+    ""
+  );
+}
+
+function draftDescriptionFromQuery(value: string | null): string {
+  if (!value) return "";
+  try {
+    return draftDescription(JSON.parse(value));
+  } catch {
+    return value;
+  }
 }
 
 export function RequestDetailPage({ api }: { api: ApiClient }) {

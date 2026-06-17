@@ -61,6 +61,14 @@ describe("stage 03 user flow surfaces", () => {
     await screen.findAllByText("维修");
     fireEvent.change(screen.getByLabelText("标题"), { target: { value: "新需求" } });
     fireEvent.change(screen.getByLabelText("描述"), { target: { value: "需要修灯并调试" } });
+    fireEvent.click(screen.getByRole("button", { name: "AI 草稿" }));
+    await waitFor(() => expect(api.ai.requestDraft).toHaveBeenCalled());
+    expect(api.ai.requestDraft.mock.calls[0][0]).toMatchObject({
+      prompt: "新需求\n需要修灯并调试",
+      title: "新需求",
+      description: "需要修灯并调试"
+    });
+    expect((screen.getByLabelText("描述") as HTMLTextAreaElement).value).toBe("AI 生成的真实任务描述");
     fireEvent.change(screen.getByLabelText("类别"), { target: { value: "11" } });
     fireEvent.change(screen.getByLabelText("预计耗时"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("时间币报酬"), { target: { value: "5" } });
@@ -136,7 +144,7 @@ function apiStub() {
   return {
     categories: { list: vi.fn().mockResolvedValue({ categories: [{ categoryId: 11, name: "维修" }] }) },
     tags: { list: vi.fn().mockResolvedValue({ tags: [{ name: "维修" }] }) },
-    ai: { requestDraft: vi.fn().mockResolvedValue({ draft: "AI 草稿" }) },
+    ai: { requestDraft: vi.fn().mockResolvedValue({ draft: { title: "AI 草稿", description: "AI 生成的真实任务描述" } }) },
     files: { upload: vi.fn().mockResolvedValue({ file: { fileId: "f1", originalName: "demo.png" } }) },
     requests: {
       list: vi.fn().mockResolvedValue({ requests: [request], pagination: { page: 1, pageSize: 12, total: 24, totalPages: 2, hasNext: true, hasPrev: false } }),

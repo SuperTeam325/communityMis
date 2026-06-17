@@ -74,6 +74,12 @@ type AiFeedback = {
   createdAt?: string;
 };
 
+type AiFeedbackReport = {
+  title?: string;
+  content?: string;
+  rows?: Array<Record<string, unknown>>;
+};
+
 type AiError = AiCallLog & {
   exceptionType?: string;
   exceptionText?: string;
@@ -169,7 +175,9 @@ export function AiAssistantPage({ api }: { api: ApiClient }) {
   const openScene = (value: AiScene, prompt: string) => {
     setScene(value);
     setInputValue(prompt);
-    setParams((current) => applyPatch(current, { scene: value, prompt }), { replace: true });
+    setConversationId(null);
+    setMessages([]);
+    setParams((current) => applyPatch(current, { scene: value, prompt, conversationId: "", page: "" }), { replace: true });
   };
 
   const sendMessage = async (event: React.FormEvent) => {
@@ -545,6 +553,7 @@ export function AdminAiConversationsPage({ api }: { api: ApiClient }) {
 export function AdminAiFeedbackPage({ api }: { api: ApiClient }) {
   const { params, setParams } = useQueryParams();
   const [selectedIds, setSelectedIds] = React.useState<Array<string | number>>([]);
+  const [reportResult, setReportResult] = React.useState<Record<string, unknown> | null>(null);
   const state = useAsync(() => api.admin.aiFeedback({
     keyword: params.get("keyword") ?? "",
     userId: params.get("userId") ?? "",
@@ -557,7 +566,14 @@ export function AdminAiFeedbackPage({ api }: { api: ApiClient }) {
   }), [api, params.toString()]);
   const rows = asArray<AiFeedback>(state.data, "feedback");
   const summary = asRecord(state.data?.summary);
+  const detail = useAsync(() => {
+    const id = params.get("conversationId");
+    return id ? api.admin.aiConversation(id) : (Promise.resolve({}) as Promise<Record<string, unknown>>);
+  }, [api, params.get("conversationId")]);
+  const conversation = asRecord(detail.data?.conversation);
+  const messages = asArray<AiMessage>(detail.data?.messages, "messages");
   const mutation = useMutationTracker();
+  const report = asRecord(reportResult?.report) as AiFeedbackReport;
   return (
     <AiAdminPageShell title="AI 用户反馈" active="feedback">
       <AiAdminSummary summary={summary} />
@@ -571,18 +587,60 @@ export function AdminAiFeedbackPage({ api }: { api: ApiClient }) {
           scene: params.get("scene") ?? "all",
           status: params.get("status") ?? "all",
           rating: params.get("rating") ?? "all"
-        }), () => state.reload())}>生成周报</button>
+        }), (value) => {
+          setReportResult(value);
+          state.reload();
+        })}>{mutation.busy ? "生成中..." : "生成周报"}</button>
       </div>
-      <StateView loading={state.loading} error={state.error} empty={rows.length === 0}>
-        <AiFeedbackTable
-          rows={rows}
-          selectedIds={selectedIds}
-          onToggle={(id) => setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])}
-          onResolve={(id) => mutation.run(() => api.admin.resolveAiFeedback(String(id), { resolution: "人工复盘完成" }), () => state.reload())}
-          onOpenConversation={(id) => setParams(applyPatch(params, { conversationId: String(id) }))}
-        />
-        <PaginationControls pagination={state.data?.pagination} onPageChange={(page) => setParams(applyPatch(params, { page }))} />
-      </StateView>
+      <div className="admin-split">
+        <div>
+          {reportResult ? (
+            <section className="panel ai-report-panel" role="status">
+              <div className="section-heading">
+                <h2>{text(report.title, "AI 用户反馈周报")}</h2>
+                <span>{fullDateText(reportResult.generatedAt)}</span>
+              </div>
+              <div className="detail-list">
+                <div className="detail-item"><div className="label">纳入反馈</div><div className="value">{text(report.rows?.length, "0")} 条</div></div>
+                <div className="detail-item"><div className="label">负向反馈</div><div className="value">{text(reportResult.summary && typeof reportResult.summary === "object" ? (reportResult.summary as Record<string, unknown>).negativeCount : 0, "0")}</div></div>
+                <div className="detail-item"><div className="label">待处理</div><div className="value">{text(reportResult.summary && typeof reportResult.summary === "object" ? (reportResult.summary as Record<string, unknown>).pendingCount : 0, "0")}</div></div>
+              </div>
+              <pre className="report-content">{text(report.content, "")}</pre>
+            </section>
+          ) : null}
+          <StateView loading={state.loading} error={state.error} empty={rows.length === 0}>
+            <AiFeedbackTable
+              rows={rows}
+              selectedIds={selectedIds}
+              onToggle={(id) => setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])}
+              onResolve={(id) => mutation.run(() => api.admin.resolveAiFeedback(String(id), { resolution: "人工复盘完成" }), () => state.reload())}
+              onOpenConversation={(id) => setParams(applyPatch(params, { conversationId: String(id) }))}
+            />
+            <PaginationControls pagination={state.data?.pagination} onPageChange={(page) => setParams(applyPatch(params, { page }))} />
+          </StateView>
+        </div>
+        <aside className="panel">
+          <h2>会话详情</h2>
+          <StateView loading={detail.loading} error={detail.error} empty={!conversation.conversationId}>
+            <div className="detail-list">
+              <div className="detail-item"><div className="label">会话</div><div className="value">{text(conversation.sceneText ?? conversation.scene)}</div></div>
+              <div className="detail-item"><div className="label">状态</div><div className="value">{text(conversation.statusText ?? conversation.status)}</div></div>
+              <div className="detail-item"><div className="label">消息数</div><div className="value">{text(conversation.messageCount, "0")}</div></div>
+            </div>
+            <div className="ai-message-list">
+              {messages.map((item) => (
+                <article key={String(item.messageId)} className="ai-message-detail">
+                  <div className="detail-top">
+                    <strong>{text(item.senderType)}</strong>
+                    <span>{fullDateText(item.createdAt)}</span>
+                  </div>
+                  <p>{text(item.content)}</p>
+                </article>
+              ))}
+            </div>
+          </StateView>
+        </aside>
+      </div>
       {mutation.error ? <p className="field-error">{mutation.error}</p> : null}
     </AiAdminPageShell>
   );
@@ -1068,6 +1126,7 @@ function wrapClipboardHtml(html: string) {
 async function loadConversation(api: ApiClient, conversationId: string | number, setMessages: React.Dispatch<React.SetStateAction<AiMessage[]>>) {
   const payload = await api.ai.conversation(String(conversationId));
   const conversation = asRecord(payload.conversation);
-  const messages = asArray<AiMessage>(conversation.messages, "messages");
+  const payloadMessages = asArray<AiMessage>(payload.messages, "messages");
+  const messages = payloadMessages.length > 0 ? payloadMessages : asArray<AiMessage>(conversation.messages, "messages");
   setMessages(messages.map((item) => ({ ...item, role: item.senderType === "ai" ? "assistant" : "user" })));
 }

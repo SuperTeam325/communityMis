@@ -1119,6 +1119,18 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.ai-report-panel {
+  margin-bottom: var(--space-lg);
+}
+
+.report-content {
+  margin: var(--space-md) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font: inherit;
+}
+
 .scene-grid {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }

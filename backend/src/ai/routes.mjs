@@ -104,7 +104,8 @@ export async function handleAiRoutes({ request, response, url, authService, aiAd
     ensureAiStore(authService.store, ["listAiConversationsForUserId"]);
     const conversations = await authService.store.listAiConversationsForUserId(context.user.userId, {
       page: positiveInteger(url.searchParams.get("page"), 1),
-      pageSize: Math.min(50, positiveInteger(url.searchParams.get("pageSize") ?? url.searchParams.get("limit"), 20))
+      pageSize: Math.min(50, positiveInteger(url.searchParams.get("pageSize") ?? url.searchParams.get("limit"), 20)),
+      scene: normalizeSceneFilter(url.searchParams.get("scene"))
     });
     sendJson(response, 200, {
       conversations: (conversations.conversations ?? []).map(aiConversationDto),
@@ -151,7 +152,7 @@ export async function handleAiRoutes({ request, response, url, authService, aiAd
       userId: context.user.userId,
       scene: "request_draft",
       conversationId: parseOptionalId(body.conversationId),
-      operation: async (conversation) => requestDraftPayload(authService.store, context, body, conversation)
+      operation: async (conversation) => requestDraftPayload(authService.store, context, body, conversation, aiAdapter)
     }));
     return true;
   }
@@ -253,7 +254,7 @@ async function chatPayload(store, context, body, conversation, aiAdapter) {
     };
   }
 
-  if (scene === "request_filter" || /找|筛选|推荐|需求|任务/.test(prompt)) {
+  if (scene === "request_filter" || (scene !== "request_draft" && /找|筛选|推荐|需求|任务/.test(prompt))) {
     return requestFilterPayload(store, context, {
       prompt,
       conversationId: conversation.conversationId,
@@ -265,7 +266,7 @@ async function chatPayload(store, context, body, conversation, aiAdapter) {
       prompt,
       conversationId: conversation.conversationId,
       skipUserMessage: true
-    }, conversation, inputMessage);
+    }, conversation, aiAdapter, inputMessage);
   }
 
   let result = ruleAnswer(prompt);
@@ -369,19 +370,20 @@ async function requestFilterPayload(store, context, body, conversation, existing
   };
 }
 
-async function requestDraftPayload(store, context, body, conversation) {
+async function requestDraftPayload(store, context, body, conversation, aiAdapter = null, existingUserMessage = null) {
   const prompt = optionalText(body.prompt ?? body.message ?? body.description ?? body.title, 2000);
   if (!prompt) {
     throw new HttpError(400, "AI_PROMPT_REQUIRED", "Request draft prompt is required.");
   }
-  const userMessage = body.skipUserMessage ? null : await createAiMessageSafe(store, {
+  const userMessage = existingUserMessage ?? (body.skipUserMessage ? null : await createAiMessageSafe(store, {
     conversationId: conversation.conversationId,
     senderType: "user",
     content: prompt,
     businessType: "request_draft",
     businessId: null
-  });
-  const draft = await generateRequestDraft(store, body, prompt);
+  }));
+  const draftResult = await generateRequestDraft(store, body, prompt, context, aiAdapter);
+  const draft = draftResult.draft;
   const answer = "已生成发布草稿。请先检查标题、描述、类别和时间币，确认后再填入表单；AI 不会自动提交。";
   const message = await createAiMessageSafe(store, {
     conversationId: conversation.conversationId,
@@ -398,6 +400,9 @@ async function requestDraftPayload(store, context, body, conversation) {
     type: "draft",
     answer,
     draft,
+    fallback: Boolean(draftResult.fallback),
+    model: draftResult.model ?? null,
+    providerError: draftResult.providerError ?? null,
     requiresUserConfirmation: true,
     safety: {
       canSubmit: false,
@@ -647,7 +652,7 @@ async function streamChatPayload(store, context, body, conversation, aiAdapter, 
     };
   }
 
-  if (scene === "request_filter" || /找|筛选|推荐|需求|任务/.test(prompt)) {
+  if (scene === "request_filter" || (scene !== "request_draft" && /找|筛选|推荐|需求|任务/.test(prompt))) {
     const result = await requestFilterPayload(store, context, {
       prompt,
       conversationId: conversation.conversationId,
@@ -662,7 +667,7 @@ async function streamChatPayload(store, context, body, conversation, aiAdapter, 
       prompt,
       conversationId: conversation.conversationId,
       skipUserMessage: true
-    }, conversation);
+    }, conversation, aiAdapter, inputMessage);
     await emitTextChunks(result.answer, emit);
     return result;
   }
@@ -991,7 +996,44 @@ function scoreRequest(item, criteria) {
   };
 }
 
-async function generateRequestDraft(store, body, prompt) {
+async function generateRequestDraft(store, body, prompt, context = {}, aiAdapter = null) {
+  const fallbackDraft = await localRequestDraft(store, body, prompt);
+  if (!aiAdapter || typeof aiAdapter.complete !== "function") {
+    return { draft: fallbackDraft, fallback: true };
+  }
+  const config = typeof store.getAiConfig === "function" ? await store.getAiConfig() : null;
+  try {
+    const result = await aiAdapter.complete({
+      prompt: await requestDraftModelPrompt(store, body, prompt, fallbackDraft),
+      scene: "request_draft",
+      user: context.user,
+      config,
+      fallback: {
+        type: "draft",
+        answer: JSON.stringify(fallbackDraft)
+      }
+    });
+    const modelDraft = parseModelDraft(result.answer);
+    return {
+      draft: normalizeRequestDraft({ ...fallbackDraft, ...modelDraft }),
+      fallback: Boolean(result.fallback),
+      model: result.model ?? null,
+      providerError: result.providerError ?? null
+    };
+  } catch (error) {
+    return {
+      draft: fallbackDraft,
+      fallback: true,
+      providerError: {
+        code: error?.code ?? "AI_PROVIDER_UNAVAILABLE",
+        message: error?.message ?? "AI provider request failed.",
+        ...(error?.details === undefined ? {} : { details: error.details })
+      }
+    };
+  }
+}
+
+async function localRequestDraft(store, body, prompt) {
   const categories = await safeStoreCall(store, "listCategories", []);
   const tags = await safeStoreCall(store, "listTags", []);
   const criteria = await parseRequestFilter(store, prompt);
@@ -1018,6 +1060,83 @@ async function generateRequestDraft(store, body, prompt) {
       "发布前再次检查是否包含私下交易或现金结算。"
     ]
   };
+}
+
+async function requestDraftModelPrompt(store, body, prompt, fallbackDraft) {
+  const categories = (await safeStoreCall(store, "listCategories", [])).slice(0, 20).map((item) => ({
+    categoryId: item.categoryId,
+    name: item.name,
+    code: item.code
+  }));
+  const tags = (await safeStoreCall(store, "listTags", [])).slice(0, 30).map((item) => item.name).filter(Boolean);
+  return [
+    "请根据用户意图生成一个社区互助需求发布草稿。",
+    "只输出 JSON，不要 Markdown、解释或代码块。",
+    "JSON 字段必须包含 title, description, categoryId, categoryName, tags, estimatedHours, coinAmount, location, checklist。",
+    "description 要是真实可发布的任务描述，包含需求背景、服务内容、时间地点、注意事项和验收方式，不要输出模板提示词。",
+    "禁止现金结算、私下交易、攻击性或违法内容。AI 不能自动发布，只能生成草稿。",
+    `用户需求: ${prompt}`,
+    `当前表单: ${JSON.stringify({
+      title: body.title ?? null,
+      description: body.description ?? null,
+      categoryId: body.categoryId ?? null,
+      estimatedHours: body.estimatedHours ?? null,
+      coinAmount: body.coinAmount ?? null,
+      location: body.location ?? null,
+      tags: body.tags ?? null
+    })}`,
+    `可选类别: ${JSON.stringify(categories)}`,
+    `可选标签: ${JSON.stringify(tags)}`,
+    `本地兜底草稿: ${JSON.stringify(fallbackDraft)}`
+  ].join("\n");
+}
+
+function parseModelDraft(answer) {
+  const text = String(answer ?? "").trim();
+  if (!text) {
+    throw new Error("AI provider returned an empty draft.");
+  }
+  const json = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]
+    ?? text.match(/\{[\s\S]*\}/)?.[0]
+    ?? text;
+  const parsed = JSON.parse(json);
+  return normalizeRequestDraft(parsed?.draft && typeof parsed.draft === "object" ? parsed.draft : parsed);
+}
+
+function normalizeRequestDraft(input) {
+  const draft = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const title = normalizeDraftText(draft.title, 100);
+  const description = normalizeDraftText(draft.description ?? draft.content, 2000);
+  if (!title || !description) {
+    throw new Error("AI provider returned an incomplete draft.");
+  }
+  const tags = Array.isArray(draft.tags)
+    ? [...new Set(draft.tags.map((tag) => normalizeDraftText(tag, 30)).filter(Boolean))].slice(0, 8)
+    : [];
+  const checklist = Array.isArray(draft.checklist)
+    ? draft.checklist.map((item) => normalizeDraftText(item, 120)).filter(Boolean).slice(0, 6)
+    : [];
+  return {
+    title,
+    description,
+    categoryId: draft.categoryId ?? null,
+    categoryName: normalizeDraftText(draft.categoryName, 80) || null,
+    tags: tags.length > 0 ? tags : ["邻里互助"],
+    estimatedHours: positiveDraftNumber(draft.estimatedHours, 1),
+    coinAmount: positiveDraftNumber(draft.coinAmount, 10),
+    location: normalizeDraftText(draft.location, 120),
+    checklist
+  };
+}
+
+function normalizeDraftText(value, maxLength) {
+  if (value === undefined || value === null) return "";
+  return String(value).replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function positiveDraftNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
 function ruleAnswer(prompt) {
@@ -1350,6 +1469,14 @@ function normalizeScene(value) {
     ["help", "rules"]
   ]);
   return (map.get(text) ?? text).replace(/[^a-z0-9_]/g, "_").slice(0, 50) || "chat";
+}
+
+function normalizeSceneFilter(value) {
+  const text = String(value ?? "").trim();
+  if (!text || text === "all") {
+    return "all";
+  }
+  return normalizeScene(text);
 }
 
 function inferScene(prompt) {
