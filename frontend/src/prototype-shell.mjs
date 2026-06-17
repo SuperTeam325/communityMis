@@ -177,10 +177,27 @@ function markCurrentRouteLinks() {
 }
 
 function installAuthForms() {
+  bindAuthTabs();
   bindUserLoginForm();
   bindEmbeddedRegisterForm();
   bindRegisterPageForm();
   bindAdminLoginForm();
+}
+
+function bindAuthTabs() {
+  document.querySelectorAll("#auth-tabs button[data-panel]").forEach((button) => {
+    if (button.dataset.runtimeAuthTabBound === "true") {
+      return;
+    }
+    button.dataset.runtimeAuthTabBound = "true";
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      document.querySelectorAll("#auth-tabs button[data-panel]").forEach((item) => item.classList.toggle("active", item === button));
+      document.querySelectorAll("#auth-tabs a").forEach((item) => item.classList.remove("active"));
+      document.querySelectorAll(".auth-panel").forEach((panel) => panel.classList.toggle("active", panel.id === button.dataset.panel));
+    }, true);
+  });
 }
 
 function installRuntimeBackButtons() {

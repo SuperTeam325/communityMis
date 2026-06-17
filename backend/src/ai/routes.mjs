@@ -16,6 +16,7 @@ const HIGH_RISK_PATTERNS = [
   { intent: "finalize_dispute", label: "裁决", pattern: /(裁决|终审|判定胜诉|判谁赢)/i, guide: "纠纷裁决必须由管理员在后台人工提交，AI 只提供事实摘要和证据整理。" },
   { intent: "ban_user", label: "封禁", pattern: /(封禁|禁用账号|拉黑用户|封号)/i, guide: "账号处置属于高风险后台操作，需要管理员权限和审计记录。" }
 ];
+const PRIVACY_QUERY_PATTERN = /(查询|查看|获取|告诉我|给我|调取|读取).{0,40}(他人|别人|其他用户|用户|账号|账户|[^\s，。！？]{3,}).{0,40}(钱包|余额|订单|消息|私信|聊天)/i;
 const RULE_TEMPLATES = [
   {
     pattern: /(纠纷|争议|申诉)/i,
@@ -217,6 +218,25 @@ async function chatPayload(store, context, body, conversation, aiAdapter) {
   const highRisk = detectHighRiskIntent(prompt);
   if (highRisk) {
     const result = highRiskResponse(highRisk);
+    const message = await createAiMessageSafe(store, {
+      conversationId: conversation.conversationId,
+      senderType: "ai",
+      content: result.answer,
+      businessType: "safety",
+      businessId: null,
+      sensitiveHit: true
+    });
+    return {
+      conversation: aiConversationDto(conversation),
+      userMessage: aiMessageDto(inputMessage),
+      message: aiMessageDto(message),
+      ...result
+    };
+  }
+
+  const privacyRisk = detectPrivacyQuery(prompt);
+  if (privacyRisk) {
+    const result = privacyBoundaryResponse();
     const message = await createAiMessageSafe(store, {
       conversationId: conversation.conversationId,
       senderType: "ai",
@@ -1109,8 +1129,28 @@ function highRiskResponse(intent) {
   };
 }
 
+function privacyBoundaryResponse() {
+  const answer = "我不能查询或披露其他用户的钱包余额、订单详情或消息内容。请只在你有权限的业务页面查看自己的数据；我可以说明查看路径和权限规则。";
+  return {
+    scene: "safety",
+    type: "blocked",
+    blocked: true,
+    intent: "privacy_boundary",
+    answer,
+    guidance: "请只查看你有权限的数据。",
+    safety: {
+      canExecute: false,
+      reason: "privacy_boundary"
+    }
+  };
+}
+
 function detectHighRiskIntent(prompt) {
   return HIGH_RISK_PATTERNS.find((item) => item.pattern.test(prompt)) ?? null;
+}
+
+function detectPrivacyQuery(prompt) {
+  return PRIVACY_QUERY_PATTERN.test(prompt);
 }
 
 function orderSuggestions(order, dispute) {
