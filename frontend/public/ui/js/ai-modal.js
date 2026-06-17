@@ -413,7 +413,6 @@
       }
       .ai-modal-msg-action-btn:hover {
         background: var(--border-light, #e2e8f0);
-        color: var(--text-secondary, #334155);
       }
       .ai-modal-msg-action-btn.active {
         background: var(--accent-subtle, rgba(99,102,241,0.08));

@@ -435,7 +435,6 @@ textarea.input { resize: vertical; min-height: 100px; line-height: 1.6; }
   background: var(--secondary); color: #fff; font-size: 13px;
   font-weight: 600; cursor: pointer; transition: background 0.15s, transform 0.1s;
 }
-.apply-filter-btn:hover { background: oklch(48% 0.12 175); }
 .apply-filter-btn:active { transform: scale(0.97); }
 
 /* Rules list */
