@@ -604,6 +604,7 @@
     if (initialized) return;
     initialized = true;
     injectStyles();
+    ensureRichTextRenderer();
 
     const sceneChips = ['all', 'filter', 'publish', 'rules', 'summary'].map(s =>
       `<button class="ai-modal-scene-chip" data-scene="${s}">${icons[s === 'all' ? 'sun' : s === 'filter' ? 'search' : s === 'publish' ? 'edit' : s === 'rules' ? 'copy' : 'dollar']} ${SCENE_LABELS[s]}</button>`
@@ -914,13 +915,29 @@
     inputEl.style.height = '';
     chatArea.scrollTop = chatArea.scrollHeight;
 
-    setTimeout(() => {
-      showTyping();
-      setTimeout(() => {
-        hideTyping();
-        const resp = getResponse(query);
-        chatArea.insertAdjacentHTML('beforeend', buildAIResponseHTML(resp));
-        chatArea.scrollTop = chatArea.scrollHeight;
+    const assistantShell = createAssistantShell();
+    const previousConversationId = currentConversationId;
+    let streamed = '';
+    requestAiChatStream(query, chunk => {
+      streamed += chunk;
+      updateAssistantShell(assistantShell, streamed);
+    })
+      .then(resp => {
+        replaceAssistantShell(assistantShell, resp);
+      })
+      .catch(() => {
+        currentConversationId = previousConversationId;
+        return requestAiChat(query)
+          .then(resp => replaceAssistantShell(assistantShell, resp))
+          .catch(error => {
+            replaceAssistantShell(assistantShell, {
+              text: error.message || 'AI 服务暂不可用，请稍后再试。',
+              type: 'default',
+              response: ''
+            });
+          });
+      })
+      .finally(() => {
         isProcessing = false;
         sendBtn.disabled = false;
       });
