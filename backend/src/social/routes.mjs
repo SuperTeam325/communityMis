@@ -417,12 +417,25 @@ async function feedPayload(store, searchParams, viewerId = null) {
   const page = parsePositiveQuery(searchParams.get("page"), 1);
   const pageSize = Math.min(50, parsePositiveQuery(searchParams.get("pageSize") ?? searchParams.get("limit"), 10));
   const keyword = optionalText(searchParams.get("keyword") ?? searchParams.get("q"), 100);
-  const postResult = typeof store.listCommunityPosts === "function"
-    ? await store.listCommunityPosts({ viewerId, keyword, page: 1, pageSize: 100 })
-    : { posts: [], total: 0 };
-  const requestItems = typeof store.listServiceRequests === "function"
-    ? await feedRequestItems(store, keyword)
-    : [];
+
+  let postResult = { posts: [], total: 0 };
+  if (typeof store.listCommunityPosts === "function") {
+    try {
+      postResult = await store.listCommunityPosts({ viewerId, keyword, page: 1, pageSize: 100 });
+    } catch (error) {
+      console.error("Failed to load community posts for feed:", error.message);
+    }
+  }
+
+  let requestItems = [];
+  if (typeof store.listServiceRequests === "function") {
+    try {
+      requestItems = await feedRequestItems(store, keyword);
+    } catch (error) {
+      console.error("Failed to load service requests for feed:", error.message);
+    }
+  }
+
   const items = [
     ...((postResult.posts ?? []).map((post) => ({ type: "community_post", sortAt: post.createdAt, post: communityPostDto(post) }))),
     ...requestItems
