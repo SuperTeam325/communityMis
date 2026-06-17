@@ -16,7 +16,19 @@ import { WalletPage, WalletFreezePage } from "./pages/WalletPages";
 import { MessagesPage, NotificationsPage } from "./pages/MessagesPages";
 import { AiAssistantPage, AiResultsPage, AdminAiConfigPage, AdminAiConversationsPage, AdminAiErrorsPage, AdminAiFeedbackPage, AdminAiLogsPage } from "./pages/AiPages";
 import { ProfilePage, SettingsPage, UserPublicPage, CreditPage, HelpPage } from "./pages/ProfilePages";
-import { AdminDashboardPage, AdminGenericPage, AdminSystemPage } from "./pages/AdminPages";
+import {
+  AdminAuditLogPage,
+  AdminCategoriesPage,
+  AdminDashboardPage,
+  AdminDisputeFinalPage,
+  AdminDisputesPage,
+  AdminRiskContentPage,
+  AdminSensitiveWordsPage,
+  AdminStatsPage,
+  AdminSystemPage,
+  AdminTransactionsPage,
+  AdminUsersPage
+} from "./pages/AdminPages";
 
 type PageProps = {
   api: ApiClient;
@@ -111,14 +123,23 @@ function PageSwitch(props: PageProps) {
     case "credit": return <CreditPage api={props.api} />;
     case "help": return <HelpPage />;
     case "admin-dashboard": return <AdminDashboardPage api={props.api} />;
+    case "admin-users": return <AdminUsersPage api={props.api} />;
+    case "admin-transactions": return <AdminTransactionsPage api={props.api} />;
+    case "admin-disputes": return <AdminDisputesPage api={props.api} />;
+    case "admin-dispute-final": return <AdminDisputeFinalPage api={props.api} />;
+    case "admin-stats": return <AdminStatsPage api={props.api} />;
     case "admin-ai-logs": return <AdminAiLogsPage api={props.api} />;
     case "admin-ai-conversations": return <AdminAiConversationsPage api={props.api} />;
     case "admin-ai-feedback": return <AdminAiFeedbackPage api={props.api} />;
     case "admin-ai-errors": return <AdminAiErrorsPage api={props.api} />;
     case "admin-ai-config": return <AdminAiConfigPage api={props.api} />;
+    case "admin-categories": return <AdminCategoriesPage api={props.api} />;
+    case "admin-sensitive-words": return <AdminSensitiveWordsPage api={props.api} />;
+    case "admin-risk-content": return <AdminRiskContentPage api={props.api} />;
+    case "admin-audit-log": return <AdminAuditLogPage api={props.api} />;
     case "admin-system": return <AdminSystemPage api={props.api} />;
     case "admin-login": return <LoginPage api={props.api} admin />;
-    default: return <AdminGenericPage api={props.api} route={props.route} />;
+    default: return <NotFoundPage routes={appRoutes} />;
   }
 }
 

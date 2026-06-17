@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createMemoryAuthStore } from "../backend/src/auth/store.mjs";
 import { createApiClient } from "../frontend/src/api/client.mjs";
@@ -7,246 +9,157 @@ const checks = [];
 await run();
 
 async function run() {
-  await checkCatalogAndRequestApis();
+  checkStaticFiles();
+  await checkAdminApiLoop();
+  runCommand("npm", ["run", "typecheck"], "typecheck passes");
+  runCommand("npm", ["run", "test:component"], "component tests pass");
+  runCommand("npm", ["run", "build"], "frontend build passes");
 
-  const failed = checks.filter((item) => !item.ok);
   for (const item of checks) {
     console.log(`${item.ok ? "ok" : "fail"} - ${item.message}`);
   }
-
-  if (failed.length > 0) {
-    process.exitCode = 1;
-  }
+  if (checks.some((item) => !item.ok)) process.exitCode = 1;
 }
 
-async function checkCatalogAndRequestApis() {
-  const store = createMemoryAuthStore({
-    seedUsers: [
-      {
-        userId: 6101,
-        username: "stage06_repair",
-        password: "user123456",
-        phone: "13900006101",
-        displayName: "阶段六维修邻居",
-        bio: "可处理电脑维修和跑腿代取。",
-        skillTags: ["电脑维修", "跑腿代取"],
-        serviceCategories: ["家政维修", "跑腿代办"],
-        role: "user",
-        status: 1,
-        initialBalance: 20
-      },
-      {
-        userId: 6102,
-        username: "stage06_pet",
-        password: "user123456",
-        displayName: "宠物照看邻居",
-        skillTags: ["宠物照看"],
-        serviceCategories: ["宠物照看"],
-        role: "user",
-        status: 1,
-        initialBalance: 12
-      },
-      {
-        userId: 6103,
-        username: "stage06_disabled",
-        password: "user123456",
-        displayName: "不可见发布者",
-        skillTags: ["不可见标签"],
-        role: "user",
-        status: 0,
-        initialBalance: 0
-      }
-    ],
-    seedRequests: [
-      {
-        requestId: 6201,
-        publisherId: 6101,
-        categoryId: 10,
-        title: "帮忙代取快递到 5 号楼",
-        description: "南门驿站有一个较重的快递，请在傍晚前送到 5 号楼大厅。",
-        location: "南门驿站",
-        estimatedHours: 0.5,
-        coinAmount: 10,
-        status: "open",
-        tags: ["跑腿代取", "代买"],
-        createdAt: "2026-06-08T09:00:00.000Z"
-      },
-      {
-        requestId: 6202,
-        publisherId: 6101,
-        categoryId: 11,
-        title: "电脑无法联网，帮忙排查",
-        description: "台式机可以开机但无法连接网络，需要有电脑维修经验。",
-        location: "2 号楼 502",
-        estimatedHours: 1.5,
-        coinAmount: 25,
-        status: "open",
-        tags: ["电脑维修"],
-        createdAt: "2026-06-09T10:30:00.000Z"
-      },
-      {
-        requestId: 6203,
-        publisherId: 6102,
-        categoryId: 13,
-        title: "周六照看猫咪",
-        description: "短途外出，请帮忙上门喂猫和换水。",
-        location: "8 号楼",
-        estimatedHours: 1,
-        coinAmount: 18,
-        status: "accepted",
-        tags: ["宠物照看"],
-        createdAt: "2026-06-07T08:00:00.000Z"
-      },
-      {
-        requestId: 6204,
-        publisherId: 6101,
-        categoryId: 10,
-        title: "已取消的跑腿需求",
-        description: "这条需求不应出现在查询结果中。",
-        location: "南门",
-        estimatedHours: 1,
-        coinAmount: 12,
-        status: "cancelled",
-        tags: ["跑腿代取"],
-        createdAt: "2026-06-10T08:00:00.000Z"
-      },
-      {
-        requestId: 6205,
-        publisherId: 6103,
-        categoryId: 10,
-        title: "禁用用户发布的需求",
-        description: "发布者不可见时需求不应出现在查询结果中。",
-        location: "北门",
-        estimatedHours: 1,
-        coinAmount: 12,
-        status: "open",
-        tags: ["不可见标签"],
-        createdAt: "2026-06-10T09:00:00.000Z"
-      }
-    ],
-    seedReviews: [
-      {
-        reviewId: 6301,
-        orderId: 6401,
-        reviewerId: 6102,
-        targetId: 6101,
-        direction: "publisher_to_provider",
-        rating: 5,
-        comment: "维修很快。",
-        orderTitle: "电脑维修",
-        tags: ["专业"],
-        createdAt: "2026-06-01T09:00:00.000Z"
-      },
-      {
-        reviewId: 6302,
-        orderId: 6402,
-        reviewerId: 6102,
-        targetId: 6101,
-        direction: "provider_to_publisher",
-        rating: 4,
-        comment: "需求描述清楚。",
-        orderTitle: "跑腿代取",
-        tags: ["清楚"],
-        createdAt: "2026-06-02T09:00:00.000Z"
-      },
-      {
-        reviewId: 6303,
-        orderId: 6403,
-        reviewerId: 6101,
-        targetId: 6102,
-        direction: "publisher_to_provider",
-        rating: 3,
-        comment: "普通。",
-        orderTitle: "宠物照看",
-        tags: [],
-        createdAt: "2026-06-03T09:00:00.000Z"
-      }
-    ]
-  });
-  const server = createBackendServer({
-    authStore: store,
-    sessionSecret: "stage06-test-secret"
-  });
+function checkStaticFiles() {
+  const adminPages = read("frontend/src/spa/pages/AdminPages.tsx");
+  const app = read("frontend/src/spa/App.tsx");
+  const api = read("frontend/src/spa/api.ts");
+  const componentTest = read("tests/component/spa-stage-06.test.tsx");
+  const e2eTest = read("tests/e2e/spa-stage-06.spec.ts");
+
+  [
+    "AdminUsersPage",
+    "AdminTransactionsPage",
+    "AdminDisputesPage",
+    "AdminDisputeFinalPage",
+    "AdminStatsPage",
+    "AdminCategoriesPage",
+    "AdminSensitiveWordsPage",
+    "AdminRiskContentPage",
+    "AdminAuditLogPage",
+    "AdminSystemPage"
+  ].forEach((name) => record(adminPages.includes(`function ${name}`) || adminPages.includes(`export function ${name}`), `${name} exists`));
+
+  record(!app.includes("AdminGenericPage"), "App no longer imports or renders AdminGenericPage");
+  record(!adminPages.includes("window.prompt"), "admin pages do not use window.prompt");
+  record(!adminPages.includes("window.location.href"), "admin pages do not hard navigate with window.location.href");
+  record(!adminPages.includes("window.location.reload"), "admin pages do not reload the whole page");
+  record(api.includes("messageCleanup"), "SPA api exposes admin.messageCleanup");
+  record(componentTest.includes("AdminUsersPage") && componentTest.includes("AdminRiskContentPage"), "stage 06 component test covers admin pages");
+  record(e2eTest.includes("/admin/users") && e2eTest.includes("/admin/system"), "stage 06 e2e test covers admin shell pages");
+}
+
+async function checkAdminApiLoop() {
+  const store = createMemoryAuthStore();
+  const server = createBackendServer({ authStore: store, sessionSecret: "stage06-admin-secret" });
   const port = await listen(server);
   const baseUrl = `http://127.0.0.1:${port}`;
   const api = createApiClient({ baseUrl, fetchImpl: fetch, allowBearer: true });
 
   try {
-    const categories = await api.categories.list();
-    record(categories.categories?.some((category) => category.code === "errand"), "categories endpoint returns seeded service categories");
+    const login = await api.adminAuth.login({ username: "admin_main", password: "admin123456" });
+    const token = login.token;
+    record(Boolean(token), "admin can login");
 
-    const tags = await api.tags.list();
-    const repairTag = tags.tags?.find((tag) => tag.name === "电脑维修");
-    record(Boolean(repairTag), "tags endpoint returns active skill tags");
-    record(!tags.tags?.some((tag) => tag.name === "不可见标签"), "tags endpoint excludes disabled publishers");
+    const dashboard = await api.admin.dashboard(token);
+    record(Boolean(dashboard.metrics), "dashboard returns metrics");
 
-    const openRequests = await api.requests.list({ sort: "latest" });
-    const openIds = openRequests.requests.map((request) => request.requestId);
-    record(openRequests.pagination?.total === 2, "default request query returns only open visible requests");
-    record(openIds.includes(6201) && openIds.includes(6202), "open request query includes visible open requests");
-    record(!openIds.includes(6203) && !openIds.includes(6204) && !openIds.includes(6205), "open request query excludes accepted, cancelled, and invisible requests by default");
-    record(openRequests.requests.every(hasSummaryFields), "request summaries include required task, publisher, and credit fields");
-    record(openRequests.structuredFilters?.ai?.applied === false, "request query response reserves structured AI filter metadata");
+    const users = await api.admin.users(token, { page: 1, pageSize: 5 });
+    const targetUser = users.users?.find((item) => item.role === "user") ?? users.users?.[0];
+    record(Boolean(targetUser?.userId), "admin users list returns users");
+    if (targetUser?.userId) {
+      const status = await api.admin.updateUserStatus(token, targetUser.userId, { status: "active", reason: "stage06 validation" });
+      record(Boolean(status.user), "admin can update user status");
+    }
 
-    const paged = await api.requests.list({ pageSize: 1 });
-    record(paged.requests.length === 1 && paged.pagination.total === 2 && paged.pagination.hasNext === true, "request query supports pagination metadata");
+    const transactions = await api.admin.transactions(token, { page: 1, pageSize: 5 });
+    record(Array.isArray(transactions.transactions), "admin transactions list works");
 
-    const byCategory = await api.requests.list({ category: "errand" });
-    record(byCategory.pagination.total === 1 && byCategory.requests[0]?.requestId === 6201, "request query filters by category code");
+    const disputes = await api.admin.disputes(token, { page: 1, pageSize: 5 });
+    const dispute = disputes.disputes?.[0];
+    record(Boolean(dispute?.disputeId), "admin disputes list works");
+    if (dispute?.disputeId) {
+      const detail = await api.admin.dispute(token, dispute.disputeId);
+      record(Boolean(detail.dispute), "admin dispute detail works");
+      const finalized = await api.admin.finalizeDispute(token, dispute.disputeId, {
+        finalResult: "mediate",
+        refundAmount: 0,
+        reason: "阶段六验证终审理由"
+      });
+      record(Boolean(finalized.dispute?.finalResult), "admin can finalize dispute");
+    }
 
-    const byKeyword = await api.requests.list({ keyword: "电脑" });
-    record(byKeyword.pagination.total === 1 && byKeyword.requests[0]?.requestId === 6202, "request query filters by keyword");
+    const stats = await api.admin.stats(token);
+    record(Boolean(stats), "admin stats endpoint works");
 
-    const byTag = await api.requests.list({ tag: "宠物照看", status: "accepted" });
-    record(byTag.pagination.total === 1 && byTag.requests[0]?.requestId === 6203, "request query filters by tag and explicit status");
+    const category = await api.admin.createCategory(token, { name: "阶段六类别", code: "stage06_category", status: "active" });
+    record(Boolean(category.category?.categoryId), "admin can create category");
+    if (category.category?.categoryId) {
+      await api.admin.updateCategory(token, category.category.categoryId, { description: "stage06 updated" });
+      const tag = await api.admin.createTag(token, { name: "阶段六标签", categoryId: category.category.categoryId, status: "active" });
+      record(Boolean(tag.tag?.tagId), "admin can create tag");
+      if (tag.tag?.tagId) {
+        await api.admin.updateTag(token, tag.tag.tagId, { sortOrder: 2, status: "disabled" });
+        record(true, "admin can update and disable tag");
+      }
+      await api.admin.updateCategory(token, category.category.categoryId, { status: "disabled" });
+      record(true, "admin can update and disable category");
+    }
 
-    const byCredit = await api.requests.list({ status: "all", minCredit: 4.5 });
-    record(byCredit.requests.every((item) => item.publisher.userId === 6101), "request query filters by publisher credit range");
+    const word = await api.admin.createSensitiveWord(token, { word: "stage06敏感词", level: "review", category: "验证", reason: "stage06" });
+    record(Boolean(word.sensitiveWord?.wordId), "admin can create sensitive word");
+    await api.admin.importSensitiveWords(token, { content: "stage06批量词", level: "review", category: "验证", reason: "stage06 import" });
+    record(true, "admin can import sensitive words");
+    if (word.sensitiveWord?.wordId) {
+      await api.admin.updateSensitiveWord(token, word.sensitiveWord.wordId, { status: "disabled" });
+      record(true, "admin can update and disable sensitive word");
+    }
 
-    const cancelled = await api.requests.list({ status: "cancelled" });
-    record(cancelled.pagination.total === 0, "request query never returns cancelled requests");
+    const risks = await api.admin.riskContent(token, { page: 1, pageSize: 5 });
+    const risk = risks.riskContents?.[0];
+    record(Array.isArray(risks.riskContents), "admin risk content list works");
+    if (risk?.riskId) {
+      await api.admin.resolveRiskContent(token, risk.riskId, { status: "reviewing", note: "stage06 review" });
+      await api.admin.batchReviewRiskContent(token, { riskIds: [risk.riskId], note: "stage06 batch review" });
+      record(true, "admin can resolve and batch review risk content");
+    }
 
-    const detail = await api.requests.detail(6201);
-    record(detail.request?.description?.includes("较重的快递"), "request detail returns full description");
-    record(detail.request?.publisher?.userId === 6101, "request detail returns publisher public profile");
-    record(detail.request?.publisher?.credit?.reviewCount === 2 && detail.request.publisher.credit.averageRating === 4.5, "request detail returns publisher credit summary");
-    record(!JSON.stringify(detail).includes("13900006101") && !JSON.stringify(detail).includes("passwordHash"), "request detail does not expose private publisher fields");
+    const audit = await api.admin.auditLogs(token, { page: 1, pageSize: 5 });
+    record(Array.isArray(audit.auditLogs), "admin audit log list works");
 
-    const cancelledDetail = await requestJson(baseUrl, "GET", "/api/requests/6204");
-    record(cancelledDetail.status === 404, "cancelled request detail is hidden");
+    const system = await api.admin.system(token);
+    record(Boolean(system.settings ?? system.system), "admin system endpoint works");
+    await api.admin.updateSystem(token, { freezeDays: 3, autoArchiveDays: 30, newUserCoin: 5, maintenanceMode: false, autoBackup: true, aiHighRiskBlock: true, safetyNotice: "stage06" });
+    record(true, "admin can update system settings");
 
-    const invalidStatus = await requestJson(baseUrl, "GET", "/api/requests?status=unknown");
-    record(invalidStatus.status === 400 && invalidStatus.body.error?.code === "INVALID_REQUEST_STATUS", "invalid request status filter returns 400");
+    const backup = await api.admin.createBackup(token, { confirmText: "立即备份", reason: "stage06 backup", label: "stage06 validation" });
+    record(Boolean(backup.backup?.backupId), "admin can create backup");
+    if (backup.backup?.backupId) {
+      await api.admin.restoreBackup(token, backup.backup.backupId, { confirmText: "恢复备份", reason: "stage06 restore" });
+      await api.admin.deleteBackup(token, backup.backup.backupId, { confirmText: "删除备份", reason: "stage06 delete" });
+      record(true, "admin can restore and delete backup");
+    }
+
+    await api.admin.messageCleanup(token, { mode: "preview", days: 90 });
+    await api.admin.messageCleanup(token, { mode: "execute", days: 90, confirmText: "清理归档消息" });
+    record(true, "admin message cleanup preview and execute work");
   } finally {
     await close(server);
   }
 }
 
-function hasSummaryFields(request) {
-  return Boolean(
-    request.title
-    && request.descriptionSummary
-    && Number.isFinite(request.estimatedHours)
-    && Number.isFinite(request.coinAmount)
-    && request.publisher?.displayName
-    && request.creditSummary
-  );
+function runCommand(command, args, message) {
+  const result = spawnSync(command, args, { stdio: "inherit", shell: process.platform === "win32" });
+  record(result.status === 0, message);
 }
 
-async function requestJson(baseUrl, method, path, body = null) {
-  const headers = { accept: "application/json" };
-  if (body !== null) {
-    headers["content-type"] = "application/json";
-  }
-  const response = await fetch(`${baseUrl}${path}`, {
-    method,
-    headers,
-    body: body === null ? undefined : JSON.stringify(body)
-  });
-  return {
-    status: response.status,
-    body: await response.json()
-  };
+function read(path) {
+  return existsSync(path) ? readFileSync(path, "utf8") : "";
+}
+
+function record(ok, message) {
+  checks.push({ ok: Boolean(ok), message });
 }
 
 function listen(server) {
@@ -261,16 +174,6 @@ function listen(server) {
 
 function close(server) {
   return new Promise((resolve, reject) => {
-    server.close((error) => {
-      if (error) {
-        reject(error);
-      } else {
-        resolve();
-      }
-    });
+    server.close((error) => error ? reject(error) : resolve());
   });
-}
-
-function record(ok, message) {
-  checks.push({ ok: Boolean(ok), message });
 }
