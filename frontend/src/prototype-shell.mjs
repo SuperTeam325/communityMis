@@ -1819,13 +1819,16 @@ function renderFeedList(payload, state, userSession) {
     return;
   }
 
-  content.innerHTML = `
-    <div class="feed-runtime-summary" role="status">
-      <span>真实社区流</span>
-      <strong>${escapeHtml(pagination.total)} 条动态</strong>
-    </div>
-    ${items.map(feedItemCardHtml).join("")}
-  `;
+  const posts = items.filter(item => item.type === "community_post" || item.post);
+  const requests = items.filter(item => !(item.type === "community_post" || item.post));
+  content.innerHTML = "<div class=\"feed-grid\">" +
+    "<div class=\"feed-col\"><div class=\"feed-col-title\">服务需求</div>" +
+    (requests.length > 0 ? requests.map(feedItemCardHtml).join("") : "<p class=\"feed-empty\">暂无需求</p>") +
+    "</div>" +
+    "<div class=\"feed-col\"><div class=\"feed-col-title\">社区帖子</div>" +
+    (posts.length > 0 ? posts.map(feedItemCardHtml).join("") : "<p class=\"feed-empty\">暂无帖子</p>") +
+    "</div>" +
+    "</div>";
   bindTaskCards();
   bindCommunityPostCards();
   bindFeedAcceptButtons(userSession);
@@ -8524,7 +8527,7 @@ function conversationItemHtml(item) {
   return `
     <a class="conv-item ${unread > 0 ? "unread" : ""}" href="${escapeHtml(href)}" data-message-user-id="${escapeHtml(participant.userId ?? "")}" data-order-id="${escapeHtml(item.orderId ?? "")}" style="text-decoration:none;color:inherit;">
       <div class="conv-avatar">
-        <div class="avatar" style="background:${escapeHtml(avatarColor(participant.userId ?? item.orderId ?? 1))};display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:700;">${escapeHtml(firstCharacter(name))}</div>
+        <div class="avatar" style="background:${escapeHtml(avatarColor(participant.userId ?? item.orderId ?? 1))};display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:700;border-radius:50%;width:40px;height:40px;">${escapeHtml(firstCharacter(name))}</div>
       </div>
       <div class="conv-body">
         <div class="conv-top">
