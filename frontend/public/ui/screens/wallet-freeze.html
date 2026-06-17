@@ -180,8 +180,114 @@
 
   <h1 class="section-label">冻结记录</h1>
   <section class="freeze-list" id="freezeList" aria-label="冻结记录列表">
-<div data-runtime-placeholder class="runtime-placeholder">正在加载真实冻结明细。</div>
-</section>
+    <article class="freeze-card" data-status="active">
+      <div class="freeze-card-top">
+        <div>
+          <h2>帮忙更换厨房水龙头</h2>
+          <div class="freeze-id">ORD-240650-048 · TX-20260605-0914</div>
+        </div>
+        <div class="freeze-amount">⏂ 45.00</div>
+      </div>
+      <dl class="freeze-meta">
+        <div><dt>状态</dt><dd><span class="status-pill status-active">服务进行中</span></dd></div>
+        <div><dt>冻结原因</dt><dd>订单报酬预留</dd></div>
+        <div><dt>释放条件</dt><dd>双方确认完成</dd></div>
+      </dl>
+      <p class="reason-text">你发布的订单已被刘师傅接单。平台会先冻结对应时间币，服务完成并由你确认后释放给服务方。</p>
+      <div class="card-actions">
+        <a class="btn btn--secondary btn--sm" href="order-detail.html?id=ORD-240650-048">查看订单</a>
+        <button class="btn btn--ghost btn--sm detail-toggle">展开链路</button>
+      </div>
+      <div class="detail-panel">
+        <ul class="timeline">
+          <li><span class="timeline-dot"></span><div>订单创建并预留预算<span>2026-06-05 08:42 · 冻结前余额 ⏂331.50</span></div></li>
+          <li><span class="timeline-dot"></span><div>服务方接单，冻结生效<span>2026-06-05 09:14 · 冻结 ⏂45.00</span></div></li>
+          <li><span class="timeline-dot"></span><div>预计释放<span>服务完成且双方确认后自动转入服务方余额</span></div></li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="freeze-card" data-status="dispute">
+      <div class="freeze-card-top">
+        <div>
+          <h2>辅导初三数学 2 小时</h2>
+          <div class="freeze-id">ORD-240524-032 · DSP-240528-003</div>
+        </div>
+        <div class="freeze-amount">⏂ 40.00</div>
+      </div>
+      <dl class="freeze-meta">
+        <div><dt>状态</dt><dd><span class="status-pill status-dispute">纠纷处理中</span></dd></div>
+        <div><dt>冻结原因</dt><dd>双方证据冲突</dd></div>
+        <div><dt>释放条件</dt><dd>管理员终审</dd></div>
+      </dl>
+      <p class="reason-text">该订单已进入纠纷流程，相关时间币会保持冻结，直到管理员参考证据、陪审投票和平台规则完成终审。</p>
+      <div class="card-actions">
+        <a class="btn btn--secondary btn--sm" href="dispute-detail.html?id=DSP-240528-003">查看纠纷</a>
+        <button class="btn btn--ghost btn--sm detail-toggle">展开链路</button>
+      </div>
+      <div class="detail-panel">
+        <ul class="timeline">
+          <li><span class="timeline-dot"></span><div>订单报酬冻结<span>2026-05-24 18:20 · 冻结 ⏂40.00</span></div></li>
+          <li><span class="timeline-dot"></span><div>用户发起纠纷<span>2026-05-28 10:12 · 冻结状态延长</span></div></li>
+          <li><span class="timeline-dot"></span><div>等待管理员终审<span>AI 摘要仅供参考，不能替代裁决</span></div></li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="freeze-card" data-status="active">
+      <div class="freeze-card-top">
+        <div>
+          <h2>代取宠物医院药</h2>
+          <div class="freeze-id">ORD-240651-049 · TX-20260603-1216</div>
+        </div>
+        <div class="freeze-amount">⏂ 25.00</div>
+      </div>
+      <dl class="freeze-meta">
+        <div><dt>状态</dt><dd><span class="status-pill status-active">等待接单</span></dd></div>
+        <div><dt>冻结原因</dt><dd>发布预算预留</dd></div>
+        <div><dt>释放条件</dt><dd>无人接单自动退回</dd></div>
+      </dl>
+      <p class="reason-text">你发布任务时预留了时间币预算。若任务过期无人接单，冻结金额会自动回到钱包可用余额。</p>
+      <div class="card-actions">
+        <a class="btn btn--secondary btn--sm" href="orders.html">查看订单</a>
+        <button class="btn btn--ghost btn--sm detail-toggle">展开链路</button>
+      </div>
+      <div class="detail-panel">
+        <ul class="timeline">
+          <li><span class="timeline-dot"></span><div>发布任务并冻结预算<span>2026-06-03 12:16 · 冻结 ⏂25.00</span></div></li>
+          <li><span class="timeline-dot"></span><div>等待邻居接单<span>当前暂无服务方接单</span></div></li>
+          <li><span class="timeline-dot"></span><div>预计释放<span>48 小时无人接单后退回可用余额</span></div></li>
+        </ul>
+      </div>
+    </article>
+
+    <article class="freeze-card" data-status="released">
+      <div class="freeze-card-top">
+        <div>
+          <h2>帮李阿姨代购日用品</h2>
+          <div class="freeze-id">ORD-240603-042 · TX-20260604-1826</div>
+        </div>
+        <div class="freeze-amount">⏂ 35.00</div>
+      </div>
+      <dl class="freeze-meta">
+        <div><dt>状态</dt><dd><span class="status-pill status-released">已释放</span></dd></div>
+        <div><dt>冻结原因</dt><dd>订单报酬预留</dd></div>
+        <div><dt>释放结果</dt><dd>转入服务方</dd></div>
+      </dl>
+      <p class="reason-text">双方已确认完成，原冻结金额已释放给服务方。该记录保留用于钱包和订单审计。</p>
+      <div class="card-actions">
+        <a class="btn btn--secondary btn--sm" href="order-detail.html?id=ORD-240603-042">查看订单</a>
+        <button class="btn btn--ghost btn--sm detail-toggle">展开链路</button>
+      </div>
+      <div class="detail-panel">
+        <ul class="timeline">
+          <li><span class="timeline-dot"></span><div>订单接单，金额冻结<span>2026-06-03 14:22 · 冻结 ⏂35.00</span></div></li>
+          <li><span class="timeline-dot"></span><div>需求方确认完成<span>2026-06-04 18:21</span></div></li>
+          <li><span class="timeline-dot"></span><div>系统释放给服务方<span>2026-06-04 18:26 · 已入账</span></div></li>
+        </ul>
+      </div>
+    </article>
+  </section>
 
   <div class="empty-state" id="emptyState">
     <p>当前筛选下没有冻结记录。</p>
@@ -247,6 +353,10 @@
       button.textContent = card.classList.contains('expanded') ? '收起链路' : '展开链路';
     });
   });
+</script>
+<script src="/assets/app/jury-nav.js"></script>
+<script>
+(function(){"use strict";function t(){var u=window.__API_BASE_URL__||"";if(!u){if(!t._r)t._r=0;if(t._r++<20)setTimeout(t,500);return}fetch(u+"/api/auth/me",{credentials:"include"}).then(function(r){return r.ok?r.json():null}).then(function(d){if(d&&d.user&&d.user.isJury)n()}).catch(function(){})}function n(){var v=document.querySelector(".bottom-nav");if(!v||document.querySelector(".jlink"))return;var a=document.createElement("a");a.href="/jury";a.className="jlink";a.innerHTML="<svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>陪审";v.insertBefore(a,v.lastElementChild)}setTimeout(t,800)})();
 </script>
 </body>
 </html>

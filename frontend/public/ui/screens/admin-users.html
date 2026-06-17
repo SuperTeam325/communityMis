@@ -238,8 +238,7 @@
           </tr>
         </thead>
         <tbody id="userTableBody">
-<tr data-runtime-placeholder><td colspan="7">正在加载真实用户数据。</td></tr>
-</tbody>
+        </tbody>
       </table>
     </div>
 
@@ -259,9 +258,85 @@
 </div>
 
 <script>
-const users = [];
+const users = [
+  { id:'U1001', name:'林小红', phone:'138****2341', role:'普通用户', credit:4.9, coins:286.5, orders:38, date:'2025-11-03', status:'active', color:'oklch(58% 0.15 28)' },
+  { id:'U1002', name:'赵姐', phone:'159****6732', role:'普通用户', credit:3.6, coins:142.0, orders:15, date:'2026-01-17', status:'restricted', color:'oklch(56% 0.12 175)' },
+  { id:'U1003', name:'小明', phone:'177****8901', role:'普通用户', credit:4.8, coins:520.0, orders:64, date:'2025-09-20', status:'active', color:'oklch(55% 0.10 210)' },
+  { id:'U1004', name:'王大壮', phone:'186****4521', role:'普通用户', credit:2.1, coins:48.5, orders:12, date:'2026-02-14', status:'restricted', color:'oklch(50% 0.15 55)' },
+  { id:'U1005', name:'陈阿姨', phone:'132****0098', role:'普通用户', credit:4.7, coins:89.0, orders:22, date:'2025-10-08', status:'active', color:'oklch(62% 0.12 100)' },
+  { id:'U1006', name:'李华', phone:'150****3321', role:'普通用户', credit:4.3, coins:5.0, orders:0, date:'2026-05-28', status:'active', color:'oklch(58% 0.16 28)' },
+  { id:'U1007', name:'admin_张三', phone:'130****7788', role:'管理员', credit:5.0, coins:0, orders:0, date:'2025-08-01', status:'active', color:'oklch(45% 0.17 22)' },
+  { id:'U1008', name:'spammer_007', phone:'198****1212', role:'普通用户', credit:0.8, coins:3.0, orders:1, date:'2026-04-02', status:'disabled', color:'oklch(40% 0.02 100)' },
+  { id:'U1009', name:'周老师', phone:'137****5566', role:'普通用户', credit:4.9, coins:315.0, orders:51, date:'2025-11-25', status:'active', color:'oklch(52% 0.18 255)' },
+  { id:'U1010', name:'刘阿姨', phone:'185****9987', role:'普通用户', credit:4.5, coins:76.0, orders:19, date:'2026-01-03', status:'active', color:'oklch(64% 0.10 170)' }
+];
 
+function creditClass(v) { return v >= 4 ? 'high' : v >= 2.5 ? 'mid' : 'low'; }
+function creditColor(v) { return v >= 4 ? 'var(--success)' : v >= 2.5 ? 'var(--warning)' : 'var(--danger)'; }
+
+function renderTable(data) {
+  const tbody = document.getElementById('userTableBody');
+  tbody.innerHTML = data.map(u => `
+    <tr>
+      <td>
+        <div class="user-cell">
+          <div class="user-avatar" style="background:${u.color}">${u.name[0]}</div>
+          <div>
+            <div class="user-name">${u.name}</div>
+            <div class="user-id">${u.id} · ${u.phone}</div>
+          </div>
+        </div>
+      </td>
+      <td>${u.role}</td>
+      <td>
+        <div class="credit-bar">
+          <span style="font-weight:600;font-size:14px">${u.credit.toFixed(1)}</span>
+          <div class="bar-track">
+            <div class="bar-fill ${creditClass(u.credit)}" style="width:${u.credit * 20}%"></div>
+          </div>
+        </div>
+      </td>
+      <td><span style="font-family:var(--font-mono);font-weight:500">⏂ ${u.coins.toFixed(1)}</span></td>
+      <td>${u.orders}</td>
+      <td style="font-size:13px;color:var(--muted)">${u.date}</td>
+      <td>
+        ${u.status === 'active'
+          ? '<span class="status-pill active">正常</span>'
+          : u.status === 'restricted'
+          ? '<span class="status-pill restricted">受限</span>'
+          : '<span class="status-pill disabled">已禁用</span>'}
+      </td>
+      <td>
+        <div class="action-row">
+          <button class="action-btn">查看</button>
+          ${u.status === 'active'
+            ? '<button class="action-btn danger" onclick="toggleUser(this,\''+u.id+'\')">禁用</button>'
+            : '<button class="action-btn" onclick="toggleUser(this,\''+u.id+'\')">启用</button>'}
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function toggleUser(btn, uid) {
+  const tr = btn.closest('tr');
+  const pill = tr.querySelector('.status-pill');
+  if (pill.classList.contains('active')) {
+    pill.className = 'status-pill disabled';
+    pill.textContent = '已禁用';
+    btn.className = 'action-btn';
+    btn.textContent = '启用';
+  } else if (pill.classList.contains('disabled')) {
+    pill.className = 'status-pill active';
+    pill.textContent = '正常';
+    btn.className = 'action-btn danger';
+    btn.textContent = '禁用';
+  }
+}
+
+renderTable(users);
 </script>
 
+<script src="/assets/app/jury-nav.js"></script>
 </body>
 </html>

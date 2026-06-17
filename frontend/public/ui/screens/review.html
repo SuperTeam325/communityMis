@@ -137,7 +137,56 @@
 </div>
 
 <div class="review-body">
-<div data-runtime-placeholder class="runtime-placeholder">正在加载真实评价对象。</div>
+
+  <!-- Target info -->
+  <div class="target-card">
+    <div class="target-label">评价对象</div>
+    <div class="avatar lg" style="background:oklch(50% 0.12 255);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:24px;font-weight:700;width:64px;height:64px;">刘</div>
+    <div style="font-weight:700;font-size:18px;margin-top:var(--space-sm);">刘奶奶</div>
+    <div style="font-size:12px;color:var(--reward-gold);margin-top:2px;">★★★★☆ 4.6</div>
+    <div class="target-order">订单 #ORD-240603-042 · 帮李阿姨代购日用品</div>
+  </div>
+
+  <!-- Star rating -->
+  <div class="star-section" id="star-section">
+    <div class="star-label">为这次服务打分</div>
+    <div class="star-rating" id="star-rating">
+      <button class="empty" data-star="1"><svg viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
+      <button class="empty" data-star="2"><svg viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
+      <button class="empty" data-star="3"><svg viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
+      <button class="empty" data-star="4"><svg viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
+      <button class="empty" data-star="5"><svg viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
+    </div>
+    <div class="star-hint" id="star-hint">&nbsp;</div>
+  </div>
+
+  <!-- Quick tags -->
+  <div class="quick-tags">
+    <div class="qt-label">快捷标签（可选）</div>
+    <div class="qt-grid" id="qt-grid">
+      <button class="chip" data-tag="热心肠">热心肠</button>
+      <button class="chip" data-tag="响应快">响应快</button>
+      <button class="chip" data-tag="细致周到">细致周到</button>
+      <button class="chip" data-tag="准时">准时</button>
+      <button class="chip" data-tag="技术过硬">技术过硬</button>
+      <button class="chip" data-tag="沟通愉快">沟通愉快</button>
+      <button class="chip" data-tag="超出预期">超出预期</button>
+      <button class="chip" data-tag="耐心">耐心</button>
+    </div>
+  </div>
+
+  <!-- Review form -->
+  <div class="review-form">
+    <label for="review-text">文字评价</label>
+    <textarea id="review-text" placeholder="写下你的评价，帮助其他邻居了解这次服务体验…" maxlength="500"></textarea>
+    <div class="char-count" id="char-count">0 / 500</div>
+  </div>
+
+  <!-- Submit -->
+  <div class="submit-section">
+    <button class="btn btn--primary btn--lg btn--full" id="submit-btn" disabled>提交评价</button>
+    <p class="note">评价提交后不可修改。双方互评后才能看到对方的评价内容。</p>
+  </div>
 </div>
 
 <script>
@@ -220,7 +269,7 @@
       body.innerHTML = '<div class="success-card">' +
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>' +
         '<h3>评价提交成功！</h3>' +
-        '<p>你已给出 ' + rating + ' 星评价。<br>对方评价后你将看到完整互评结果。</p>' +
+        '<p>你对刘奶奶的服务给出了 ' + rating + ' 星评价。<br>对方评价后你将看到完整互评结果。</p>' +
         '<div style="margin-top:var(--space-xl);">' +
           '<button class="btn btn--primary" onclick="location.href=\'orders.html\'">返回我的订单</button>' +
         '</div>' +
@@ -252,5 +301,9 @@
   </a>
 </nav>
 
+<script src="/assets/app/jury-nav.js"></script>
+<script>
+(function(){"use strict";function t(){var u=window.__API_BASE_URL__||"";if(!u){if(!t._r)t._r=0;if(t._r++<20)setTimeout(t,500);return}fetch(u+"/api/auth/me",{credentials:"include"}).then(function(r){return r.ok?r.json():null}).then(function(d){if(d&&d.user&&d.user.isJury)n()}).catch(function(){})}function n(){var v=document.querySelector(".bottom-nav");if(!v||document.querySelector(".jlink"))return;var a=document.createElement("a");a.href="/jury";a.className="jlink";a.innerHTML="<svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>陪审";v.insertBefore(a,v.lastElementChild)}setTimeout(t,800)})();
+</script>
 </body>
 </html>

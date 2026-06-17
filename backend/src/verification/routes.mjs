@@ -41,7 +41,11 @@ export function hashVerificationCode(code) {
   return crypto.createHash("sha256").update(String(code)).digest("hex");
 }
 
-export async function verifyRegistrationCodes(store, input = {}) {
+export async function verifyRegistrationCodes(store, input = {}, config = {}) {
+  const verification = config.registrationVerification ?? process.env.REGISTRATION_VERIFICATION ?? "email";
+  if (verification === "none" || verification === "false" || verification === "off") {
+    return;
+  }
   const check = {
     channel: "email",
     purpose: "register",

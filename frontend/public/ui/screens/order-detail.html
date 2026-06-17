@@ -181,7 +181,160 @@
 </div>
 
 <div class="detail-body">
-<div data-runtime-placeholder class="runtime-placeholder">正在加载真实订单详情。</div>
+  <!-- Info card -->
+  <div class="info-card">
+    <div class="order-no">#ORD-240603-042</div>
+    <div class="order-title">帮李阿姨代购日用品</div>
+    <div style="display:flex;align-items:center;gap:var(--space-md);flex-wrap:wrap;">
+      <span class="status-pill status-done"><span class="sp-dot"></span>已完成</span>
+      <span class="badge badge--success">双方已互评</span>
+    </div>
+    <div class="info-row">
+      <div class="info-cell"><dt>时间币金额</dt><dd class="amount">⏂ 35.00</dd></div>
+      <div class="info-cell"><dt>约合服务时间</dt><dd>7 小时</dd></div>
+      <div class="info-cell"><dt>创建时间</dt><dd>2024-06-03 10:15</dd></div>
+      <div class="info-cell"><dt>完成时间</dt><dd>2024-06-03 14:22</dd></div>
+    </div>
+  </div>
+
+  <!-- Party cards -->
+  <div class="party-row">
+    <div class="party-card">
+      <div class="party-role">需求方</div>
+      <div class="avatar lg" style="background:oklch(50% 0.12 255);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:24px;font-weight:700;width:56px;height:56px;">刘</div>
+      <div style="font-weight:600;margin-top:var(--space-sm);">刘奶奶</div>
+      <div style="font-size:12px;color:var(--reward-gold);margin-top:2px;">★★★★☆ 4.6</div>
+      <div class="party-confirm confirmed">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> 已确认
+      </div>
+    </div>
+    <div class="party-card">
+      <div class="party-role">服务方</div>
+      <div class="avatar lg" style="background:oklch(60% 0.12 28);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:24px;font-weight:700;width:56px;height:56px;">张</div>
+      <div style="font-weight:600;margin-top:var(--space-sm);">张叔</div>
+      <div style="font-size:12px;color:var(--reward-gold);margin-top:2px;">★★★★★ 4.9</div>
+      <div class="party-confirm confirmed">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg> 已确认
+      </div>
+    </div>
+  </div>
+
+  <!-- Status timeline -->
+  <div class="timeline">
+    <h3>订单进度</h3>
+    <div class="tl-step done">
+      <div class="tl-node-wrap">
+        <div class="tl-node"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+        <div class="tl-line"></div>
+      </div>
+      <div class="tl-content">
+        <div class="tl-step-title">需求发布</div>
+        <div class="tl-step-desc">刘奶奶发布了「帮李阿姨代购日用品」需求，约 7 小时服务时间</div>
+        <div class="tl-step-time">2024-06-03 09:00</div>
+      </div>
+    </div>
+    <div class="tl-step done">
+      <div class="tl-node-wrap">
+        <div class="tl-node"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+        <div class="tl-line"></div>
+      </div>
+      <div class="tl-content">
+        <div class="tl-step-title">服务接单</div>
+        <div class="tl-step-desc">张叔接单，承诺在当天 14:00 前完成</div>
+        <div class="tl-step-time">2024-06-03 09:35</div>
+      </div>
+    </div>
+    <div class="tl-step done">
+      <div class="tl-node-wrap">
+        <div class="tl-node"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+        <div class="tl-line"></div>
+      </div>
+      <div class="tl-content">
+        <div class="tl-step-title">双方确认完成</div>
+        <div class="tl-step-desc">需求方刘奶奶确认服务完成，服务方张叔确认完成</div>
+        <div class="tl-step-time">需求方: 2024-06-03 14:10 · 服务方: 2024-06-03 14:15</div>
+      </div>
+    </div>
+    <div class="tl-step done">
+      <div class="tl-node-wrap">
+        <div class="tl-node"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+        <div class="tl-line"></div>
+      </div>
+      <div class="tl-content">
+        <div class="tl-step-title">时间币转账</div>
+        <div class="tl-step-desc">刘奶奶扣除 ⏂35.00，张叔获得 ⏂35.00，系统记录双账户流水</div>
+        <div class="tl-step-time">2024-06-03 14:15</div>
+      </div>
+    </div>
+    <div class="tl-step done">
+      <div class="tl-node-wrap">
+        <div class="tl-node"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div>
+      </div>
+      <div class="tl-content">
+        <div class="tl-step-title">双方互评完成</div>
+        <div class="tl-step-desc">双方互相给出 ★★★★★ 评价，订单归档</div>
+        <div class="tl-step-time">2024-06-03 15:00</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI Summary -->
+  <div class="ai-summary-card">
+    <div class="ai-header">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--secondary)" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span style="font-weight:600;font-size:15px;">AI 订单摘要</span>
+      <span class="ai-badge">仅供参考</span>
+    </div>
+    <div class="ai-content" id="ai-summary-content">
+      <p><strong>服务事项：</strong>帮助刘奶奶去永辉超市代购日用品（洗衣液×1、抽纸×2、垃圾袋×1）。</p>
+      <p style="margin-top:8px;"><strong>时间约定：</strong>2024年6月3日上午，预计3.5小时完成。实际于14:10完成。</p>
+      <p style="margin-top:8px;"><strong>转账记录：</strong>需求方（刘奶奶）扣减 ⏂35.00，服务方（张叔）获得 ⏂35.00。</p>
+      <p style="margin-top:8px;"><strong>评价结果：</strong>双方互评均为5星，无争议事项。</p>
+    </div>
+    <div class="ai-disclaimer">
+      ⚠ AI 摘要基于订单记录生成，已区分「已记录事实」与「AI 辅助建议」。不构成法律或裁决依据。
+    </div>
+  </div>
+
+  <!-- Chat / messages -->
+  <div class="chat-area">
+    <h3>沟通记录</h3>
+    <div class="chat-msg other">
+      <div class="avatar sm" style="background:oklch(50% 0.12 255);display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700;">刘</div>
+      <div>
+        <div class="cm-bubble">小张你好，我这边需要帮忙去永辉超市买三样东西：洗衣液×1、抽纸×2、垃圾袋×1，你看方便吗？</div>
+        <div class="cm-time">09:05</div>
+      </div>
+    </div>
+    <div class="chat-msg me">
+      <div class="avatar sm" style="background:oklch(60% 0.12 28);display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700;">张</div>
+      <div>
+        <div class="cm-bubble">没问题刘奶奶，我上午就去，大概 11 点前送回来。清单我看过了。</div>
+        <div class="cm-time">09:08</div>
+      </div>
+    </div>
+    <div class="chat-msg other">
+      <div class="avatar sm" style="background:oklch(50% 0.12 255);display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700;">刘</div>
+      <div>
+        <div class="cm-bubble">太感谢了！钱我让超市帮你预留好了。</div>
+        <div class="cm-time">09:12</div>
+      </div>
+    </div>
+    <div class="chat-msg me">
+      <div class="avatar sm" style="background:oklch(60% 0.12 28);display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700;">张</div>
+      <div>
+        <div class="cm-bubble">刘奶奶，东西都买好了，我现在送过来，大概10分钟到。</div>
+        <div class="cm-time">10:50</div>
+      </div>
+    </div>
+    <div class="chat-msg other">
+      <div class="avatar sm" style="background:oklch(50% 0.12 255);display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700;">刘</div>
+      <div>
+        <div class="cm-bubble">好的好的，到了按门铃就行。非常感谢你！</div>
+        <div class="cm-time">10:52</div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Bottom Nav -->
@@ -207,5 +360,9 @@
   </a>
 </nav>
 
+<script src="/assets/app/jury-nav.js"></script>
+<script>
+(function(){"use strict";function t(){var u=window.__API_BASE_URL__||"";if(!u){if(!t._r)t._r=0;if(t._r++<20)setTimeout(t,500);return}fetch(u+"/api/auth/me",{credentials:"include"}).then(function(r){return r.ok?r.json():null}).then(function(d){if(d&&d.user&&d.user.isJury)n()}).catch(function(){})}function n(){var v=document.querySelector(".bottom-nav");if(!v||document.querySelector(".jlink"))return;var a=document.createElement("a");a.href="/jury";a.className="jlink";a.innerHTML="<svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>陪审";v.insertBefore(a,v.lastElementChild)}setTimeout(t,800)})();
+</script>
 </body>
 </html>

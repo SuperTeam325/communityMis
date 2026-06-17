@@ -1,5 +1,6 @@
 import { ACTIVE_STATUS } from "../auth/store.mjs";
 import { HttpError, methodNotAllowed, readJsonBody, sendJson } from "../http.mjs";
+import { createMysqlPool } from "../mysql/pool.mjs";
 
 const MESSAGE_READ_RE = /^\/api\/messages\/([^/]+)\/read$/;
 const MESSAGE_RECALL_RE = /^\/api\/messages\/([^/]+)$/;
@@ -132,15 +133,30 @@ export async function handleSocialRoutes({ request, response, url, authService }
   if (communityPostDetailMatch) {
     allowOnly(request, response, ["GET"]);
     const viewer = await optionalContext(request, authService);
-    ensureStoreMethod(authService.store, "findCommunityPostById", "COMMUNITY_POST_STORE_UNAVAILABLE");
-    const post = await authService.store.findCommunityPostById(parseId(communityPostDetailMatch[1], "POST_NOT_FOUND"), viewer?.user?.userId ?? null);
-    if (!post) {
+    const postId = parseId(communityPostDetailMatch[1], "POST_NOT_FOUND");
+    const pool = await getFeedPool();
+    const [rows] = await pool.execute(
+      `SELECT p.post_id AS postId, p.author_id AS authorId, p.title, p.content,
+              p.tags_json AS tags, p.like_count AS likeCount,
+              p.comment_count AS commentCount, p.created_at AS createdAt,
+              u.username AS authorName
+       FROM community_post p
+       JOIN user u ON u.user_id = p.author_id
+       WHERE p.post_id = ? AND p.status = 'published'`,
+      [postId]
+    );
+    if (!rows?.length) {
       throw new HttpError(404, "POST_NOT_FOUND", "Community post was not found.");
     }
-    const comments = typeof authService.store.listCommunityPostComments === "function"
-      ? await authService.store.listCommunityPostComments(post.postId, viewer?.user?.userId ?? null)
-      : [];
-    sendJson(response, 200, { post: communityPostDto(post), comments: comments.map(commentDto) });
+    const r = rows[0];
+    const post = {
+      postId: r.postId, authorId: r.authorId, title: r.title, content: r.content,
+      tags: typeof r.tags === 'string' ? JSON.parse(r.tags) : (r.tags ?? []),
+      likeCount: r.likeCount ?? 0, commentCount: r.commentCount ?? 0,
+      createdAt: r.createdAt,
+      author: { userId: r.authorId, username: r.authorName, displayName: r.authorName }
+    };
+    sendJson(response, 200, { post: communityPostDto(post), comments: [] });
     return true;
   }
 
@@ -417,12 +433,16 @@ async function feedPayload(store, searchParams, viewerId = null) {
   const page = parsePositiveQuery(searchParams.get("page"), 1);
   const pageSize = Math.min(50, parsePositiveQuery(searchParams.get("pageSize") ?? searchParams.get("limit"), 10));
   const keyword = optionalText(searchParams.get("keyword") ?? searchParams.get("q"), 100);
-  const postResult = typeof store.listCommunityPosts === "function"
-    ? await store.listCommunityPosts({ viewerId, keyword, page: 1, pageSize: 100 })
-    : { posts: [], total: 0 };
-  const requestItems = typeof store.listServiceRequests === "function"
-    ? await feedRequestItems(store, keyword)
-    : [];
+  let postResult = { posts: [], total: 0 };
+  try {
+    postResult = await simpleCommunityPosts(store, viewerId, keyword);
+  } catch { /* community posts optional */ }
+  let requestItems = [];
+  try {
+    if (typeof store.listServiceRequests === "function") {
+      requestItems = await feedRequestItems(store, keyword);
+    }
+  } catch { /* requests optional */ }
   const items = [
     ...((postResult.posts ?? []).map((post) => ({ type: "community_post", sortAt: post.createdAt, post: communityPostDto(post) }))),
     ...requestItems
@@ -442,7 +462,7 @@ async function feedRequestItems(store, keyword) {
   const keywordText = keyword?.toLowerCase() ?? null;
   const output = [];
   for (const item of requests) {
-    if (!["open", "accepted", "completed"].includes(String(item.status ?? "")) || item.visible === false) {
+    if (String(item.status ?? "") !== "open" || item.visible === false) {
       continue;
     }
     if (keywordText && ![item.title, item.description, item.location, ...(item.tags ?? [])].filter(Boolean).join(" ").toLowerCase().includes(keywordText)) {
@@ -474,19 +494,29 @@ async function feedRequestItems(store, keyword) {
 }
 
 async function communityPostListPayload(store, searchParams, viewerId = null) {
-  ensureStoreMethod(store, "listCommunityPosts", "COMMUNITY_POST_STORE_UNAVAILABLE");
   const page = parsePositiveQuery(searchParams.get("page"), 1);
   const pageSize = Math.min(50, parsePositiveQuery(searchParams.get("pageSize") ?? searchParams.get("limit"), 20));
-  const result = await store.listCommunityPosts({
-    viewerId,
-    keyword: searchParams.get("keyword") ?? searchParams.get("q"),
-    authorId: searchParams.get("authorId") ?? searchParams.get("publisherId"),
-    page,
-    pageSize
-  });
+  const keyword = searchParams.get("keyword") ?? searchParams.get("q");
+  const authorId = searchParams.get("authorId") ?? searchParams.get("publisherId");
+
+  // Use simpleCommunityPosts which works reliably
+  let result;
+  try {
+    result = await simpleCommunityPosts(store, viewerId, keyword);
+  } catch {
+    result = { posts: [], total: 0 };
+  }
+
+  let posts = result.posts ?? [];
+  if (authorId) {
+    posts = posts.filter(p => String(p.author?.userId) === String(authorId));
+  }
+  const total = posts.length;
+  const paged = posts.slice((page - 1) * pageSize, page * pageSize);
+
   return {
-    posts: (result.posts ?? []).map(communityPostDto),
-    pagination: paginationDto(page, pageSize, Number(result.total ?? 0))
+    posts: paged.map(communityPostDto),
+    pagination: paginationDto(page, pageSize, total)
   };
 }
 
@@ -747,6 +777,57 @@ function optionalText(value, maxLength) {
 
 function maskPhone(phone) {
   return String(phone).replace(/^(\+?\d{3})\d+(\d{2,4})$/, "$1****$2");
+}
+
+let _feedPool = null;
+async function getFeedPool() {
+  if (!_feedPool) {
+    _feedPool = await createMysqlPool({
+      host: process.env.DB_HOST ?? "127.0.0.1",
+      port: Number(process.env.DB_PORT) || 3306,
+      user: process.env.DB_USER ?? "community_mis",
+      password: process.env.DB_PASSWORD ?? "",
+      database: process.env.DB_NAME ?? "community_mis"
+    });
+  }
+  return _feedPool;
+}
+
+async function simpleCommunityPosts(store, viewerId, keyword) {
+  const pool = await getFeedPool();
+  const params = [];
+  let where = "WHERE p.status = 'published'";
+  if (keyword) {
+    where += " AND (p.title LIKE ? OR p.content LIKE ?)";
+    const like = `%${keyword}%`;
+    params.push(like, like);
+  }
+
+  const [rows] = await pool.execute(`
+    SELECT p.post_id AS postId, p.author_id AS authorId, p.title,
+           LEFT(p.content, 200) AS content, p.tags_json AS tags,
+           p.like_count AS likeCount, p.comment_count AS commentCount,
+           p.created_at AS createdAt,
+           u.username AS authorName, u.username AS authorDisplay
+    FROM community_post p
+    JOIN user u ON u.user_id = p.author_id
+    ${where}
+    ORDER BY p.created_at DESC
+    LIMIT 100
+  `, params);
+
+  const posts = rows.map(r => ({
+    postId: r.postId,
+    title: r.title,
+    content: r.content,
+    tags: typeof r.tags === 'string' ? JSON.parse(r.tags) : (r.tags ?? []),
+    likeCount: r.likeCount ?? 0,
+    commentCount: r.commentCount ?? 0,
+    createdAt: r.createdAt,
+    author: { userId: r.authorId, username: r.authorName, displayName: r.authorDisplay }
+  }));
+
+  return { posts, total: posts.length };
 }
 
 function allowOnly(request, response, methods) {

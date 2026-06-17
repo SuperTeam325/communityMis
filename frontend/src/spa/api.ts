@@ -14,6 +14,20 @@ export class ApiError extends Error {
 
 export type ApiClient = ReturnType<typeof createApiClient>;
 
+const SESSION_TOKEN_KEY = "neighbor_bearer_token";
+
+function getSessionToken(): string | null {
+  try { return sessionStorage.getItem(SESSION_TOKEN_KEY); } catch { return null; }
+}
+
+function setSessionToken(token: string): void {
+  try { sessionStorage.setItem(SESSION_TOKEN_KEY, token); } catch { /* ignore */ }
+}
+
+function clearSessionToken(): void {
+  try { sessionStorage.removeItem(SESSION_TOKEN_KEY); } catch { /* ignore */ }
+}
+
 export function createApiClient(config: RuntimeConfig, fetchImpl: typeof fetch = fetch) {
   type StreamHandlers = {
     onEvent?: (event: Record<string, unknown>) => void;
@@ -23,6 +37,10 @@ export function createApiClient(config: RuntimeConfig, fetchImpl: typeof fetch =
   const request = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
     const headers = new Headers(options.headers);
     const body = normalizeBody(options.body, headers);
+    const sessionToken = getSessionToken();
+    if (sessionToken && !headers.has("authorization")) {
+      headers.set("authorization", "Bearer " + sessionToken);
+    }
     if (isMutation(options.method) && !headers.has("x-csrf-token")) {
       const csrfToken = readCookie("csrf_token");
       if (csrfToken) headers.set("x-csrf-token", csrfToken);
@@ -87,16 +105,32 @@ export function createApiClient(config: RuntimeConfig, fetchImpl: typeof fetch =
     request,
     streamRequest,
     auth: {
-      login: (payload: unknown) => request<{ user: unknown }>("/api/auth/login", { method: "POST", body: payload as BodyInit }),
-      register: (payload: unknown) => request<{ user: unknown }>("/api/auth/register", { method: "POST", body: payload as BodyInit }),
-      logout: () => request<{ ok?: boolean }>("/api/auth/logout", { method: "POST" }),
+      login: async (payload: unknown) => {
+        const result = await request<{ token?: string; user: unknown }>("/api/auth/login", { method: "POST", body: payload as BodyInit });
+        if (result.token) setSessionToken(result.token);
+        return result;
+      },
+      register: async (payload: unknown) => {
+        const result = await request<{ token?: string; user: unknown }>("/api/auth/register", { method: "POST", body: payload as BodyInit });
+        if (result.token) setSessionToken(result.token);
+        return result;
+      },
+      logout: async () => {
+        const result = await request<{ ok?: boolean }>("/api/auth/logout", { method: "POST" });
+        clearSessionToken();
+        return result;
+      },
       me: () => request<{ user: unknown }>("/api/auth/me")
     },
     verification: {
       sendEmail: (payload: unknown) => request<{ verificationToken: string; expiresAt: string; cooldownSeconds?: number }>("/api/verification/email/send", { method: "POST", body: payload as BodyInit })
     },
     adminAuth: {
-      login: (payload: unknown) => request<{ user: unknown }>("/api/admin/auth/login", { method: "POST", body: payload as BodyInit }),
+      login: async (payload: unknown) => {
+        const result = await request<{ token?: string; user: unknown }>("/api/admin/auth/login", { method: "POST", body: payload as BodyInit });
+        if (result.token) setSessionToken(result.token);
+        return result;
+      },
       me: () => request<{ user: unknown }>("/api/admin/auth/me")
     },
     requests: {
@@ -145,6 +179,25 @@ export function createApiClient(config: RuntimeConfig, fetchImpl: typeof fetch =
       list: (params = {}) => request<Record<string, unknown>>(withQuery("/api/messages", params)),
       send: (payload: unknown) => request<Record<string, unknown>>("/api/messages", { method: "POST", body: payload as BodyInit }),
       read: (id: string) => request<Record<string, unknown>>(`/api/messages/${encodeURIComponent(id)}/read`, { method: "POST" })
+    },
+    communityPosts: {
+      list: (params = {}) => request<Record<string, unknown>>(withQuery("/api/community-posts", params)),
+      feed: (params = {}) => request<Record<string, unknown>>(withQuery("/api/feed", params)),
+      detail: (id: string) => request<Record<string, unknown>>(`/api/community-posts/${encodeURIComponent(id)}`),
+      create: (payload: unknown) => request<Record<string, unknown>>("/api/community-posts", { method: "POST", body: payload as BodyInit }),
+      like: (id: string) => request<Record<string, unknown>>(`/api/community-posts/${encodeURIComponent(id)}/like`, { method: "POST" }),
+      unlike: (id: string) => request<Record<string, unknown>>(`/api/community-posts/${encodeURIComponent(id)}/like`, { method: "DELETE" }),
+      collect: (id: string) => request<Record<string, unknown>>(`/api/community-posts/${encodeURIComponent(id)}/collect`, { method: "POST" }),
+      uncollect: (id: string) => request<Record<string, unknown>>(`/api/community-posts/${encodeURIComponent(id)}/collect`, { method: "DELETE" }),
+      comments: (id: string) => request<Record<string, unknown>>(`/api/community-posts/${encodeURIComponent(id)}/comments`),
+      createComment: (id: string, payload: unknown) => request<Record<string, unknown>>(`/api/community-posts/${encodeURIComponent(id)}/comments`, { method: "POST", body: payload as BodyInit }),
+      likeComment: (id: string) => request<Record<string, unknown>>(`/api/community-post-comments/${encodeURIComponent(id)}/like`, { method: "POST" }),
+      unlikeComment: (id: string) => request<Record<string, unknown>>(`/api/community-post-comments/${encodeURIComponent(id)}/like`, { method: "DELETE" })
+    },
+    collections: {
+      me: (params = {}) => request<Record<string, unknown>>(withQuery("/api/users/me/collections", params)),
+      create: (payload: unknown) => request<Record<string, unknown>>("/api/collections", { method: "POST", body: payload as BodyInit }),
+      delete: (type: string, id: string) => request<Record<string, unknown>>(`/api/collections/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, { method: "DELETE" })
     },
     users: {
       me: () => request<Record<string, unknown>>("/api/users/me"),
