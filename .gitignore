@@ -93,5 +93,8 @@ UISource/output/
 plan/
 *.md
 !README.md
+!docs/
+!docs/*.md
 
 head.png
+!plan/
