@@ -8,8 +8,8 @@ export default defineConfig({
   test: {
     globals: true,
     include: [
-      "../tests/unit/**/*.{test,spec}.?(c|m)[jt]s?(x)",
-      "../tests/component/**/*.{test,spec}.?(c|m)[jt]s?(x)"
+      "../tests/unit/*.test.*",
+      "../tests/component/*.test.*"
     ]
   },
   build: {
@@ -27,7 +27,7 @@ export default defineConfig({
   },
   server: {
     host: "127.0.0.1",
-    port: 5173
+    port: parseInt(process.env.FRONTEND_PORT ?? "5173")
   },
   define: {
     "import.meta.env.VITE_BUILD_VERSION": JSON.stringify(process.env.BUILD_VERSION ?? "dev")

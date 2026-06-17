@@ -826,13 +826,13 @@
 <script>
 const errors = [
   {
-    id: "ERR-260605-067",
-    user: "王大壮",
+    id: "ERROR",
+    user: "用户丙",
     role: "服务者",
     type: "越权尝试",
     severity: "严重",
     status: "已阻断",
-    audit: "AUD-260605-410",
+    audit: "AUDIT-410",
     time: "2026-06-05 14:58",
     reason: "用户要求 AI 修改对方评价与订单结算状态。",
     guardrail: "AI 已拒绝执行，并提示平台只允许用户在订单页发起纠纷或联系管理员。",
@@ -843,13 +843,13 @@ request_id=req_ai_6f28a
 latency=0.42s`
   },
   {
-    id: "ERR-260605-052",
-    user: "赵姐",
+    id: "ERROR",
+    user: "用户己",
     role: "需求发布者",
     type: "高风险请求",
     severity: "高",
     status: "待复核",
-    audit: "AUD-260605-389",
+    audit: "AUDIT-389",
     time: "2026-06-05 13:33",
     reason: "纠纷摘要请求包含完整地址与证据图片描述。",
     guardrail: "已脱敏地址，仅保留街道级别；图片内容只生成事实性描述。",
@@ -859,13 +859,13 @@ fields_masked=phone,address,exact_room
 result=allowed_with_redaction`
   },
   {
-    id: "ERR-260605-044",
+    id: "ERROR",
     user: "周老师",
     role: "求助者",
     type: "超时",
     severity: "中",
     status: "已恢复",
-    audit: "AUD-260605-372",
+    audit: "AUDIT-372",
     time: "2026-06-05 12:48",
     reason: "智能筛选调用超过 3 秒阈值，第二次重试成功。",
     guardrail: "未返回空结果，前端展示“正在重试”并保持原筛选条件。",
@@ -876,13 +876,13 @@ result=success
 latency=4.91s`
   },
   {
-    id: "ERR-260604-188",
-    user: "陈阿姨",
+    id: "ERROR",
+    user: "用户丁",
     role: "需求发布者",
     type: "模型失败",
     severity: "低",
     status: "已归档",
-    audit: "AUD-260604-219",
+    audit: "AUDIT-219",
     time: "2026-06-04 18:19",
     reason: "发布辅助生成草稿时模型服务返回 500。",
     guardrail: "已提示稍后重试，表单草稿未丢失。",
@@ -893,13 +893,13 @@ fallback=manual_edit_hint
 result=failed_safe`
   },
   {
-    id: "ERR-260604-173",
+    id: "ERROR",
     user: "匿名访客",
     role: "未登录",
     type: "策略拒绝",
     severity: "中",
     status: "已阻断",
-    audit: "AUD-260604-198",
+    audit: "AUDIT-198",
     time: "2026-06-04 16:42",
     reason: "未登录用户尝试查询他人订单冻结金额。",
     guardrail: "AI 拒绝展示订单信息，仅返回公开规则说明。",

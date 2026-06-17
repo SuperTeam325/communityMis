@@ -176,7 +176,7 @@
     <div class="form-group">
       <textarea class="input" rows="6" placeholder="分享你的日常、求助邻里、或者随便聊聊…"></textarea>
       <div style="margin-top:var(--space-sm);display:flex;justify-content:flex-end;">
-        <button onclick="openAIModal('publish')" class="ai-assist-btn">
+        <button data-ai-modal-scene="publish" class="ai-assist-btn">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           AI 帮我完善
         </button>
@@ -225,7 +225,7 @@
       <label>任务描述</label>
       <textarea class="input" id="task-description" rows="4" maxlength="2000" placeholder="详细说明任务要求、地点、注意事项等…"></textarea>
       <div style="margin-top:var(--space-sm);display:flex;justify-content:flex-end;">
-        <button onclick="openAIModal('publish')" class="ai-assist-btn">
+        <button data-ai-modal-scene="publish" class="ai-assist-btn">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           AI 帮我完善
         </button>
@@ -264,7 +264,7 @@
 
     <div class="form-group">
       <label>执行地点</label>
-      <input class="input" id="task-location" type="text" maxlength="120" placeholder="如：阳光花园小区内 / 3公里范围内">
+      <input class="input" id="task-location" type="text" maxlength="120" placeholder="如：邻里社区小区内 / 3公里范围内">
     </div>
 
     <div class="form-group">
@@ -371,8 +371,6 @@
     setTimeout(() => toast.classList.remove('show'), 2000);
   });
 </script>
-<script>
-(function(){"use strict";function t(){var u=window.__API_BASE_URL__||"";if(!u){if(!t._r)t._r=0;if(t._r++<20)setTimeout(t,500);return}fetch(u+"/api/auth/me",{credentials:"include"}).then(function(r){return r.ok?r.json():null}).then(function(d){if(d&&d.user&&d.user.isJury)n()}).catch(function(){})}function n(){var v=document.querySelector(".bottom-nav");if(!v||document.querySelector(".jlink"))return;var a=document.createElement("a");a.href="/jury";a.className="jlink";a.innerHTML="<svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>陪审";v.insertBefore(a,v.lastElementChild)}setTimeout(t,800)})();
-</script>
+
 </body>
 </html>

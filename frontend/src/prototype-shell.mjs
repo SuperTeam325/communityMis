@@ -661,6 +661,10 @@ async function hydrateCurrentRoute(session) {
       await hydrateDisputeDetailRoute(session);
       return;
     }
+    if (route.id === "jury-hall") {
+      await hydrateJuryHallRoute(session);
+      return;
+    }
     if (route.id === "jury-voting") {
       await hydrateJuryVotingRoute(session);
       return;
@@ -1700,15 +1704,18 @@ function updateFeedQuery(patch, userSession) {
   if (next.filter && next.filter !== "all") {
     params.set("filter", next.filter);
   }
-  if (filter?.category) {
-    params.set("category", filter.category);
-  } else if (next.category) {
+  // 动态分类（filter===all）或显式指定分类时才写入 category/tag，
+  // 静态 filter 的分类/标签由 feedApiParams 运行时从 TASK_FILTERS 派生，
+  // 不应写入 URL，否则 state.category 非空会导致静态 chip 高亮失效
+  if (next.category) {
     params.set("category", next.category);
+  } else if (next.filter === "all" && filter?.category) {
+    params.set("category", filter.category);
   }
-  if (filter?.tag) {
-    params.set("tag", filter.tag);
-  } else if (next.tag) {
+  if (next.tag) {
     params.set("tag", next.tag);
+  } else if (next.filter === "all" && filter?.tag) {
+    params.set("tag", filter.tag);
   }
   if (next.status && next.status !== "open") {
     params.set("status", next.status);
@@ -1753,8 +1760,8 @@ function applyFeedControls(state) {
     // 避免将无属性按钮的兜底值 "all" 错误匹配到 state.filter
     if (!categoryCode && filterAttr === undefined) return;
     const active = categoryCode
-      ? categoryCode === state.category
-      : filterAttr === state.filter && (!state.category || TASK_FILTERS.get(state.filter)?.category === state.category);
+      ? state.filter === "all" && categoryCode === state.category
+      : filterAttr === state.filter && !state.category;
     button.classList.toggle("active", active);
   });
 }
@@ -1779,13 +1786,13 @@ function renderFeedCategories(categories, state, userSession) {
     .filter((category) => category?.code && !staticLabels.has(category.name))
     .slice(0, 4)
     .map((category) => {
-      const active = category.code === state.category;
+      const active = state.filter === "all" && category.code === state.category;
       return `<button class="chip${active ? " active" : ""}" data-filter="all" data-category-code="${escapeAttribute(category.code)}">${escapeHtml(category.name)}</button>`;
     });
 
   tabs.innerHTML = `
     ${staticFilters.map(([filter, label]) => {
-      const active = filter === state.filter && (!state.category || TASK_FILTERS.get(state.filter)?.category === state.category);
+      const active = filter === state.filter && !state.category;
       return `<button class="chip${active ? " active" : ""}" data-filter="${escapeHtml(filter)}">${escapeHtml(label)}</button>`;
     }).join("")}
     ${categoryButtons.join("")}
@@ -2648,17 +2655,17 @@ function applyRequestDetail(item, userSession = null, comments = []) {
       navigateTo(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
       return;
     }
-    const message = prompt(`申请接单「${item.title}」\n\n请输入申请理由（可选）：`, "我对这个需求很感兴趣，希望能为您服务。");
-    if (message === null) {
-      return;
-    }
     const button = document.getElementById("accept-request");
-    const restore = setLoading(button, "提交中...");
+    const restore = setLoading(button, "接单中...");
     try {
-      await api.requests.apply(userSession.token, item.requestId, message || undefined);
-      button.textContent = "已申请";
+      const result = await api.requests.accept(userSession.token, item.requestId);
+      const orderId = result.order?.orderId;
+      button.textContent = "已接单";
       button.disabled = true;
-      showToast("申请已提交，等待发布者确认。", "success");
+      showToast("接单成功，正在进入订单详情。", "success");
+      if (orderId) {
+        setTimeout(() => navigateTo(`/orders/${encodeURIComponent(orderId)}`), 600);
+      }
     } catch (error) {
       restore();
       showToast(acceptErrorMessage(error), "error");
@@ -3578,6 +3585,58 @@ async function hydrateJuryVotingRoute(session) {
   } catch (error) {
     renderJuryVotingState("error", juryErrorMessage(error));
   }
+}
+
+async function hydrateJuryHallRoute(session) {
+  const userSession = session ?? auth.readSession("user");
+  const list = document.getElementById("L");
+  if (!list || !hasUserSession(userSession)) {
+    return;
+  }
+  renderJuryHallState("loading", "正在读取待投票纠纷。");
+  try {
+    const payload = await api.jury.disputes(sessionToken(userSession));
+    const disputes = Array.isArray(payload?.disputes) ? payload.disputes : [];
+    if (disputes.length === 0) {
+      renderJuryHallState("empty", "当前没有需要陪审团投票的纠纷。");
+      return;
+    }
+    list.innerHTML = disputes.map(juryHallCard).join("");
+  } catch (error) {
+    renderJuryHallState("error", juryErrorMessage(error));
+  }
+}
+
+function renderJuryHallState(kind, message) {
+  const list = document.getElementById("L");
+  if (!list) {
+    return;
+  }
+  const action = kind === "error"
+    ? '<button type="button" data-jury-retry>重试</button>'
+    : '<a href="/feed">返回首页</a>';
+  list.innerHTML = `<div class="s ${kind === "error" ? "se" : ""}">
+    <strong>${escapeHtml(kind === "loading" ? "加载中" : kind === "empty" ? "暂无待投票纠纷" : "加载失败")}</strong>
+    <p>${escapeHtml(message)}</p>
+    ${kind === "loading" ? "" : action}
+  </div>`;
+  list.querySelector("[data-jury-retry]")?.addEventListener("click", () => hydrateJuryHallRoute(auth.readSession("user")));
+}
+
+function juryHallCard(dispute) {
+  const reason = String(dispute.reason || "暂无纠纷说明").slice(0, 120);
+  return `<a href="/jury/voting?disputeId=${encodeURIComponent(dispute.disputeId)}" class="c">
+    <div class="ch">
+      <span class="ci">#${escapeHtml(dispute.disputeId)}</span>
+      <span class="ct">${escapeHtml(disputeTypeLabel(dispute.type))}</span>
+    </div>
+    <div class="cb">${escapeHtml(reason)}</div>
+    <div class="cf">
+      <span>订单 #${escapeHtml(dispute.orderId ?? "-")}</span>
+      <span>${escapeHtml(formatDateTime(dispute.updatedAt ?? dispute.createdAt))}</span>
+      <span class="ca">参与投票</span>
+    </div>
+  </a>`;
 }
 
 function renderJuryVotingState(kind, message) {

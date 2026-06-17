@@ -1,8 +1,0 @@
-{
-  "apiBaseUrl": "http://127.0.0.1:3001",
-  "appEnv": "development",
-  "buildVersion": "dev",
-  "sentryDsn": "",
-  "sentryTracesSampleRate": 0,
-  "sentryIngestOrigin": ""
-}

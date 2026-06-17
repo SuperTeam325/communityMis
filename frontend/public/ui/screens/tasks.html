@@ -261,23 +261,20 @@
   .ai-fab {
     position: fixed; right: 20px; bottom: calc(80px + env(safe-area-inset-bottom));
     width: 56px; height: 56px; border-radius: 50%;
-    background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-    color: #fff; border: none; cursor: pointer;
+    background: var(--ai-icon-red, #b43b38);
+    color: #fff; border: 2px solid var(--ai-icon-ring, #bdeff6); cursor: pointer;
+    box-sizing: border-box;
     display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.35);
-    z-index: 90; transition: transform 0.3s, box-shadow 0.3s;
+    box-shadow: var(--ai-icon-shadow, 0 8px 22px rgba(67, 118, 128, 0.18));
+    z-index: 90; transition: transform 0.2s ease, box-shadow 0.2s ease;
   }
   .ai-fab:hover {
-    transform: scale(1.1) rotate(15deg);
-    box-shadow: 0 6px 28px rgba(99, 102, 241, 0.45);
+    transform: scale(1.06);
+    box-shadow: 0 10px 28px rgba(67, 118, 128, 0.24);
   }
   .ai-fab svg { width: 24px; height: 24px; }
   .fab-pulse {
-    position: absolute; inset: -4px;
-    border-radius: 50%;
-    border: 2px solid var(--accent);
-    opacity: 0;
-    animation: fabPulse 2s ease-out infinite;
+    display: none;
   }
   @keyframes fabPulse {
     0% { transform: scale(1); opacity: 0.6; }
@@ -457,7 +454,7 @@
         </div>
         <p class="task-desc">菜鸟驿站 3 号柜，两个包裹有点重，需要有推车的邻居帮忙</p>
         <div class="meta-row">
-          <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/><path d="M12 21.7C17.3 17 20 13 20 10a8 8 0 1 0-16 0c0 3 2.7 7 8 11.7z"/></svg>阳光花园小区</span>
+          <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/><path d="M12 21.7C17.3 17 20 13 20 10a8 8 0 1 0-16 0c0 3 2.7 7 8 11.7z"/></svg>邻里社区小区</span>
           <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>今天 20:00</span>
           <span class="badge badge--warning">即将截止</span>
         </div>
@@ -465,7 +462,7 @@
           <a class="publisher-info" href="user-public.html">
             <div class="avatar sm" style="background:oklch(70% 0.08 28);">李</div>
             <div>
-              <div style="font-weight:500;">李阿姨</div>
+              <div style="font-weight:500;">用户乙</div>
               <div class="rating">★★★★☆ 4.8</div>
             </div>
           </a>
@@ -481,14 +478,14 @@
         </div>
         <p class="task-desc">金毛犬性格温顺，就在小区内遛弯，下午 4–5 点之间来 6 号楼就行</p>
         <div class="meta-row">
-          <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/><path d="M12 21.7C17.3 17 20 13 20 10a8 8 0 1 0-16 0c0 3 2.7 7 8 11.7z"/></svg>阳光花园小区</span>
+          <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/><path d="M12 21.7C17.3 17 20 13 20 10a8 8 0 1 0-16 0c0 3 2.7 7 8 11.7z"/></svg>邻里社区小区</span>
           <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>明天 17:00</span>
         </div>
         <div class="card-footer">
           <a class="publisher-info" href="user-public.html">
             <div class="avatar sm" style="background:oklch(65% 0.08 175);">赵</div>
             <div>
-              <div style="font-weight:500;">赵姐</div>
+              <div style="font-weight:500;">用户己</div>
               <div class="rating">★★★★★ 5.0</div>
             </div>
           </a>
@@ -511,7 +508,7 @@
           <a class="publisher-info" href="user-public.html">
             <div class="avatar sm" style="background:oklch(55% 0.10 255);">刘</div>
             <div>
-              <div style="font-weight:500;">刘奶奶</div>
+              <div style="font-weight:500;">用户戊</div>
               <div class="rating">★★★★☆ 4.6</div>
             </div>
           </a>
@@ -535,7 +532,7 @@
           <a class="publisher-info" href="user-public.html">
             <div class="avatar sm" style="background:oklch(60% 0.10 28);">王</div>
             <div>
-              <div style="font-weight:500;">小王</div>
+              <div style="font-weight:500;">用户庚</div>
               <div class="rating">★★★★★ 5.0</div>
             </div>
           </a>
@@ -551,7 +548,7 @@
         </div>
         <p class="task-desc">宜家 BILLY 书柜，已经拆箱了在客厅，需要 1 个人帮忙一起装，大概 40 分钟</p>
         <div class="meta-row">
-          <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/><path d="M12 21.7C17.3 17 20 13 20 10a8 8 0 1 0-16 0c0 3 2.7 7 8 11.7z"/></svg>阳光花园 9 号楼</span>
+          <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/><path d="M12 21.7C17.3 17 20 13 20 10a8 8 0 1 0-16 0c0 3 2.7 7 8 11.7z"/></svg>邻里社区 9 号楼</span>
           <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>3 天内</span>
         </div>
         <div class="card-footer">
@@ -574,7 +571,7 @@
         </div>
         <p class="task-desc">丰巢 12 号柜取一个小包裹，送到 5 号楼 203，家门口放物业前台也可以</p>
         <div class="meta-row">
-          <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/><path d="M12 21.7C17.3 17 20 13 20 10a8 8 0 1 0-16 0c0 3 2.7 7 8 11.7z"/></svg>阳光花园小区</span>
+          <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/><path d="M12 21.7C17.3 17 20 13 20 10a8 8 0 1 0-16 0c0 3 2.7 7 8 11.7z"/></svg>邻里社区小区</span>
           <span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>今天 22:00</span>
         </div>
         <div class="card-footer">
@@ -612,7 +609,7 @@
 </div>
 
 <!-- AI FAB -->
-<button class="ai-fab" aria-label="AI 助手" onclick="openAIModal('filter')">
+<button class="ai-fab" aria-label="AI 助手" data-ai-modal-scene="filter">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
   <span class="fab-pulse"></span>
 </button>
@@ -727,8 +724,6 @@
   window.addEventListener('resize', updateLayout);
 </script>
 <script src="/assets/app/jury-nav.js"></script>
-<script>
-(function(){"use strict";function t(){var u=window.__API_BASE_URL__||"";if(!u){if(!t._r)t._r=0;if(t._r++<20)setTimeout(t,500);return}fetch(u+"/api/auth/me",{credentials:"include"}).then(function(r){return r.ok?r.json():null}).then(function(d){if(d&&d.user&&d.user.isJury)n()}).catch(function(){})}function n(){var v=document.querySelector(".bottom-nav");if(!v||document.querySelector(".jlink"))return;var a=document.createElement("a");a.href="/jury";a.className="jlink";a.innerHTML="<svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>陪审";v.insertBefore(a,v.lastElementChild)}setTimeout(t,800)})();
-</script>
+
 </body>
 </html>

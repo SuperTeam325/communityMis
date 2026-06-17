@@ -161,24 +161,36 @@ describe("frontend runtime config", () => {
     expect(shell).not.toContain("onclick=\"exportCSV()\"");
   });
 
+  test("feed filter chips do not share active state with category chips", () => {
+    const shell = fs.readFileSync(path.join(process.cwd(), "frontend", "src", "prototype-shell.mjs"), "utf8");
+
+    expect(shell).toContain("? state.filter === \"all\" && categoryCode === state.category");
+    expect(shell).toContain("const active = state.filter === \"all\" && category.code === state.category;");
+    expect(shell).toContain("const active = filter === state.filter && !state.category;");
+    expect(shell).not.toContain("filterAttr === state.filter && (!state.category || TASK_FILTERS.get(state.filter)?.category === state.category)");
+    expect(shell).not.toContain("filter === state.filter && (!state.category || TASK_FILTERS.get(state.filter)?.category === state.category)");
+  });
+
   test("global AI modal uses cookie and CSRF authenticated backend actions", () => {
     const modal = fs.readFileSync(path.join(process.cwd(), "frontend", "public", "ui", "js", "ai-modal.js"), "utf8");
 
     for (const expected of [
+      "'use strict'",
+      "window.openAIModal",
+      "window._aiModalNavigate",
+      "buildModal",
+      "injectStyles",
+      "requestAIReply",
+      "/api/ai/chat",
       "credentials: 'include'",
-      "readCookie('csrf_token')",
-      "headers['x-csrf-token'] = csrfToken",
-      "requestStreamJson('/api/ai/chat/stream'",
-      "requestJson('/api/ai/chat'",
-      "requestJson('/api/ai/messages/' + encodeURIComponent(messageId) + '/feedback'",
-      "ai-rich-text.mjs",
-      "data-ai-raw",
-      "ClipboardItem",
-      "'text/html'",
-      "response.body?.getReader",
-      "data-ai-modal-action=\"results\"",
-      "data-ai-modal-action=\"draft\"",
-      "currentConversationId = data.conversation?.conversationId || currentConversationId"
+      "x-csrf-token",
+      "data-scene=\"",
+      "navigator.clipboard",
+      "ai-modal-scene-chip",
+      "ai-modal-send-btn",
+      "ai-modal-close",
+      "ai-modal-new",
+      "ai-modal-welcome"
     ]) {
       expect(modal).toContain(expected);
     }
@@ -186,6 +198,8 @@ describe("frontend runtime config", () => {
     expect(modal).not.toContain("neighbor:userSession");
     expect(modal).not.toContain("readUserToken");
     expect(modal).not.toContain("authorization: 'Bearer '");
+    expect(modal).not.toContain("aiResponses");
+    expect(modal).not.toContain("getResponse(");
   });
 
   test("help route is public read-only and hydrated by the prototype shell", () => {

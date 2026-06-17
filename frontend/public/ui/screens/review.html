@@ -142,9 +142,9 @@
   <div class="target-card">
     <div class="target-label">评价对象</div>
     <div class="avatar lg" style="background:oklch(50% 0.12 255);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:24px;font-weight:700;width:64px;height:64px;">刘</div>
-    <div style="font-weight:700;font-size:18px;margin-top:var(--space-sm);">刘奶奶</div>
+    <div style="font-weight:700;font-size:18px;margin-top:var(--space-sm);">用户戊</div>
     <div style="font-size:12px;color:var(--reward-gold);margin-top:2px;">★★★★☆ 4.6</div>
-    <div class="target-order">订单 #ORD-240603-042 · 帮李阿姨代购日用品</div>
+    <div class="target-order">订单 #ORD-LIVE603-042 · 帮用户乙代购日用品</div>
   </div>
 
   <!-- Star rating -->
@@ -269,7 +269,7 @@
       body.innerHTML = '<div class="success-card">' +
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>' +
         '<h3>评价提交成功！</h3>' +
-        '<p>你对刘奶奶的服务给出了 ' + rating + ' 星评价。<br>对方评价后你将看到完整互评结果。</p>' +
+        '<p>你对用户戊的服务给出了 ' + rating + ' 星评价。<br>对方评价后你将看到完整互评结果。</p>' +
         '<div style="margin-top:var(--space-xl);">' +
           '<button class="btn btn--primary" onclick="location.href=\'orders.html\'">返回我的订单</button>' +
         '</div>' +
@@ -302,8 +302,6 @@
 </nav>
 
 <script src="/assets/app/jury-nav.js"></script>
-<script>
-(function(){"use strict";function t(){var u=window.__API_BASE_URL__||"";if(!u){if(!t._r)t._r=0;if(t._r++<20)setTimeout(t,500);return}fetch(u+"/api/auth/me",{credentials:"include"}).then(function(r){return r.ok?r.json():null}).then(function(d){if(d&&d.user&&d.user.isJury)n()}).catch(function(){})}function n(){var v=document.querySelector(".bottom-nav");if(!v||document.querySelector(".jlink"))return;var a=document.createElement("a");a.href="/jury";a.className="jlink";a.innerHTML="<svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>陪审";v.insertBefore(a,v.lastElementChild)}setTimeout(t,800)})();
-</script>
+
 </body>
 </html>

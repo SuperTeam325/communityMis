@@ -366,22 +366,20 @@
   .ai-fab {
     position: fixed; right: var(--space-xl); bottom: calc(var(--space-xl) + var(--bottom-nav-height, 0px));
     z-index: 600; width: 56px; height: 56px; border-radius: var(--radius-full);
-    background: var(--accent); color: var(--surface); border: none; cursor: pointer;
+    background: var(--ai-icon-red, #b43b38); color: #fff; border: 2px solid var(--ai-icon-ring, #bdeff6); cursor: pointer;
+    box-sizing: border-box;
     display: grid; place-items: center;
-    box-shadow: 0 4px 16px color-mix(in oklch, var(--accent) 35%, transparent), 0 1px 3px color-mix(in oklch, var(--accent) 20%, transparent);
-    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: var(--ai-icon-shadow, 0 8px 22px rgba(67, 118, 128, 0.18));
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
   }
   .ai-fab:hover {
-    transform: scale(1.1) rotate(-5deg);
-    box-shadow: 0 8px 28px color-mix(in oklch, var(--accent) 45%, transparent), 0 2px 6px color-mix(in oklch, var(--accent) 25%, transparent);
+    transform: scale(1.06);
+    box-shadow: 0 10px 28px rgba(67, 118, 128, 0.24);
   }
   .ai-fab:active { transform: scale(0.95); }
   .fab-pulse {
-    position: absolute; inset: -4px; border-radius: inherit;
-    border: 2px solid var(--accent); opacity: 0;
-    animation: pulse-glow 2.5s ease-in-out infinite;
+    display: none;
   }
-
   /* ===== 底部导航 ===== */
   .bottom-nav {
     transition: all 0.3s ease;
@@ -527,7 +525,7 @@
       <div class="review-top">
         <div class="review-avatar" style="background:oklch(65% 0.08 175);">赵</div>
         <div style="flex:1;">
-          <div class="review-name">赵姐</div>
+          <div class="review-name">用户己</div>
           <div class="review-time">3 天前 · 订单「帮忙遛狗 30 分钟」</div>
         </div>
       </div>
@@ -546,7 +544,7 @@
       <div class="review-top">
         <div class="review-avatar" style="background:oklch(60% 0.08 50);">刘</div>
         <div style="flex:1;">
-          <div class="review-name">刘奶奶</div>
+          <div class="review-name">用户戊</div>
           <div class="review-time">1 周前 · 订单「帮忙去超市代购日用品」</div>
         </div>
       </div>
@@ -582,7 +580,7 @@
       <div class="review-top">
         <div class="review-avatar" style="background:oklch(70% 0.08 28);">李</div>
         <div style="flex:1;">
-          <div class="review-name">李阿姨</div>
+          <div class="review-name">用户乙</div>
           <div class="review-time">1 个月前 · 订单「丰巢取件送到 5 号楼」</div>
         </div>
       </div>
@@ -641,7 +639,7 @@
 </div>
 
 <!-- AI FAB -->
-<button class="ai-fab" aria-label="AI 助手" onclick="openAIModal('all')">
+<button class="ai-fab" aria-label="AI 助手" data-ai-modal-scene="all">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
   <span class="fab-pulse"></span>
 </button>
@@ -691,8 +689,6 @@
   });
 </script>
 <script src="/assets/app/jury-nav.js"></script>
-<script>
-(function(){"use strict";function t(){var u=window.__API_BASE_URL__||"";if(!u){if(!t._r)t._r=0;if(t._r++<20)setTimeout(t,500);return}fetch(u+"/api/auth/me",{credentials:"include"}).then(function(r){return r.ok?r.json():null}).then(function(d){if(d&&d.user&&d.user.isJury)n()}).catch(function(){})}function n(){var v=document.querySelector(".bottom-nav");if(!v||document.querySelector(".jlink"))return;var a=document.createElement("a");a.href="/jury";a.className="jlink";a.innerHTML="<svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>陪审";v.insertBefore(a,v.lastElementChild)}setTimeout(t,800)})();
-</script>
+
 </body>
 </html>

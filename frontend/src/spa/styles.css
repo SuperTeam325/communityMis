@@ -436,7 +436,6 @@ textarea {
 }
 
 .chat-copy-btn:hover {
-  color: var(--accent);
   border-color: var(--accent-light);
   background: var(--accent-subtle);
 }

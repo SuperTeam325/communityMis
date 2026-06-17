@@ -241,23 +241,20 @@
   .ai-fab {
     position: fixed; right: 20px; bottom: calc(80px + env(safe-area-inset-bottom));
     width: 56px; height: 56px; border-radius: 50%;
-    background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-    color: #fff; border: none; cursor: pointer;
+    background: var(--ai-icon-red, #b43b38);
+    color: #fff; border: 2px solid var(--ai-icon-ring, #bdeff6); cursor: pointer;
+    box-sizing: border-box;
     display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.35);
-    z-index: 90; transition: transform 0.3s, box-shadow 0.3s;
+    box-shadow: var(--ai-icon-shadow, 0 8px 22px rgba(67, 118, 128, 0.18));
+    z-index: 90; transition: transform 0.2s ease, box-shadow 0.2s ease;
   }
   .ai-fab:hover {
-    transform: scale(1.1) rotate(15deg);
-    box-shadow: 0 6px 28px rgba(99, 102, 241, 0.45);
+    transform: scale(1.06);
+    box-shadow: 0 10px 28px rgba(67, 118, 128, 0.24);
   }
   .ai-fab svg { width: 24px; height: 24px; }
   .fab-pulse {
-    position: absolute; inset: -4px;
-    border-radius: 50%;
-    border: 2px solid var(--accent);
-    opacity: 0;
-    animation: fabPulse 2s ease-out infinite;
+    display: none;
   }
   @keyframes fabPulse {
     0% { transform: scale(1); opacity: 0.6; }
@@ -409,6 +406,18 @@
     });
   });
 
+  // Header 滚动阴影
+  const header = document.getElementById('feedHeader');
+  window.addEventListener('scroll', () => {
+    if (window.scrollY > 10) {
+      header.classList.add('scrolled');
+    } else {
+      header.classList.remove('scrolled');
+    }
+  });
+</script>
 <script type="module" src="/assets/app/main.mjs"></script>
+<script src="/assets/app/jury-nav.js"></script>
+
 </body>
 </html>

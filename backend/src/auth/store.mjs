@@ -880,7 +880,7 @@ export function createMemoryAuthStore(options = {}) {
     if (!["payer", "provider"].includes(actorRole)) {
       throw storeError("ORDER_FORBIDDEN", "Actor is not part of this order.");
     }
-    if (!["accepted", "payer_confirmed", "both_confirmed", "provider_confirmed"].includes(order.status)) {
+    if (!["accepted", "payer_confirmed", "provider_confirmed"].includes(order.status)) {
       throw storeError("ORDER_STATUS_NOT_CONFIRMABLE", "Only accepted orders can be confirmed.");
     }
 
@@ -888,7 +888,11 @@ export function createMemoryAuthStore(options = {}) {
     const confirmationChanged = actorRole === "payer" ? !order.payerConfirmed : !order.providerConfirmed;
     const nextPayerConfirmed = actorRole === "payer" ? true : order.payerConfirmed;
     const nextProviderConfirmed = actorRole === "provider" ? true : order.providerConfirmed;
-    const shouldSettle = nextPayerConfirmed && nextProviderConfirmed;
+    const shouldSettle = confirmationChanged && nextPayerConfirmed && nextProviderConfirmed;
+
+    if (!confirmationChanged) {
+      return clone(order);
+    }
 
     const previousOrder = clone(order);
     const previousRequest = clone(request);
@@ -920,7 +924,7 @@ export function createMemoryAuthStore(options = {}) {
         request.updatedAt = now;
       } else if (order.providerConfirmed && !order.payerConfirmed) {
         order.status = "provider_confirmed";
-      } else if (order.payerConfirmed) {
+      } else if (order.payerConfirmed && !order.providerConfirmed) {
         order.status = "payer_confirmed";
       } else {
         order.status = "accepted";
