@@ -186,10 +186,12 @@
         display: flex; align-items: center; gap: 12px;
       }
       .ai-modal-avatar {
-        width: 40px; height: 40px; border-radius: 12px;
-        background: linear-gradient(135deg, var(--accent, #6366f1), var(--accent-hover, #4f46e5));
+        width: 40px; height: 40px; border-radius: 50%;
+        background: #b43b38;
+        border: 2px solid #bdeff6;
+        box-sizing: border-box;
         display: grid; place-items: center;
-        color: #fff; box-shadow: 0 4px 12px rgba(99,102,241,0.25);
+        color: #fff; box-shadow: 0 6px 18px rgba(67,118,128,0.18);
       }
       .ai-modal-title {
         font-size: 16px; font-weight: 700; color: var(--fg, #0f172a);
@@ -255,11 +257,14 @@
         animation: fadeInUp 0.5s ease;
       }
       .welcome-icon {
-        width: 56px; height: 56px; border-radius: 16px;
-        background: linear-gradient(135deg, var(--accent, #6366f1), var(--accent-hover, #4f46e5));
+        width: 56px; height: 56px; border-radius: 50%;
+        background: #b43b38;
+        border: 3px solid #bdeff6;
+        box-sizing: border-box;
         display: grid; place-items: center;
         color: #fff;
         margin: 0 auto 16px;
+        box-shadow: 0 8px 22px rgba(67,118,128,0.18);
       }
       .ai-modal-welcome h2 {
         font-size: 18px; font-weight: 700; color: var(--fg, #0f172a);
@@ -312,7 +317,9 @@
         display: grid; place-items: center; flex-shrink: 0;
       }
       .ai-modal-msg.assistant .ai-modal-msg-avatar {
-        background: linear-gradient(135deg, var(--accent, #6366f1), var(--accent-hover, #4f46e5));
+        background: #b43b38;
+        border: 1.5px solid #bdeff6;
+        box-sizing: border-box;
         color: #fff;
       }
       .ai-modal-msg.user .ai-modal-msg-avatar {

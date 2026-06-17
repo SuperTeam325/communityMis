@@ -88,17 +88,19 @@
     flex: 1; display: flex; align-items: center; gap: var(--space-sm);
   }
   .ai-header .ai-avatar {
-    width: 36px; height: 36px; border-radius: var(--radius-md);
-    background: linear-gradient(135deg, var(--secondary), oklch(62% 0.12 200));
+    width: 36px; height: 36px; border-radius: var(--radius-full);
+    background: #b43b38;
+    border: 2px solid #bdeff6;
+    box-sizing: border-box;
     display: flex; align-items: center; justify-content: center;
     color: #fff; font-size: 14px;
-    box-shadow: 0 2px 8px oklch(52% 0.12 175 / 0.25);
+    box-shadow: 0 6px 18px rgba(67, 118, 128, 0.18);
     transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     animation: avatarPop 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
   }
   .ai-header .ai-avatar:hover {
     transform: scale(1.1) rotate(-5deg);
-    box-shadow: 0 4px 14px oklch(52% 0.12 175 / 0.35);
+    box-shadow: 0 8px 24px rgba(67, 118, 128, 0.24);
   }
   .ai-header .ai-title {
     font-family: var(--font-display); font-size: 19px; font-weight: 700;
@@ -187,17 +189,19 @@
     animation: scaleIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both;
   }
   .ai-welcome .welcome-icon {
-    width: 72px; height: 72px; border-radius: var(--radius-xl);
-    background: linear-gradient(135deg, var(--secondary), oklch(62% 0.12 200));
+    width: 72px; height: 72px; border-radius: var(--radius-full);
+    background: #b43b38;
+    border: 3px solid #bdeff6;
+    box-sizing: border-box;
     display: flex; align-items: center; justify-content: center;
     margin: 0 auto var(--space-xl); color: #fff;
-    box-shadow: 0 6px 24px oklch(52% 0.12 175 / 0.3);
+    box-shadow: 0 8px 24px rgba(67, 118, 128, 0.18);
     transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
     animation: float 5s ease-in-out infinite;
   }
   .ai-welcome .welcome-icon:hover {
     transform: scale(1.1) rotate(-5deg);
-    box-shadow: 0 10px 32px oklch(52% 0.12 175 / 0.4);
+    box-shadow: 0 12px 32px rgba(67, 118, 128, 0.24);
   }
   .ai-welcome .welcome-icon svg { width: 36px; height: 36px; transition: transform 0.3s ease; }
   .ai-welcome .welcome-icon:hover svg { transform: scale(1.15); }
@@ -273,7 +277,10 @@
     background: oklch(60% 0.12 28);
   }
   .ai-msg.assistant .msg-avatar {
-    background: linear-gradient(135deg, var(--secondary), oklch(62% 0.12 200));
+    background: #b43b38;
+    border: 1.5px solid #bdeff6;
+    border-radius: var(--radius-full);
+    box-sizing: border-box;
   }
   .ai-msg:hover .msg-avatar { transform: scale(1.08); }
   .ai-msg .msg-bubble {
@@ -690,7 +697,7 @@
 
 <!-- Input bar -->
 <div class="ai-input-bar">
-  <textarea id="ai-input" rows="1" placeholder="输入你的问题…" oninput="autoResize(this);"></textarea>
+  <textarea id="ai-input" rows="1" placeholder="输入你的问题…"></textarea>
   <button class="send-btn" id="send-btn" aria-label="发送">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polyline points="22 2 15 22 11 13 2 9 22 2"/></svg>
   </button>
@@ -706,68 +713,21 @@
     </button>
   </div>
   <div class="hist-list">
-    <div class="hist-item" data-runtime-placeholder>
-      <div class="hist-title">正在加载历史对话</div>
-      <div class="hist-time">请稍候</div>
+    <div class="hist-item" data-conv="1">
+      <div class="hist-title">筛选高信用电脑维修需求</div>
+      <div class="hist-time">今天 14:20</div>
     </div>
-  </div></div>
+    <div class="hist-item" data-conv="2">
+      <div class="hist-title">发布代取快递任务的描述怎么写</div>
+      <div class="hist-time">昨天 10:15</div>
+    </div>
+    <div class="hist-item" data-conv="3">
+      <div class="hist-title">如何发起纠纷流程咨询</div>
+      <div class="hist-time">2 天前</div>
+    </div>
+  </div>
+</div>
 
-<script>
-  function autoResize(el) {
-    el.style.height = '';
-    el.style.height = Math.min(el.scrollHeight, 100) + 'px';
-  }
-  window.autoResize = autoResize;
-
-  document.querySelectorAll('.scene-chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      document.querySelectorAll('.scene-chip').forEach(c => c.classList.remove('active'));
-      chip.classList.add('active');
-      const placeholders = {
-        all: '输入你的问题…',
-        filter: '描述你想找的真实需求…',
-        publish: '简单描述你要发布的内容…',
-        rules: '询问平台规则…',
-        summary: '选择一个订单或纠纷，我将为你生成摘要…'
-      };
-      const input = document.getElementById('ai-input');
-      input.placeholder = placeholders[chip.dataset.scene] || placeholders.all;
-      input.focus();
-    });
-  });
-
-  document.getElementById('new-chat-btn')?.addEventListener('click', () => {
-    document.getElementById('chat-area').innerHTML = `
-      <div class="ai-welcome" id="welcome-section">
-        <div class="welcome-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82"/><path d="M4.6 9a1.65 1.65 0 0 0-.33-1.82"/></svg>
-        </div>
-        <h2>你好，我是邻帮 AI 助手</h2>
-        <p>我可以帮你查找服务、解答规则、筛选需求，以及辅助发布内容。我不能替你做关键操作，最终决定权在你手中。</p>
-        <div class="suggested-qs">
-          <div class="sq-label">试试问我</div>
-          <div class="sq-grid">
-            <button class="sq-btn" data-question="帮我筛选近期发布且信用较高的需求"><span class="sq-text">帮我筛选近期发布且信用较高的需求</span></button>
-            <button class="sq-btn" data-question="如何发起纠纷？需要什么条件？"><span class="sq-text">如何发起纠纷？需要什么条件？</span></button>
-            <button class="sq-btn" data-question="我的时间币为什么被冻结了？"><span class="sq-text">我的时间币为什么被冻结了？</span></button>
-            <button class="sq-btn" data-question="帮我写一段发布任务的描述"><span class="sq-text">帮我写一段发布任务的描述</span></button>
-          </div>
-        </div>
-      </div>`;
-  });
-
-  const histPanel = document.getElementById('hist-panel');
-  const histOverlay = document.getElementById('hist-overlay');
-  document.getElementById('hist-btn')?.addEventListener('click', () => {
-    histPanel?.classList.add('open');
-    histOverlay?.classList.add('open');
-  });
-  function closeHist() {
-    histPanel?.classList.remove('open');
-    histOverlay?.classList.remove('open');
-  }
-  document.getElementById('close-hist-btn')?.addEventListener('click', closeHist);
-  histOverlay?.addEventListener('click', closeHist);
-</script>
+<script src="../js/ai-assistant-page.js"></script>
 </body>
 </html>

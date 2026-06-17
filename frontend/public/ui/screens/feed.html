@@ -241,23 +241,20 @@
   .ai-fab {
     position: fixed; right: 20px; bottom: calc(80px + env(safe-area-inset-bottom));
     width: 56px; height: 56px; border-radius: 50%;
-    background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-    color: #fff; border: none; cursor: pointer;
+    background: var(--ai-icon-red, #b43b38);
+    color: #fff; border: 2px solid var(--ai-icon-ring, #bdeff6); cursor: pointer;
+    box-sizing: border-box;
     display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.35);
-    z-index: 90; transition: transform 0.3s, box-shadow 0.3s;
+    box-shadow: var(--ai-icon-shadow, 0 8px 22px rgba(67, 118, 128, 0.18));
+    z-index: 90; transition: transform 0.2s ease, box-shadow 0.2s ease;
   }
   .ai-fab:hover {
-    transform: scale(1.1) rotate(15deg);
-    box-shadow: 0 6px 28px rgba(99, 102, 241, 0.45);
+    transform: scale(1.06);
+    box-shadow: 0 10px 28px rgba(67, 118, 128, 0.24);
   }
   .ai-fab svg { width: 24px; height: 24px; }
   .fab-pulse {
-    position: absolute; inset: -4px;
-    border-radius: 50%;
-    border: 2px solid var(--accent);
-    opacity: 0;
-    animation: fabPulse 2s ease-out infinite;
+    display: none;
   }
   @keyframes fabPulse {
     0% { transform: scale(1); opacity: 0.6; }
@@ -329,7 +326,7 @@
 </div>
 
 <!-- AI 助手 FAB -->
-<button class="ai-fab" aria-label="AI 助手" onclick="openAIModal('all')">
+<button class="ai-fab" aria-label="AI 助手" data-ai-modal-scene="all">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
   <span class="fab-pulse"></span>
 </button>

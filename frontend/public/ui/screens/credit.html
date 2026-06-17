@@ -366,22 +366,20 @@
   .ai-fab {
     position: fixed; right: var(--space-xl); bottom: calc(var(--space-xl) + var(--bottom-nav-height, 0px));
     z-index: 600; width: 56px; height: 56px; border-radius: var(--radius-full);
-    background: var(--accent); color: var(--surface); border: none; cursor: pointer;
+    background: var(--ai-icon-red, #b43b38); color: #fff; border: 2px solid var(--ai-icon-ring, #bdeff6); cursor: pointer;
+    box-sizing: border-box;
     display: grid; place-items: center;
-    box-shadow: 0 4px 16px color-mix(in oklch, var(--accent) 35%, transparent), 0 1px 3px color-mix(in oklch, var(--accent) 20%, transparent);
-    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: var(--ai-icon-shadow, 0 8px 22px rgba(67, 118, 128, 0.18));
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
   }
   .ai-fab:hover {
-    transform: scale(1.1) rotate(-5deg);
-    box-shadow: 0 8px 28px color-mix(in oklch, var(--accent) 45%, transparent), 0 2px 6px color-mix(in oklch, var(--accent) 25%, transparent);
+    transform: scale(1.06);
+    box-shadow: 0 10px 28px rgba(67, 118, 128, 0.24);
   }
   .ai-fab:active { transform: scale(0.95); }
   .fab-pulse {
-    position: absolute; inset: -4px; border-radius: inherit;
-    border: 2px solid var(--accent); opacity: 0;
-    animation: pulse-glow 2.5s ease-in-out infinite;
+    display: none;
   }
-
   /* ===== 底部导航 ===== */
   .bottom-nav {
     transition: all 0.3s ease;
@@ -531,7 +529,7 @@
 </div>
 
 <!-- AI FAB -->
-<button class="ai-fab" aria-label="AI 助手" onclick="openAIModal('all')">
+<button class="ai-fab" aria-label="AI 助手" data-ai-modal-scene="all">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
   <span class="fab-pulse"></span>
 </button>
