@@ -621,6 +621,33 @@ textarea:focus-visible {
   border-radius: 8px;
 }
 
+.attachment-preview-list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.attachment-preview-list--compact .attachment-preview {
+  width: 72px;
+  height: 54px;
+}
+
+.attachment-preview {
+  width: 112px;
+  height: 84px;
+  overflow: hidden;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.attachment-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .admin-layout {
   min-height: 100dvh;
   display: grid;

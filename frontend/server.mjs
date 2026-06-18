@@ -191,8 +191,9 @@ function securityHeaders(runtime) {
   };
 }
 
-function contentSecurityPolicy(config) {
+export function contentSecurityPolicy(config) {
   const connectSources = ["'self'", originOrSelf(config.apiBaseUrl)];
+  const imageSources = ["'self'", "data:", "blob:", originOrSelf(config.apiBaseUrl)];
   if (config.sentryIngestOrigin) {
     connectSources.push(originOrSelf(config.sentryIngestOrigin));
   }
@@ -202,7 +203,7 @@ function contentSecurityPolicy(config) {
     "object-src 'none'",
     "frame-ancestors 'none'",
     "form-action 'self'",
-    "img-src 'self' data: blob:",
+    `img-src ${Array.from(new Set(imageSources)).join(" ")}`,
     "font-src 'self' data:",
     "script-src 'self'",
     "style-src 'self' 'unsafe-inline'",

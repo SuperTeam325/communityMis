@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import type { ApiClient } from "../api";
 import {
+  AttachmentPreviewList,
   asArray,
   asRecord,
   Badge,
@@ -90,6 +91,7 @@ export function FeedPage({ api }: { api: ApiClient }) {
                 <Badge tone={statusTone(item.status)}>{statusLabel(item.status)}</Badge>
               </div>
               <p>{text(item.descriptionSummary || item.description || item.content)}</p>
+              <AttachmentPreviewList attachments={asArray<Record<string, unknown>>(item.attachments, "")} api={api} compact />
               <div className="meta-row">
                 <span>{text((item.category as Record<string, unknown>)?.name ?? item.categoryName)}</span>
                 <span>{text(item.coinAmount ?? item.rewardAmount ?? item.reward)} 时间币</span>

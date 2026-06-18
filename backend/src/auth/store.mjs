@@ -4321,10 +4321,38 @@ function normalizeServiceRequest(input) {
     coinAmount: Number(input.coinAmount ?? input.coin_amount ?? 0),
     status: String(input.status ?? "open"),
     tags: normalizeTextList(input.tags),
+    attachments: normalizeFileAttachments(input.attachments),
     visible: input.visible !== false && input.visible !== 0,
     createdAt: input.createdAt ?? now,
     updatedAt: input.updatedAt ?? input.createdAt ?? now
   };
+}
+
+function normalizeFileAttachments(value) {
+  const list = Array.isArray(value) ? value : value ? [value] : [];
+  return list.map((item) => {
+    if (!item || typeof item !== "object") {
+      const name = normalizeOptionalString(item);
+      return name ? { name, type: "file", size: 0, url: null } : null;
+    }
+    const fileId = normalizeOptionalString(item.fileId ?? item.file_id);
+    const name = normalizeOptionalString(item.name ?? item.originalName ?? item.original_name ?? item.filename ?? item.fileName) ?? fileId;
+    if (!name && !fileId) {
+      return null;
+    }
+    const mimeType = normalizeOptionalString(item.mimeType ?? item.mime_type ?? item.type);
+    const size = Number(item.size ?? item.sizeBytes ?? item.size_bytes ?? 0);
+    return {
+      fileId,
+      name,
+      originalName: normalizeOptionalString(item.originalName ?? item.original_name) ?? name,
+      type: normalizeOptionalString(item.type) ?? mimeType ?? "file",
+      mimeType,
+      size: Number.isFinite(size) ? Math.max(0, Math.round(size)) : 0,
+      sizeBytes: Number.isFinite(size) ? Math.max(0, Math.round(size)) : 0,
+      url: normalizeOptionalString(item.url ?? item.fileUrl ?? item.file_url) ?? (fileId ? `/api/files/${encodeURIComponent(fileId)}` : null)
+    };
+  }).filter(Boolean).slice(0, 8);
 }
 
 function normalizeServiceOrder(input) {

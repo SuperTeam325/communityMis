@@ -1,7 +1,9 @@
 import React from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { ApiClient } from "../api";
+import { fileAssetUrl } from "../avatar";
 import {
+  AttachmentPreviewList,
   asArray,
   asRecord,
   Badge,
@@ -33,6 +35,17 @@ const REQUEST_SORTS = [
   ["hours_asc", "耗时少"],
   ["credit_desc", "信誉高"]
 ] as const;
+
+type UploadedAttachment = {
+  fileId: string;
+  name: string;
+  originalName?: string;
+  mimeType?: string;
+  type?: string;
+  size?: number;
+  sizeBytes?: number;
+  url?: string;
+};
 
 export function TasksPage({ api }: { api: ApiClient }) {
   const { params, setParams } = useQueryParams();
@@ -103,7 +116,7 @@ export function TasksPage({ api }: { api: ApiClient }) {
       <StateView loading={state.loading} error={state.error} empty={requests.length === 0}>
         <div className="card-list">
           {requests.map((item) => (
-            <RequestCard key={text(item.requestId)} item={item} />
+            <RequestCard key={text(item.requestId)} item={item} api={api} />
           ))}
         </div>
       </StateView>
@@ -122,7 +135,7 @@ export function PostPage({ api }: { api: ApiClient }) {
   const categories = asArray<Record<string, unknown>>(categoriesState.data, "categories");
   const tags = asArray<Record<string, unknown>>(tagsState.data, "tags");
   const [draft, setDraft] = React.useState(initialDraft);
-  const [files, setFiles] = React.useState<Array<{ fileId: string; name: string }>>([]);
+  const [files, setFiles] = React.useState<UploadedAttachment[]>([]);
   const [selectedTags, setSelectedTags] = React.useState<string[]>([]);
   const [draftBusy, setDraftBusy] = React.useState(false);
   const [draftError, setDraftError] = React.useState("");
@@ -153,7 +166,7 @@ export function PostPage({ api }: { api: ApiClient }) {
             coinAmount: Number(form.get("coinAmount") || 0),
             location: form.get("location"),
             tags: selectedTags.length > 0 ? selectedTags : String(form.get("tags") ?? "").split(/[，,]/).map((item) => item.trim()).filter(Boolean),
-            attachments: files.map((file) => ({ fileId: file.fileId, name: file.name }))
+            attachments: files.map(attachmentPayload)
           });
           const request = asRecord(payload.request ?? payload);
           const requestId = text(request.requestId ?? payload.requestId, "");
@@ -216,11 +229,22 @@ export function PostPage({ api }: { api: ApiClient }) {
         </div>
         <FileUpload purpose="request-image" businessType="request" visibility="public" onUploaded={async (formData) => {
           const result = await api.files.upload(formData);
-          const file = asRecord(result.file);
+          const file = asRecord(result.file ?? result);
           const fileId = text(file.fileId ?? result.fileId, "");
-          if (fileId) setFiles((current) => [...current, { fileId, name: text(file.originalName ?? file.filename ?? file.name, fileId) }]);
+          if (fileId) {
+            setFiles((current) => [...current, {
+              fileId,
+              name: text(file.originalName ?? file.filename ?? file.name, fileId),
+              originalName: text(file.originalName ?? file.filename ?? file.name, ""),
+              mimeType: text(file.mimeType, ""),
+              type: text(file.mimeType, "file"),
+              size: Number(file.size ?? file.sizeBytes ?? 0),
+              sizeBytes: Number(file.sizeBytes ?? file.size ?? 0),
+              url: fileAssetUrl({ ...file, fileId }, api)
+            }]);
+          }
         }} />
-        {files.length ? <p className="muted">已上传 {files.map((file) => file.name).join("、")}</p> : null}
+        <AttachmentPreviewList attachments={files} api={api} />
         {draftError || mutation.error ? <p className="field-error" role="alert">{draftError || mutation.error}</p> : null}
         <button id="submit-btn" className="btn btn--primary" disabled={mutation.busy}>{mutation.busy ? "发布中..." : "发布需求"}</button>
       </form>
@@ -281,6 +305,7 @@ export function RequestDetailPage({ api }: { api: ApiClient }) {
             <Badge tone={statusTone(request.status)}>{statusLabel(request.status)}</Badge>
           </div>
           <p>{text(request.description || request.content)}</p>
+          <AttachmentPreviewList attachments={asArray<Record<string, unknown>>(request.attachments, "")} api={api} />
           <div className="metric-grid">
             <div className="metric-card"><span>时间币</span><strong>{text(request.coinAmount)}</strong></div>
             <div className="metric-card"><span>预计耗时</span><strong>{text(request.estimatedHours)} 小时</strong></div>
@@ -345,7 +370,7 @@ export function RequestDetailPage({ api }: { api: ApiClient }) {
   );
 }
 
-function RequestCard({ item }: { item: Record<string, unknown> }) {
+function RequestCard({ item, api }: { item: Record<string, unknown>; api: ApiClient }) {
   const category = asRecord(item.category);
   const publisher = asRecord(item.publisher);
   const credit = asRecord(item.creditSummary);
@@ -356,6 +381,7 @@ function RequestCard({ item }: { item: Record<string, unknown> }) {
         <Badge tone={statusTone(item.status)}>{statusLabel(item.status)}</Badge>
       </div>
       <p>{text(item.descriptionSummary || item.description || item.content)}</p>
+      <AttachmentPreviewList attachments={asArray<Record<string, unknown>>(item.attachments, "")} api={api} compact />
       <div className="meta-row">
         <span>{text(category.name)}</span>
         <span>{text(item.coinAmount)} 时间币</span>
@@ -370,4 +396,17 @@ function RequestCard({ item }: { item: Record<string, unknown> }) {
       <div className="action-row"><Link className="btn btn--secondary" to={`/posts/${text(item.requestId)}`}>查看详情</Link></div>
     </article>
   );
+}
+
+function attachmentPayload(file: UploadedAttachment) {
+  return {
+    fileId: file.fileId,
+    name: file.name,
+    originalName: file.originalName || file.name,
+    mimeType: file.mimeType || file.type || "file",
+    type: file.type || file.mimeType || "file",
+    size: Number(file.size ?? file.sizeBytes ?? 0),
+    sizeBytes: Number(file.sizeBytes ?? file.size ?? 0),
+    url: file.url
+  };
 }

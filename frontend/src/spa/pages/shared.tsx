@@ -1,5 +1,7 @@
 import React from "react";
+import type { ApiClient } from "../api";
 import { ApiError } from "../api";
+import { fileAssetUrl, isImageAsset } from "../avatar";
 
 export function useAsync<T>(loader: (signal?: AbortSignal) => Promise<T>, deps: React.DependencyList = []) {
   const [data, setData] = React.useState<T | null>(null);
@@ -97,6 +99,30 @@ export function Field({ label, children }: { label: string; children: React.Reac
 
 export function Badge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: string }) {
   return <span className={`badge-state badge-state--${tone}`}>{children}</span>;
+}
+
+export function AttachmentPreviewList({ attachments, api, compact = false }: {
+  attachments: Record<string, unknown>[];
+  api: Pick<ApiClient, "files">;
+  compact?: boolean;
+}) {
+  if (attachments.length === 0) return null;
+  return (
+    <div className={`attachment-preview-list${compact ? " attachment-preview-list--compact" : ""}`}>
+      {attachments.map((file, index) => {
+        const name = text(file.name ?? file.originalName ?? file.fileId ?? index);
+        const url = fileAssetUrl(file, api);
+        if (url && isImageAsset(file)) {
+          return (
+            <a className="attachment-preview" href={url} target="_blank" rel="noreferrer" key={text(file.fileId ?? file.url ?? name ?? index)}>
+              <img src={url} alt={name} />
+            </a>
+          );
+        }
+        return <Badge key={text(file.fileId ?? file.url ?? name ?? index)}>{name}</Badge>;
+      })}
+    </div>
+  );
 }
 
 export function FileUpload({ purpose, businessType, businessId, visibility, onUploaded }: {

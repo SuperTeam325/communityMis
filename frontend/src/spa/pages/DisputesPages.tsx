@@ -1,7 +1,9 @@
 import React from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { ApiClient } from "../api";
+import { fileAssetUrl } from "../avatar";
 import {
+  AttachmentPreviewList,
   Badge,
   FileUpload,
   Field,
@@ -113,14 +115,10 @@ export function DisputeCreatePage({ api }: { api: ApiClient }) {
         <Field label="初始证据说明"><textarea name="evidenceContent" rows={3} placeholder="补充聊天记录、完成情况或现场说明" /></Field>
         <FileUpload purpose="dispute-evidence" businessType="dispute" visibility="private" onUploaded={async (formData) => {
           const result = await api.files.upload(formData);
-          const attachment = attachmentFromUpload(result);
+          const attachment = attachmentFromUpload(result, api);
           if (attachment) setAttachments((current) => [...current, attachment]);
         }} />
-        {attachments.length > 0 ? (
-          <div className="meta-row">
-            {attachments.map((item) => <Badge key={text(item.fileId ?? item.name)}>{item.name}</Badge>)}
-          </div>
-        ) : null}
+        <AttachmentPreviewList attachments={attachments} api={api} />
         {error ? <p className="field-error" role="alert">{error}</p> : null}
         <button className="btn btn--primary" disabled={busy}>{busy ? "提交中..." : "提交纠纷"}</button>
       </form>
@@ -170,7 +168,7 @@ export function DisputeDetailPage({ api }: { api: ApiClient }) {
           </div>
           <FreezePanel freeze={asRecord(dispute.freeze)} />
           <ProgressPanel progress={asRecord(dispute.progress)} />
-          <EvidenceList evidence={asArray<Record<string, unknown>>(dispute.evidence, "")} />
+          <EvidenceList evidence={asArray<Record<string, unknown>>(dispute.evidence, "")} api={api} />
           <JuryResultPanel juryResult={juryResult} />
           <EvidenceForm api={api} disputeId={id} onSubmitted={state.reload} />
         </article>
@@ -267,7 +265,7 @@ export function JuryVotingPage({ api }: { api: ApiClient }) {
             <PartyPanel title="需求方主张" party={asRecord(dispute.publisher ?? dispute.initiator)} />
             <PartyPanel title="服务方主张" party={asRecord(dispute.provider ?? dispute.respondent)} />
           </div>
-          <EvidenceList evidence={asArray<Record<string, unknown>>(dispute.evidence, "")} />
+          <EvidenceList evidence={asArray<Record<string, unknown>>(dispute.evidence, "")} api={api} />
           <JuryResultPanel juryResult={juryResult} />
           <section className="nested-panel panel">
             <h3>投票意见</h3>
@@ -330,12 +328,10 @@ function EvidenceForm({ api, disputeId, onSubmitted }: { api: ApiClient; dispute
         <Field label="证据说明"><textarea name="content" rows={3} placeholder="说明补充证据与纠纷的关联" /></Field>
         <FileUpload purpose="dispute-evidence" businessType="dispute" businessId={disputeId} visibility="private" onUploaded={async (formData) => {
           const result = await api.files.upload(formData);
-          const attachment = attachmentFromUpload(result);
+          const attachment = attachmentFromUpload(result, api);
           if (attachment) setAttachments((current) => [...current, attachment]);
         }} />
-        {attachments.length > 0 ? (
-          <div className="meta-row">{attachments.map((item) => <Badge key={text(item.fileId ?? item.name)}>{item.name}</Badge>)}</div>
-        ) : null}
+        <AttachmentPreviewList attachments={attachments} api={api} />
         {mutation.error ? <p className="field-error" role="alert">{mutation.error}</p> : null}
         <button className="btn btn--primary" disabled={mutation.busy}>{mutation.busy ? "提交中..." : "提交证据"}</button>
       </form>
@@ -400,7 +396,7 @@ function Timeline({ items }: { items: Record<string, unknown>[] }) {
   );
 }
 
-function EvidenceList({ evidence }: { evidence: Record<string, unknown>[] }) {
+function EvidenceList({ evidence, api }: { evidence: Record<string, unknown>[]; api: ApiClient }) {
   return (
     <section className="nested-panel panel">
       <h3>证据列表</h3>
@@ -417,9 +413,7 @@ function EvidenceList({ evidence }: { evidence: Record<string, unknown>[] }) {
                 </div>
                 <p>{text(item.content, "未填写文字说明")}</p>
                 <p className="muted">提交人: {text(uploader.displayName ?? uploader.username ?? item.uploaderId)}</p>
-                <div className="meta-row">
-                  {attachments.map((file, index) => <Badge key={text(file.fileId ?? file.name ?? index)}>{text(file.name ?? file.originalName ?? file.fileId)}</Badge>)}
-                </div>
+                <AttachmentPreviewList attachments={attachments} api={api} />
               </article>
             );
           })}
@@ -489,7 +483,7 @@ function FilterButtons({ items, value, onChange }: { items: readonly (readonly [
   );
 }
 
-function attachmentFromUpload(result: Record<string, unknown>): EvidenceAttachment | null {
+function attachmentFromUpload(result: Record<string, unknown>, api: ApiClient): EvidenceAttachment | null {
   const file = asRecord(result.file ?? result);
   const fileId = text(file.fileId, "");
   const name = text(file.originalName ?? file.name ?? file.fileName, "");
@@ -501,7 +495,7 @@ function attachmentFromUpload(result: Record<string, unknown>): EvidenceAttachme
     mimeType: text(file.mimeType, ""),
     type: text(file.mimeType, "file"),
     size: Number(file.size ?? file.sizeBytes ?? 0),
-    url: text(file.url, "")
+    url: fileAssetUrl({ ...file, fileId }, api)
   };
 }
 
