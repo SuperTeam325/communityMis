@@ -3,6 +3,7 @@ import path from "node:path";
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createMemoryAuthStore } from "../backend/src/auth/store.mjs";
 import { createApiClient } from "../frontend/src/api/client.mjs";
+import { assertAppRouteCases, assertPageSource, assertSpaRouteBaseline } from "./spa-validation-helpers.mjs";
 
 const projectRoot = process.cwd();
 const checks = [];
@@ -29,7 +30,6 @@ function checkStaticWiring() {
   const memoryStoreSource = fs.readFileSync(path.join(projectRoot, "backend", "src", "auth", "store.mjs"), "utf8");
   const mysqlStoreSource = fs.readFileSync(path.join(projectRoot, "backend", "src", "auth", "mysql-store.mjs"), "utf8");
   const clientSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "api", "client.mjs"), "utf8");
-  const shellSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "prototype-shell.mjs"), "utf8");
 
   for (const expected of [
     "/api/admin/categories",
@@ -54,7 +54,21 @@ function checkStaticWiring() {
 
   record(requestRouteSource.includes("listActiveSensitiveWords") && requestRouteSource.includes("createRiskContent"), "content check uses managed sensitive words and creates risk queue entries");
   record(clientSource.includes("sensitiveWords") && clientSource.includes("resolveRiskContent") && clientSource.includes("updateSystem"), "api client exposes phase 19 admin methods");
-  record(shellSource.includes("hydrateAdminCategoriesRoute") && shellSource.includes("hydrateAdminRiskContentRoute") && shellSource.includes("hydrateAdminSystemRoute"), "phase 19 admin pages hydrate from production shell");
+  assertSpaRouteBaseline(record, ["admin-categories", "admin-sensitive-words", "admin-risk-content", "admin-audit-log", "admin-system"]);
+  assertAppRouteCases(record, ["admin-categories", "admin-sensitive-words", "admin-risk-content", "admin-audit-log", "admin-system"]);
+  assertPageSource(record, "frontend/src/spa/pages/AdminPages.tsx", [
+    "export function AdminCategoriesPage",
+    "export function AdminSensitiveWordsPage",
+    "export function AdminRiskContentPage",
+    "export function AdminAuditLogPage",
+    "export function AdminSystemPage",
+    "api.admin.categories",
+    "api.admin.sensitiveWords",
+    "api.admin.riskContent",
+    "api.admin.auditLogs",
+    "api.admin.system",
+    "api.admin.updateSystem"
+  ], "React admin governance pages");
 }
 
 async function checkGovernanceFlow() {

@@ -3,6 +3,7 @@ import path from "node:path";
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createMemoryAuthStore } from "../backend/src/auth/store.mjs";
 import { createApiClient } from "../frontend/src/api/client.mjs";
+import { assertAppRouteCases, assertPageSource, assertSpaRouteBaseline } from "./spa-validation-helpers.mjs";
 
 const projectRoot = process.cwd();
 const checks = [];
@@ -29,7 +30,6 @@ function checkStaticWiring() {
   const memoryStoreSource = fs.readFileSync(path.join(projectRoot, "backend", "src", "auth", "store.mjs"), "utf8");
   const mysqlStoreSource = fs.readFileSync(path.join(projectRoot, "backend", "src", "auth", "mysql-store.mjs"), "utf8");
   const clientSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "api", "client.mjs"), "utf8");
-  const shellSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "prototype-shell.mjs"), "utf8");
 
   for (const expected of [
     "/api/admin/ai/call-logs",
@@ -52,7 +52,21 @@ function checkStaticWiring() {
   }
   record(aiRouteSource.includes("ensureAiAvailable") && aiRouteSource.includes("AI_UNAVAILABLE"), "user AI routes honor admin AI enabled switch");
   record(clientSource.includes("aiCallLogs") && clientSource.includes("resolveAiFeedback") && clientSource.includes("updateAiConfig"), "api client exposes AI admin namespace");
-  record(shellSource.includes("hydrateAdminAiLogsRoute") && shellSource.includes("hydrateAdminAiConfigRoute"), "AI admin pages hydrate from production shell");
+  assertSpaRouteBaseline(record, ["admin-ai-logs", "admin-ai-conversations", "admin-ai-feedback", "admin-ai-errors", "admin-ai-config"]);
+  assertAppRouteCases(record, ["admin-ai-logs", "admin-ai-conversations", "admin-ai-feedback", "admin-ai-errors", "admin-ai-config"]);
+  assertPageSource(record, "frontend/src/spa/pages/AiPages.tsx", [
+    "export function AdminAiLogsPage",
+    "export function AdminAiConversationsPage",
+    "export function AdminAiFeedbackPage",
+    "export function AdminAiErrorsPage",
+    "export function AdminAiConfigPage",
+    "api.admin.aiCallLogs",
+    "api.admin.aiConversations",
+    "api.admin.aiFeedback",
+    "api.admin.aiErrors",
+    "api.admin.aiConfig",
+    "api.admin.updateAiConfig"
+  ], "React AI admin pages");
   record(adminRouteSource.includes("redactSensitiveText"), "AI conversation admin detail applies sensitive text redaction");
 }
 

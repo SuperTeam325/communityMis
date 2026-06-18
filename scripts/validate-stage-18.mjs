@@ -3,6 +3,7 @@ import path from "node:path";
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createMemoryAuthStore } from "../backend/src/auth/store.mjs";
 import { createApiClient } from "../frontend/src/api/client.mjs";
+import { assertAppRouteCases, assertPageSource, assertSpaRouteBaseline } from "./spa-validation-helpers.mjs";
 
 const projectRoot = process.cwd();
 const checks = [];
@@ -28,7 +29,6 @@ function checkStaticWiring() {
   const memoryStoreSource = fs.readFileSync(path.join(projectRoot, "backend", "src", "auth", "store.mjs"), "utf8");
   const mysqlStoreSource = fs.readFileSync(path.join(projectRoot, "backend", "src", "auth", "mysql-store.mjs"), "utf8");
   const clientSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "api", "client.mjs"), "utf8");
-  const shellSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "prototype-shell.mjs"), "utf8");
 
   for (const expected of [
     "/api/admin/disputes",
@@ -46,7 +46,17 @@ function checkStaticWiring() {
   }
 
   record(clientSource.includes("finalizeDispute") && clientSource.includes("/api/admin/stats"), "api client exposes admin dispute and stats methods");
-  record(shellSource.includes("hydrateAdminDisputesRoute") && shellSource.includes("hydrateAdminDisputeFinalRoute") && shellSource.includes("hydrateAdminStatsRoute"), "admin dispute and stats pages hydrate from production shell");
+  assertSpaRouteBaseline(record, ["admin-disputes", "admin-dispute-final", "admin-stats"]);
+  assertAppRouteCases(record, ["admin-disputes", "admin-dispute-final", "admin-stats"]);
+  assertPageSource(record, "frontend/src/spa/pages/AdminPages.tsx", [
+    "export function AdminDisputesPage",
+    "export function AdminDisputeFinalPage",
+    "export function AdminStatsPage",
+    "api.admin.disputes",
+    "api.admin.dispute",
+    "api.admin.finalizeDispute",
+    "api.admin.stats"
+  ], "React admin dispute and stats pages");
 }
 
 async function checkAdminDisputeFlow() {

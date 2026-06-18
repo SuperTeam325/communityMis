@@ -1,12 +1,15 @@
-import fs from "node:fs";
-import path from "node:path";
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createMemoryAuthStore } from "../backend/src/auth/store.mjs";
 import { createApiClient } from "../frontend/src/api/client.mjs";
-import { renderPrototypeHtml } from "../frontend/src/prototypeRenderer.mjs";
-import { routeById } from "../frontend/src/routes.mjs";
+import {
+  assertAppRouteCases,
+  assertPageSource,
+  assertSpaRouteBaseline,
+  assertSpaRouteMatches,
+  readProject,
+  routeById
+} from "./spa-validation-helpers.mjs";
 
-const projectRoot = process.cwd();
 const checks = [];
 
 await run();
@@ -26,26 +29,22 @@ async function run() {
 }
 
 function checkStaticWiring() {
-  const ordersHtml = renderPrototypeHtml(routeById.get("orders"));
-  const orderDetailHtml = renderPrototypeHtml(routeById.get("order-detail"));
-  record(ordersHtml.includes("/assets/app/prototype-shell.mjs"), "orders page loads production shell");
-  record(orderDetailHtml.includes("/assets/app/prototype-shell.mjs"), "order detail page loads production shell");
-  record(routeById.get("orders")?.path === "/orders", "orders route is mapped to /orders");
-  record(routeById.get("order-detail")?.match?.test("/orders/10301"), "order detail route accepts order ids");
-
-  const shellSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "prototype-shell.mjs"), "utf8");
-  for (const expected of [
-    "hydrateOrdersRoute",
+  assertSpaRouteBaseline(record, ["orders", "order-detail"]);
+  assertSpaRouteMatches(record, [["/orders/10301", "order-detail"]]);
+  assertAppRouteCases(record, ["orders", "order-detail"]);
+  record(routeById("orders")?.path === "/orders", "orders route is mapped to /orders");
+  assertPageSource(record, "frontend/src/spa/pages/OrdersPages.tsx", [
+    "export function OrdersPage",
+    "export function OrderDetailPage",
     "api.orders.list",
+    "api.orders.detail",
     "api.orders.confirm",
-    "data-order-confirm",
-    "settlementReady",
-    "待阶段 11 结算"
-  ]) {
-    record(shellSource.includes(expected), `stage 10 shell behavior is wired: ${expected}`);
-  }
+    "state.reload",
+    "确认完成",
+    "待结算"
+  ], "React orders pages");
 
-  const clientSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "api", "client.mjs"), "utf8");
+  const clientSource = readProject("frontend/src/api/client.mjs");
   record(clientSource.includes("orders:") && clientSource.includes("/api/orders"), "api client exposes order endpoints");
   record(clientSource.includes("/confirm"), "api client exposes order confirm endpoint");
 }

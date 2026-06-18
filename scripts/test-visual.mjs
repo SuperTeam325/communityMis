@@ -4,7 +4,9 @@ import { responsiveViewports } from "../frontend/src/spa/route-data.mjs";
 import { chromium } from "playwright";
 
 const checks = [];
-const routes = ["/", "/login", "/register", "/admin/login"];
+const publicRoutes = ["/", "/login", "/register", "/feed"];
+const userRoutes = ["/post", "/messages", "/wallet"];
+const adminRoutes = ["/admin/dashboard", "/admin/system"];
 
 await run();
 
@@ -48,26 +50,57 @@ async function run() {
 async function runVisualSmoke(baseUrl) {
   const browser = await chromium.launch();
   try {
-    const page = await browser.newPage();
     for (const viewport of responsiveViewports) {
-      await page.setViewportSize({ width: viewport.width, height: viewport.height });
-      for (const route of routes) {
-        await page.goto(`${baseUrl}${route}`, { waitUntil: "networkidle" });
-        const result = await page.evaluate(() => ({
-          title: document.title,
-          routeId: document.documentElement.dataset.routeId,
-          runtimeError: document.documentElement.dataset.runtimeError ?? null,
-          horizontalOverflow: Math.max(0, document.documentElement.scrollWidth - window.innerWidth) > 0,
-          bodyWidth: document.documentElement.scrollWidth,
-          viewport: window.innerWidth
-        }));
-        record(result.runtimeError === null, `${route} has no runtime error at ${viewport.width}x${viewport.height}`);
-        record(result.horizontalOverflow === false, `${route} has no horizontal overflow at ${viewport.width}x${viewport.height}`);
+      const publicPage = await browser.newPage({ viewport: { width: viewport.width, height: viewport.height } });
+      const userPage = await browser.newPage({ viewport: { width: viewport.width, height: viewport.height } });
+      const adminPage = await browser.newPage({ viewport: { width: viewport.width, height: viewport.height } });
+      try {
+        await loginUser(userPage, baseUrl);
+        await loginAdmin(adminPage, baseUrl);
+        await scanRouteGroup(publicPage, baseUrl, publicRoutes, viewport);
+        await scanRouteGroup(userPage, baseUrl, userRoutes, viewport);
+        await scanRouteGroup(adminPage, baseUrl, adminRoutes, viewport);
+      } finally {
+        await publicPage.close().catch(() => {});
+        await userPage.close().catch(() => {});
+        await adminPage.close().catch(() => {});
       }
     }
   } finally {
     await browser.close();
   }
+}
+
+async function scanRouteGroup(page, baseUrl, routes, viewport) {
+  for (const route of routes) {
+    await page.goto(`${baseUrl}${route}`, { waitUntil: "networkidle" });
+    const result = await page.evaluate(() => ({
+      title: document.title,
+      routeId: document.documentElement.dataset.routeId,
+      runtimeError: document.documentElement.dataset.runtimeError ?? null,
+      horizontalOverflow: Math.max(0, document.documentElement.scrollWidth - window.innerWidth) > 0,
+      bodyWidth: document.documentElement.scrollWidth,
+      viewport: window.innerWidth
+    }));
+    record(result.runtimeError === null, `${route} has no runtime error at ${viewport.width}x${viewport.height}`);
+    record(result.horizontalOverflow === false, `${route} has no horizontal overflow at ${viewport.width}x${viewport.height}`);
+  }
+}
+
+async function loginUser(page, baseUrl) {
+  await page.goto(`${baseUrl}/login`, { waitUntil: "networkidle" });
+  await page.locator("#login-username").fill("user_a");
+  await page.locator("#login-password").fill("user123456");
+  await page.locator("#login-submit").click();
+  await page.waitForURL(/\/feed$/);
+}
+
+async function loginAdmin(page, baseUrl) {
+  await page.goto(`${baseUrl}/admin/login`, { waitUntil: "networkidle" });
+  await page.locator("#admin-account").fill("admin_main");
+  await page.locator("#admin-password").fill("admin123456");
+  await page.locator("#login-submit").click();
+  await page.waitForURL(/\/admin\/dashboard$/);
 }
 
 function record(ok, message) {
