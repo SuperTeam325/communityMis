@@ -3,6 +3,7 @@ import path from "node:path";
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createMemoryAuthStore } from "../backend/src/auth/store.mjs";
 import { createApiClient } from "../frontend/src/api/client.mjs";
+import { assertAppRouteCases, assertPageSource, assertSpaRouteBaseline, assertSpaRouteMatches } from "./spa-validation-helpers.mjs";
 
 const projectRoot = process.cwd();
 const checks = [];
@@ -28,7 +29,6 @@ function checkStaticWiring() {
   const memoryStoreSource = fs.readFileSync(path.join(projectRoot, "backend", "src", "auth", "store.mjs"), "utf8");
   const mysqlStoreSource = fs.readFileSync(path.join(projectRoot, "backend", "src", "auth", "mysql-store.mjs"), "utf8");
   const clientSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "api", "client.mjs"), "utf8");
-  const shellSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "prototype-shell.mjs"), "utf8");
 
   for (const expected of [
     "ORDER_DISPUTES_RE",
@@ -53,8 +53,20 @@ function checkStaticWiring() {
   }
 
   record(clientSource.includes("disputes:") && clientSource.includes("/api/disputes/my"), "api client exposes dispute namespace");
-  record(shellSource.includes("hydrateDisputeCreateRoute") && shellSource.includes("hydrateDisputeDetailRoute"), "dispute pages hydrate from production shell");
-  record(shellSource.includes("/disputes/new?order=") && shellSource.includes("查看纠纷"), "orders pages expose dispute entry points");
+  assertSpaRouteBaseline(record, ["dispute-create", "dispute-detail", "order-detail"]);
+  assertSpaRouteMatches(record, [["/disputes/15301", "dispute-detail"]]);
+  assertAppRouteCases(record, ["dispute-create", "dispute-detail", "order-detail"]);
+  assertPageSource(record, "frontend/src/spa/pages/DisputesPages.tsx", [
+    "export function DisputeCreatePage",
+    "export function DisputeDetailPage",
+    "api.orders.dispute",
+    "api.disputes.detail",
+    "api.disputes.evidence"
+  ], "React dispute pages");
+  assertPageSource(record, "frontend/src/spa/pages/OrdersPages.tsx", [
+    "/disputes/new?orderId=",
+    "查看纠纷"
+  ], "React order dispute entry points");
 }
 
 async function checkDisputeApi() {

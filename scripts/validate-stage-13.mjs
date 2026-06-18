@@ -3,6 +3,7 @@ import path from "node:path";
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createMemoryAuthStore } from "../backend/src/auth/store.mjs";
 import { createApiClient } from "../frontend/src/api/client.mjs";
+import { assertAppRouteCases, assertPageSource, assertSpaRouteBaseline } from "./spa-validation-helpers.mjs";
 
 const projectRoot = process.cwd();
 const checks = [];
@@ -29,7 +30,6 @@ function checkStaticWiring() {
   const memoryStoreSource = fs.readFileSync(path.join(projectRoot, "backend", "src", "auth", "store.mjs"), "utf8");
   const mysqlStoreSource = fs.readFileSync(path.join(projectRoot, "backend", "src", "auth", "mysql-store.mjs"), "utf8");
   const clientSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "api", "client.mjs"), "utf8");
-  const shellSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "prototype-shell.mjs"), "utf8");
 
   for (const expected of [
     "/reviews",
@@ -48,8 +48,15 @@ function checkStaticWiring() {
   }
 
   record(clientSource.includes("review:") && clientSource.includes("/reviews"), "api client exposes review submission");
-  record(shellSource.includes("hydrateReviewRoute") && shellSource.includes("installReviewFormHandlers"), "review page hydrates from production shell");
-  record(shellSource.includes("/reviews/new?order="), "orders page exposes review entry");
+  assertSpaRouteBaseline(record, ["review", "order-detail"]);
+  assertAppRouteCases(record, ["review", "order-detail"]);
+  assertPageSource(record, "frontend/src/spa/pages/OrdersPages.tsx", [
+    "export function ReviewPage",
+    "api.orders.review",
+    "api.orders.detail",
+    "/reviews/new?orderId=",
+    "评价已提交"
+  ], "React review page");
 }
 
 async function checkReviewApi() {

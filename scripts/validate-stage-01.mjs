@@ -44,7 +44,7 @@ function checkRouteCoverage() {
   const routePaths = new Set(routes.map((item) => item.path));
   const entryPaths = new Set(routes.map((item) => routePath(item)));
   const routeIds = new Set(routes.map((item) => item.id));
-  const spaRoutes = fs.readFileSync(path.join(projectRoot, "frontend", "src", "spa", "routes.ts"), "utf8");
+  const routeDataSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "spa", "route-data.mjs"), "utf8");
   const appSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "spa", "App.tsx"), "utf8");
 
   for (const expected of [
@@ -53,12 +53,12 @@ function checkRouteCoverage() {
     "/tasks",
     "/orders/:id",
     "/jury",
-    "/jury/voting",
+    "/jury/disputes/:id",
     "/admin/login",
     "/admin/dashboard",
     "/admin/ai/config"
   ]) {
-    record(routePaths.has(expected), `legacy route pattern exists: ${expected}`);
+    record(routePaths.has(expected), `SPA route pattern exists: ${expected}`);
   }
 
   for (const expected of ["/orders/demo", "/posts/demo", "/users/demo", "/disputes/demo"]) {
@@ -67,9 +67,9 @@ function checkRouteCoverage() {
 
   for (const expectedId of ["jury-hall", "jury-voting"]) {
     record(routeIds.has(expectedId), `legacy route id exists: ${expectedId}`);
-    record(spaRoutes.includes(`id: "${expectedId}"`), `SPA route metadata exists: ${expectedId}`);
+    record(routeDataSource.includes(`id: "${expectedId}"`), `SPA route metadata exists: ${expectedId}`);
   }
-  record(spaRoutes.includes('path: "/jury/disputes/:id"'), "SPA route metadata includes jury dispute voting deep link");
+  record(routeDataSource.includes('path: "/jury/disputes/:id"'), "SPA route metadata includes jury dispute voting deep link");
   record(appSource.includes("NavLink") && appSource.includes("Link"), "SPA shell uses React Router navigation primitives");
 
   record(new Set(routes.map((item) => item.id)).size === routes.length, "SPA route ids are unique");
@@ -84,7 +84,6 @@ async function checkServers() {
   const frontend = createFrontendServer({
     env: {
       NODE_ENV: "development",
-      FRONTEND_MODE: "spa",
       API_BASE_URL: "http://127.0.0.1:3001",
       APP_ENV: "stage01",
       BUILD_VERSION: "stage01"

@@ -867,7 +867,7 @@ function AiAdminFilters({
         <input value={params.get("keyword") ?? ""} placeholder="搜索关键词" onChange={(event) => onChange({ keyword: event.currentTarget.value, page: 1 })} />
         <input value={params.get("userId") ?? ""} placeholder="用户 ID" onChange={(event) => onChange({ userId: event.currentTarget.value, page: 1 })} />
         <input value={params.get("conversationId") ?? ""} placeholder="会话 ID" onChange={(event) => onChange({ conversationId: event.currentTarget.value, page: 1 })} />
-        {showScene ? <select value={params.get("scene") ?? "all"} onChange={(event) => onChange({ scene: event.currentTarget.value, page: 1 })}>
+        {showScene ? <select aria-label="AI 场景" value={params.get("scene") ?? "all"} onChange={(event) => onChange({ scene: event.currentTarget.value, page: 1 })}>
           <option value="all">全部场景</option>
           <option value="chat">通用问答</option>
           <option value="request_filter">需求筛选</option>
@@ -876,7 +876,7 @@ function AiAdminFilters({
           <option value="dispute_summary">纠纷摘要</option>
           <option value="rules">规则问答</option>
         </select> : null}
-        {showStatus ? <select value={params.get("status") ?? "all"} onChange={(event) => onChange({ status: event.currentTarget.value, page: 1 })}>
+        {showStatus ? <select aria-label="AI 状态" value={params.get("status") ?? "all"} onChange={(event) => onChange({ status: event.currentTarget.value, page: 1 })}>
           <option value="all">全部状态</option>
           <option value="success">成功</option>
           <option value="failed">失败</option>
@@ -888,14 +888,14 @@ function AiAdminFilters({
           <option value="resolved">已处理</option>
           <option value="pending">待处理</option>
         </select> : null}
-        {showRating ? <select value={params.get("rating") ?? "all"} onChange={(event) => onChange({ rating: event.currentTarget.value, page: 1 })}>
+        {showRating ? <select aria-label="AI 反馈" value={params.get("rating") ?? "all"} onChange={(event) => onChange({ rating: event.currentTarget.value, page: 1 })}>
           <option value="all">全部反馈</option>
           <option value="useful">有用</option>
           <option value="useless">无用</option>
           <option value="wrong">错误</option>
           <option value="unsafe">不安全</option>
         </select> : null}
-        {showType ? <select value={params.get("type") ?? "all"} onChange={(event) => onChange({ type: event.currentTarget.value, page: 1 })}>
+        {showType ? <select aria-label="AI 类型" value={params.get("type") ?? "all"} onChange={(event) => onChange({ type: event.currentTarget.value, page: 1 })}>
           <option value="all">全部类型</option>
           <option value="timeout">超时</option>
           <option value="failed">模型失败</option>

@@ -2396,9 +2396,7 @@ function canViewDispute(dispute, viewerId, viewerRole) {
   if (["admin", "super_admin"].includes(String(viewerRole ?? ""))) {
     return true;
   }
-  const id = Number(viewerId);
-  // Allow dispute parties and all authenticated users (jury needs access)
-  return true;
+  return isDisputeParty(dispute, viewerId);
 }
 
 function isDisputeParty(dispute, viewerId) {

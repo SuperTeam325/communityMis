@@ -3,6 +3,7 @@ import path from "node:path";
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createMemoryAuthStore } from "../backend/src/auth/store.mjs";
 import { createApiClient } from "../frontend/src/api/client.mjs";
+import { assertAppRouteCases, assertPageSource, assertSpaRouteBaseline, assertSpaRouteMatches } from "./spa-validation-helpers.mjs";
 
 const projectRoot = process.cwd();
 const checks = [];
@@ -28,7 +29,6 @@ function checkStaticWiring() {
   const memoryStoreSource = fs.readFileSync(path.join(projectRoot, "backend", "src", "auth", "store.mjs"), "utf8");
   const mysqlStoreSource = fs.readFileSync(path.join(projectRoot, "backend", "src", "auth", "mysql-store.mjs"), "utf8");
   const clientSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "api", "client.mjs"), "utf8");
-  const shellSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "prototype-shell.mjs"), "utf8");
 
   for (const expected of [
     "JURY_DISPUTE_DETAIL_RE",
@@ -59,7 +59,16 @@ function checkStaticWiring() {
   }
 
   record(clientSource.includes("jury:") && clientSource.includes("/api/jury/disputes"), "api client exposes jury namespace");
-  record(shellSource.includes("hydrateJuryVotingRoute") && shellSource.includes("disputeJuryResultPanel"), "jury voting page and dispute detail result area hydrate from production shell");
+  assertSpaRouteBaseline(record, ["jury-voting", "jury-dispute-voting", "dispute-detail"]);
+  assertSpaRouteMatches(record, [["/jury/disputes/16801", "jury-dispute-voting"]]);
+  assertAppRouteCases(record, ["jury-voting", "jury-dispute-voting", "dispute-detail"]);
+  assertPageSource(record, "frontend/src/spa/pages/DisputesPages.tsx", [
+    "export function JuryVotingPage",
+    "api.jury.dispute",
+    "api.jury.vote",
+    "JuryResultPanel",
+    "juryResult"
+  ], "React jury voting and dispute result pages");
 }
 
 async function checkJuryVotingApi() {

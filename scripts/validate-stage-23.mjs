@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createMemoryAuthStore } from "../backend/src/auth/store.mjs";
+import { assertAppRouteCases, assertPageSource, assertSourceOmits, assertSpaRouteBaseline } from "./spa-validation-helpers.mjs";
 
 const projectRoot = process.cwd();
 const checks = [];
@@ -47,10 +48,21 @@ function checkStaticProductionReadiness() {
   const readySource = fs.readFileSync(path.join(projectRoot, "backend", "src", "routes", "health.mjs"), "utf8");
   record(readySource.includes("missingMigrations") && readySource.includes("checksumMismatches") && readySource.includes("externalServices"), "ready endpoint checks all migrations and external service configuration");
 
-  const registerHtml = fs.readFileSync(path.join(projectRoot, "frontend", "public", "ui", "screens", "register.html"), "utf8");
-  const shellSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "prototype-shell.mjs"), "utf8");
-  record(!registerHtml.includes('id="send-phone-code"') && registerHtml.includes('id="send-email-code"'), "register page exposes email-code controls only");
-  record(!shellSource.includes("api.verification.sendSms") && !shellSource.includes("phoneCodeToken") && shellSource.includes("emailCodeToken"), "frontend registration submits email verification token and code");
+  assertSpaRouteBaseline(record, ["register"]);
+  assertAppRouteCases(record, ["register"]);
+  assertPageSource(record, "frontend/src/spa/pages/AuthPages.tsx", [
+    "export function RegisterPage",
+    "emailCodeToken",
+    "emailCode",
+    "api.verification.sendEmail",
+    "purpose: \"register\"",
+    "注册并登录"
+  ], "React register page");
+  assertSourceOmits(record, "frontend/src/spa/pages/AuthPages.tsx", [
+    "api.verification.sendSms",
+    "phoneCodeToken",
+    "send-phone-code"
+  ], "React register page");
 }
 
 async function checkVerificationAndRegisterFlow() {

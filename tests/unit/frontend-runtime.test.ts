@@ -159,7 +159,7 @@ describe("frontend runtime config", () => {
     expect(modal).not.toContain("getResponse(");
   });
 
-  test("help route is public read-only and hydrated by the prototype shell", () => {
+  test("help route is public read-only in the SPA route manifest", () => {
     const help = appRoutes.find((item) => item.id === "help");
 
     expect(help?.surface).toBe("public");

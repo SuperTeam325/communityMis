@@ -5,7 +5,9 @@ import { createBackendServer } from "../backend/src/app.mjs";
 import { createFrontendServer } from "../frontend/server.mjs";
 
 const checks = [];
-const routes = ["/login", "/feed", "/tasks", "/wallet", "/admin/login", "/admin/dashboard", "/admin/ai/logs"];
+const publicRoutes = ["/login", "/admin/login"];
+const userRoutes = ["/feed", "/tasks", "/wallet"];
+const adminRoutes = ["/admin/dashboard", "/admin/ai/logs"];
 const axeSource = fs.readFileSync(path.join(process.cwd(), "node_modules", "axe-core", "axe.min.js"), "utf8");
 
 await run();
@@ -63,11 +65,27 @@ function checkStaticPrerequisites() {
 }
 
 async function scanRoutes(browser, frontendOrigin) {
-  const context = await browser.newContext({ bypassCSP: true });
-  const page = await context.newPage();
-  await loginUser(page, frontendOrigin);
-  await loginAdmin(page, frontendOrigin);
+  const publicContext = await browser.newContext({ bypassCSP: true });
+  const userContext = await browser.newContext({ bypassCSP: true });
+  const adminContext = await browser.newContext({ bypassCSP: true });
+  try {
+    const publicPage = await publicContext.newPage();
+    const userPage = await userContext.newPage();
+    const adminPage = await adminContext.newPage();
+    await loginUser(userPage, frontendOrigin);
+    await loginAdmin(adminPage, frontendOrigin);
 
+    await scanRouteGroup(publicPage, frontendOrigin, publicRoutes);
+    await scanRouteGroup(userPage, frontendOrigin, userRoutes);
+    await scanRouteGroup(adminPage, frontendOrigin, adminRoutes);
+  } finally {
+    await publicContext.close().catch(() => {});
+    await userContext.close().catch(() => {});
+    await adminContext.close().catch(() => {});
+  }
+}
+
+async function scanRouteGroup(page, frontendOrigin, routes) {
   for (const route of routes) {
     await page.goto(`${frontendOrigin}${route}`, { waitUntil: "networkidle" });
     await disableMotion(page);
@@ -87,8 +105,6 @@ async function scanRoutes(browser, frontendOrigin) {
       ? `${route} has no serious or critical axe violations`
       : `${route} has serious/critical axe violations: ${blockers.map((item) => item.id).join(", ")}`);
   }
-
-  await context.close();
 }
 
 async function disableMotion(page) {

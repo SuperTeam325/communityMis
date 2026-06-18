@@ -3,6 +3,7 @@ import path from "node:path";
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createMemoryAuthStore } from "../backend/src/auth/store.mjs";
 import { createApiClient } from "../frontend/src/api/client.mjs";
+import { assertAppRouteCases, assertPageSource, assertSpaRouteBaseline } from "./spa-validation-helpers.mjs";
 
 const projectRoot = process.cwd();
 const checks = [];
@@ -29,7 +30,6 @@ function checkStaticWiring() {
   const memoryStoreSource = fs.readFileSync(path.join(projectRoot, "backend", "src", "auth", "store.mjs"), "utf8");
   const mysqlStoreSource = fs.readFileSync(path.join(projectRoot, "backend", "src", "auth", "mysql-store.mjs"), "utf8");
   const clientSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "api", "client.mjs"), "utf8");
-  const shellSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "prototype-shell.mjs"), "utf8");
 
   record(appSource.includes("handleAdminRoutes"), "backend app mounts admin routes before request routes");
 
@@ -56,8 +56,17 @@ function checkStaticWiring() {
   }
 
   record(clientSource.includes("admin:") && clientSource.includes("/api/admin/dashboard"), "api client exposes admin namespace");
-  record(shellSource.includes("hydrateAdminDashboardRoute") && shellSource.includes("hydrateAdminUsersRoute") && shellSource.includes("hydrateAdminTransactionsRoute"), "admin pages hydrate from production shell");
-  record(shellSource.includes("updateAdminUserStatus") && shellSource.includes("api.admin.updateUserStatus"), "admin users page can update account status through API");
+  assertSpaRouteBaseline(record, ["admin-dashboard", "admin-users", "admin-transactions"]);
+  assertAppRouteCases(record, ["admin-dashboard", "admin-users", "admin-transactions"]);
+  assertPageSource(record, "frontend/src/spa/pages/AdminPages.tsx", [
+    "export function AdminDashboardPage",
+    "export function AdminUsersPage",
+    "export function AdminTransactionsPage",
+    "api.admin.dashboard",
+    "api.admin.users",
+    "api.admin.transactions",
+    "api.admin.updateUserStatus"
+  ], "React admin dashboard users and transactions pages");
 }
 
 async function checkAdminApiFlow() {

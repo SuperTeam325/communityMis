@@ -40,13 +40,20 @@ Legacy prototype HTML URLs redirect to the matching SPA route. For example, `/sc
 
 ## Validation
 
-For stage 7 build and deployment cleanup:
+For stage 8+ SPA acceptance:
 
 ```bash
 npm run typecheck
 npm run build
+npm run test:stage22
 npm run test:stage07
 npm run test:frontend-build
 ```
 
-Earlier and later stage scripts may still be migrated in stage 8 where the test system moves fully from prototype assertions to SPA route and React behavior assertions.
+Seeded local accounts used by browser and stage acceptance:
+
+- `user_a / user123456`
+- `user_b / user123456`
+- `admin_main / admin123456`
+
+Stage scripts validate the React SPA route manifest, production build artifacts, browser fallback behavior, and backend API flows instead of prototype HTML pages.

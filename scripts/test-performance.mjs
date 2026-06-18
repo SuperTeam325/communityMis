@@ -27,6 +27,8 @@ function run() {
 
 function checkHtmlBudget() {
   const htmlFiles = listFiles(distRoot).filter((item) => item.endsWith(".html"));
+  const relativeHtml = htmlFiles.map((file) => path.relative(distRoot, file).replace(/\\/g, "/"));
+  record(relativeHtml.length === 1 && relativeHtml[0] === "index.html", "production build has a single SPA HTML entry");
   for (const file of htmlFiles) {
     const size = fs.statSync(file).size;
     record(size < 80 * 1024, `${path.relative(distRoot, file)} HTML is below 80KB (${size} bytes)`);

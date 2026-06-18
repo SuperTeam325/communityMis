@@ -3,6 +3,7 @@ import path from "node:path";
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createMemoryAuthStore } from "../backend/src/auth/store.mjs";
 import { createApiClient } from "../frontend/src/api/client.mjs";
+import { assertAppRouteCases, assertPageSource, assertSpaRouteBaseline } from "./spa-validation-helpers.mjs";
 
 const projectRoot = process.cwd();
 const checks = [];
@@ -29,7 +30,6 @@ function checkStaticWiring() {
   const memoryStoreSource = fs.readFileSync(path.join(projectRoot, "backend", "src", "auth", "store.mjs"), "utf8");
   const mysqlStoreSource = fs.readFileSync(path.join(projectRoot, "backend", "src", "auth", "mysql-store.mjs"), "utf8");
   const clientSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "api", "client.mjs"), "utf8");
-  const shellSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "prototype-shell.mjs"), "utf8");
 
   for (const expected of [
     "/api/ai/chat",
@@ -53,7 +53,23 @@ function checkStaticWiring() {
     record(mysqlStoreSource.includes(expected), `mysql store exposes ${expected}`);
   }
   record(clientSource.includes("requestFilter") && clientSource.includes("orderSummary") && clientSource.includes("disputeSummary"), "api client exposes AI namespace");
-  record(shellSource.includes("hydrateAiAssistantRoute") && shellSource.includes("loadOrderAiSummary") && shellSource.includes("loadDisputeAiSummary"), "AI user pages hydrate from production shell");
+  assertSpaRouteBaseline(record, ["ai-assistant", "ai-results", "order-detail", "dispute-detail"]);
+  assertAppRouteCases(record, ["ai-assistant", "ai-results", "order-detail", "dispute-detail"]);
+  assertPageSource(record, "frontend/src/spa/pages/AiPages.tsx", [
+    "export function AiAssistantPage",
+    "export function AiResultsPage",
+    "api.ai.chat",
+    "api.ai.requestFilter",
+    "api.ai.feedback"
+  ], "React AI user pages");
+  assertPageSource(record, "frontend/src/spa/pages/RequestsPages.tsx", [
+    "api.ai.requestDraft"
+  ], "React request drafting page");
+  assertPageSource(record, "frontend/src/spa/api.ts", [
+    "requestDraft",
+    "orderSummary",
+    "disputeSummary"
+  ], "React SPA API client");
 }
 
 async function checkAiUserFlow() {

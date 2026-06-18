@@ -1,12 +1,14 @@
-import fs from "node:fs";
-import path from "node:path";
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createMemoryAuthStore } from "../backend/src/auth/store.mjs";
 import { createApiClient } from "../frontend/src/api/client.mjs";
-import { renderPrototypeHtml } from "../frontend/src/prototypeRenderer.mjs";
-import { routeById } from "../frontend/src/routes.mjs";
+import {
+  assertAppRouteCases,
+  assertPageSource,
+  assertSpaRouteBaseline,
+  assertSpaRouteMatches,
+  readProject
+} from "./spa-validation-helpers.mjs";
 
-const projectRoot = process.cwd();
 const checks = [];
 
 await run();
@@ -26,25 +28,23 @@ async function run() {
 }
 
 function checkStaticWiring() {
-  const postDetailHtml = renderPrototypeHtml(routeById.get("post-detail"));
-  const orderDetailHtml = renderPrototypeHtml(routeById.get("order-detail"));
-  record(postDetailHtml.includes("/assets/app/prototype-shell.mjs"), "request detail page loads production shell");
-  record(orderDetailHtml.includes("/assets/app/prototype-shell.mjs"), "order detail page loads production shell");
-  record(routeById.get("post-detail")?.match?.test("/posts/9901"), "request detail route accepts request ids");
-  record(routeById.get("order-detail")?.match?.test("/orders/40000"), "order detail route accepts order ids");
-
-  const shellSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "prototype-shell.mjs"), "utf8");
-  for (const expected of [
-    "hydrateOrderDetailRoute",
+  assertSpaRouteBaseline(record, ["post-detail", "order-detail"]);
+  assertSpaRouteMatches(record, [["/posts/9901", "post-detail"], ["/orders/40000", "order-detail"]]);
+  assertAppRouteCases(record, ["post-detail", "order-detail"]);
+  assertPageSource(record, "frontend/src/spa/pages/RequestsPages.tsx", [
+    "export function RequestDetailPage",
+    "api.requests.detail",
     "api.requests.accept",
+    "detail.reload",
+    "navigate(`/orders/"
+  ], "React request detail page");
+  assertPageSource(record, "frontend/src/spa/pages/OrdersPages.tsx", [
+    "export function OrderDetailPage",
     "api.orders.detail",
-    "确认接单",
-    "/orders/"
-  ]) {
-    record(shellSource.includes(expected), `stage 09 shell behavior is wired: ${expected}`);
-  }
+    "确认完成"
+  ], "React order detail page");
 
-  const clientSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "api", "client.mjs"), "utf8");
+  const clientSource = readProject("frontend/src/api/client.mjs");
   record(clientSource.includes("/accept"), "api client exposes request accept endpoint");
   record(clientSource.includes("/api/orders/"), "api client exposes order detail endpoint");
 }

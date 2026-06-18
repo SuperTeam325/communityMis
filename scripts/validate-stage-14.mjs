@@ -3,6 +3,7 @@ import path from "node:path";
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createMemoryAuthStore } from "../backend/src/auth/store.mjs";
 import { createApiClient } from "../frontend/src/api/client.mjs";
+import { assertAppRouteCases, assertPageSource, assertSpaRouteBaseline } from "./spa-validation-helpers.mjs";
 
 const projectRoot = process.cwd();
 const checks = [];
@@ -28,7 +29,6 @@ function checkStaticWiring() {
   const memoryStoreSource = fs.readFileSync(path.join(projectRoot, "backend", "src", "auth", "store.mjs"), "utf8");
   const mysqlStoreSource = fs.readFileSync(path.join(projectRoot, "backend", "src", "auth", "mysql-store.mjs"), "utf8");
   const clientSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "api", "client.mjs"), "utf8");
-  const shellSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "prototype-shell.mjs"), "utf8");
 
   for (const expected of [
     "/api/notifications",
@@ -52,7 +52,18 @@ function checkStaticWiring() {
 
   record(clientSource.includes("notifications:") && clientSource.includes("/api/notifications/read-all"), "api client exposes notification namespace");
   record(clientSource.includes("messages:") && clientSource.includes("/api/messages"), "api client exposes message namespace");
-  record(shellSource.includes("hydrateNotificationsRoute") && shellSource.includes("hydrateMessagesRoute"), "messages and notifications pages hydrate from production shell");
+  assertSpaRouteBaseline(record, ["messages", "notifications"]);
+  assertAppRouteCases(record, ["messages", "notifications"]);
+  assertPageSource(record, "frontend/src/spa/pages/MessagesPages.tsx", [
+    "export function MessagesPage",
+    "export function NotificationsPage",
+    "api.messages.list",
+    "api.messages.send",
+    "api.notifications.list",
+    "api.notifications.read",
+    "api.notifications.readAll",
+    "state.reload"
+  ], "React messages and notifications pages");
 }
 
 async function checkNotificationApi() {

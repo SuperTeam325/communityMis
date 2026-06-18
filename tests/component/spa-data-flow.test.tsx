@@ -2,8 +2,9 @@
 import React from "react";
 import { describe, expect, test, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { MessagesPage } from "../../frontend/src/spa/pages/MessagesPages";
+import { OrderDetailPage } from "../../frontend/src/spa/pages/OrdersPages";
 import { useAsync, useMutationTracker, useQueryParams } from "../../frontend/src/spa/pages/shared";
 
 describe("SPA data flow helpers", () => {
@@ -118,5 +119,50 @@ describe("SPA page mutations", () => {
     await screen.findAllByText("新消息");
     expect(api.messages.send).toHaveBeenCalledWith({ receiverId: 2, content: "你好" });
     await waitFor(() => expect(api.messages.list.mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
+  test("order detail refreshes local state after confirmation", async () => {
+    const baseOrder = {
+      orderId: 4001,
+      status: "accepted",
+      coinAmount: 5,
+      canConfirm: true,
+      request: { title: "局部刷新订单", description: "确认后只刷新订单详情。" },
+      publisher: { userId: 1, displayName: "需求方" },
+      provider: { userId: 2, displayName: "服务方" },
+      confirmation: { payerConfirmed: false, providerConfirmed: false },
+      reviewState: {}
+    };
+    const api = {
+      orders: {
+        detail: vi.fn()
+          .mockResolvedValueOnce({ order: baseOrder })
+          .mockResolvedValueOnce({
+            order: {
+              ...baseOrder,
+              status: "payer_confirmed",
+              canConfirm: false,
+              payerConfirmed: true,
+              confirmation: { payerConfirmed: true, providerConfirmed: false }
+            }
+          }),
+        confirm: vi.fn().mockResolvedValue({ order: { ...baseOrder, payerConfirmed: true } })
+      }
+    };
+
+    render(
+      <MemoryRouter initialEntries={["/orders/4001"]}>
+        <Routes>
+          <Route path="/orders/:id" element={<OrderDetailPage api={api as any} />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await screen.findByText("局部刷新订单");
+    fireEvent.click(screen.getByRole("button", { name: "确认完成" }));
+
+    await screen.findAllByText("已确认");
+    expect(api.orders.confirm).toHaveBeenCalledWith("4001");
+    await waitFor(() => expect(api.orders.detail.mock.calls.length).toBeGreaterThanOrEqual(2));
   });
 });

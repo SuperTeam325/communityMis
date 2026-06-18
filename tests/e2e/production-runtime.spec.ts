@@ -110,6 +110,37 @@ test("messages and notifications hydrate with cookie session", async ({ page }) 
   await expect(page.locator(".notif-card", { hasText: "需求已被接单" })).toHaveCount(1);
 });
 
+test("legacy redirects and dynamic route refreshes use the SPA runtime", async ({ page }) => {
+  const legacyFeed = await page.request.get(`${frontendBaseUrl}/screens/feed.html`, { maxRedirects: 0 });
+  expect(legacyFeed.status()).toBe(302);
+  expect(legacyFeed.headers().location).toBe("/feed");
+
+  const legacyPost = await page.request.get(`${frontendBaseUrl}/community-posts/2001`, { maxRedirects: 0 });
+  expect(legacyPost.status()).toBe(302);
+  expect(legacyPost.headers().location).toBe("/posts/2001");
+
+  const legacyJury = await page.request.get(`${frontendBaseUrl}/jury/voting?disputeId=8001`, { maxRedirects: 0 });
+  expect(legacyJury.status()).toBe(302);
+  expect(legacyJury.headers().location).toBe("/jury/disputes/8001");
+
+  await page.goto(`${frontendBaseUrl}/login`);
+  await page.locator("#login-username").fill("user_a");
+  await page.locator("#login-password").fill("user123456");
+  await page.locator("#login-submit").click();
+  await expect(page).toHaveURL(/\/feed$/);
+
+  for (const [route, routeId] of [
+    ["/posts/2001", "post-detail"],
+    ["/orders/3001", "order-detail"],
+    ["/disputes/8001", "dispute-detail"]
+  ] as const) {
+    await page.goto(`${frontendBaseUrl}${route}`, { waitUntil: "networkidle" });
+    await expect(page.locator("html")).toHaveAttribute("data-route-id", routeId);
+    await page.reload({ waitUntil: "networkidle" });
+    await expect(page.locator("html")).toHaveAttribute("data-route-id", routeId);
+  }
+});
+
 test("core business API flow works with cookie and CSRF browser model", async () => {
   const userA = createCookieAwareApi(apiBaseUrl);
   const userB = createCookieAwareApi(apiBaseUrl);

@@ -1,18 +1,24 @@
-import fs from "node:fs";
-import path from "node:path";
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createMemoryAuthStore } from "../backend/src/auth/store.mjs";
 import { createApiClient } from "../frontend/src/api/client.mjs";
-import { renderPrototypeHtml } from "../frontend/src/prototypeRenderer.mjs";
-import { routeById } from "../frontend/src/routes.mjs";
+import {
+  assertAppRouteCases,
+  assertDistSpaOnly,
+  assertFrontendServerSpaRuntime,
+  assertLegacyPrototypeSourcesRemoved,
+  assertNoPrototypeTestDependencies,
+  assertPageSource,
+  assertSpaRouteBaseline,
+  routeById
+} from "./spa-validation-helpers.mjs";
 
-const projectRoot = process.cwd();
 const checks = [];
 
 await run();
 
 async function run() {
   checkStaticWiring();
+  await checkSpaRuntimeBaseline();
   await checkRequestPublishingApi();
 
   const failed = checks.filter((item) => !item.ok);
@@ -26,33 +32,35 @@ async function run() {
 }
 
 function checkStaticWiring() {
-  const postHtml = renderPrototypeHtml(routeById.get("post"));
-  record(postHtml.includes("/assets/app/prototype-shell.mjs"), "post page loads production shell");
-  record(routeById.get("post")?.surface === "user", "post page remains protected by user route guard");
-  for (const expected of [
+  assertLegacyPrototypeSourcesRemoved(record);
+  assertNoPrototypeTestDependencies(record);
+  assertSpaRouteBaseline(record, ["post"]);
+  assertAppRouteCases(record, ["post"]);
+  record(routeById("post")?.surface === "user", "post page remains protected by user route guard");
+  assertPageSource(record, "frontend/src/spa/pages/RequestsPages.tsx", [
+    "export function PostPage",
     'id="task-title"',
     'id="task-description"',
     'id="task-hours"',
     'id="task-coins"',
     'id="task-location"',
     'id="task-tags"',
-    "AI 帮我完善"
-  ]) {
-    record(postHtml.includes(expected), `post form exposes required publishing control: ${expected}`);
-  }
-
-  const shellSource = fs.readFileSync(path.join(projectRoot, "frontend", "src", "prototype-shell.mjs"), "utf8");
-  for (const expected of [
-    "hydratePostRoute",
-    "api.content.check",
     "api.requests.create",
+    "api.ai.requestDraft",
     "publish-success-panel",
-    "task-skill-tags",
-    "查看新需求",
-    "进入任务大厅"
-  ]) {
-    record(shellSource.includes(expected), `stage 08 shell behavior is wired: ${expected}`);
-  }
+    "查看详情",
+    "返回信息流"
+  ], "React post page");
+  assertPageSource(record, "tests/e2e/production-runtime.spec.ts", [
+    "/post",
+    "#task-title",
+    "#publish-success-panel"
+  ], "production runtime e2e");
+}
+
+async function checkSpaRuntimeBaseline() {
+  assertDistSpaOnly(record);
+  await assertFrontendServerSpaRuntime(record, { APP_ENV: "stage08", BUILD_VERSION: "stage08" });
 }
 
 async function checkRequestPublishingApi() {
