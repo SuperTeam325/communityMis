@@ -1200,6 +1200,7 @@ SET @provider_balance_after = ROUND(@provider_balance_before + @coin_amount, 2);
 UPDATE \`wallet\`
 SET
   \`balance\` = @payer_balance_after,
+  \`frozen_balance\` = ROUND(GREATEST(0, \`frozen_balance\` - @coin_amount), 2),
   \`version\` = \`version\` + 1,
   \`updated_at\` = @settled_at
 WHERE \`user_id\` = @payer_id
