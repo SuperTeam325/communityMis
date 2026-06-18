@@ -19,7 +19,7 @@ export const appRoutes = [
   defineRoute({ id: "review", title: "订单评价", path: "/reviews/new", entryPath: "/reviews/new", surface: "user", layout: "userShell", legacyPaths: screenPaths("review.html") }),
   defineRoute({ id: "dispute-create", title: "发起纠纷", path: "/disputes/new", entryPath: "/disputes/new", surface: "user", layout: "userShell", legacyPaths: screenPaths("dispute-create.html") }),
   defineRoute({ id: "dispute-detail", title: "纠纷详情", path: "/disputes/:id", entryPath: "/disputes/demo", surface: "user", layout: "userShell", legacyPaths: screenPaths("dispute-detail.html") }),
-  defineRoute({ id: "jury-hall", title: "陪审大厅", path: "/jury", entryPath: "/jury", surface: "user", layout: "userShell", legacyPaths: ["/jury.html", "/screens/jury.html", "/jury-hall.html", "/screens/jury-hall.html"] }),
+  defineRoute({ id: "jury-hall", title: "陪审大厅", path: "/jury", entryPath: "/jury", surface: "user", layout: "userShell", nav: "user", legacyPaths: ["/jury.html", "/screens/jury.html", "/jury-hall.html", "/screens/jury-hall.html"] }),
   defineRoute({ id: "jury-voting", title: "陪审投票", path: "/jury/voting", entryPath: "/jury/voting", surface: "user", layout: "userShell", legacyPaths: screenPaths("jury-voting.html") }),
   defineRoute({ id: "jury-dispute-voting", title: "陪审投票", path: "/jury/disputes/:id", entryPath: "/jury/disputes/demo", surface: "user", layout: "userShell" }),
   defineRoute({ id: "help", title: "帮助与规则", path: "/help", entryPath: "/help", surface: "public", layout: "userShell", legacyPaths: screenPaths("help.html") }),
@@ -49,6 +49,7 @@ export const userNav = [
   { id: "tasks", label: "任务", path: "/tasks" },
   { id: "post", label: "发布", path: "/post" },
   { id: "messages", label: "消息", path: "/messages" },
+  { id: "jury-hall", label: "纠纷", path: "/jury" },
   { id: "profile", label: "我的", path: "/profile" }
 ];
 

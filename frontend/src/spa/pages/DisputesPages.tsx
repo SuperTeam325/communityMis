@@ -113,7 +113,7 @@ export function DisputeCreatePage({ api }: { api: ApiClient }) {
         <Field label="原因"><input name="reason" required /></Field>
         <Field label="说明"><textarea name="description" rows={5} required /></Field>
         <Field label="初始证据说明"><textarea name="evidenceContent" rows={3} placeholder="补充聊天记录、完成情况或现场说明" /></Field>
-        <FileUpload purpose="dispute-evidence" businessType="dispute" visibility="private" onUploaded={async (formData) => {
+        <FileUpload purpose="dispute-evidence" businessType="dispute" visibility="public" onUploaded={async (formData) => {
           const result = await api.files.upload(formData);
           const attachment = attachmentFromUpload(result, api);
           if (attachment) setAttachments((current) => [...current, attachment]);
@@ -326,7 +326,7 @@ function EvidenceForm({ api, disputeId, onSubmitted }: { api: ApiClient; dispute
         ).catch(() => {});
       }}>
         <Field label="证据说明"><textarea name="content" rows={3} placeholder="说明补充证据与纠纷的关联" /></Field>
-        <FileUpload purpose="dispute-evidence" businessType="dispute" businessId={disputeId} visibility="private" onUploaded={async (formData) => {
+        <FileUpload purpose="dispute-evidence" businessType="dispute" businessId={disputeId} visibility="public" onUploaded={async (formData) => {
           const result = await api.files.upload(formData);
           const attachment = attachmentFromUpload(result, api);
           if (attachment) setAttachments((current) => [...current, attachment]);

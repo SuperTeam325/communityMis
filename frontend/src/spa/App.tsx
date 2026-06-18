@@ -236,6 +236,8 @@ function NavIcon({ id }: { id: string }) {
       return <svg {...common}><path d="M12 5v14M5 12h14" /></svg>;
     case "messages":
       return <svg {...common}><path d="M5 6.5h14v9H9l-4 3v-12Z" /><path d="M8.5 10h7M8.5 13h4" /></svg>;
+    case "jury-hall":
+      return <svg {...common}><path d="M7 4v3M17 4v3M5 7h14v10a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V7Z" /><path d="M9 11h6M9 15h4" /></svg>;
     case "profile":
       return <svg {...common}><circle cx="12" cy="8" r="3.5" /><path d="M5 20c1.2-4 4-6 7-6s5.8 2 7 6" /></svg>;
     default:

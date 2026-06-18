@@ -5,9 +5,6 @@ export async function handleJuryRoutes({ request, response, url, authService }) 
     if (!["GET"].includes(request.method)) { methodNotAllowed(response, ["GET"]); throw new HttpError(0, "HANDLED"); }
     const context = await authService.authenticateRequest(request);
     authService.requireRole(context, ["user"]);
-    if (!context.user || !context.user.isJury) {
-      throw new HttpError(403, "JURY_FORBIDDEN", "Only jury members can list disputes.");
-    }
     let disputes = [];
     if (typeof authService.store.listAdminDisputes === "function") {
       const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10) || 1);
