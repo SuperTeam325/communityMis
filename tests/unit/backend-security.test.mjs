@@ -340,6 +340,39 @@ describe("admin configuration snapshots", () => {
   });
 });
 
+describe("admin dispute finalization", () => {
+  test("records jury votes and both parties evidence in the final decision basis", async () => {
+    const store = createMemoryAuthStore();
+    const result = await store.finalizeDispute({
+      disputeId: 8001,
+      actorId: 9001,
+      actorRole: "admin",
+      finalResult: "mediate",
+      refundAmount: 20,
+      reason: "结合陪审投票与双方证据，按比例调解。",
+      createdAt: "2026-06-10T10:00:00.000Z"
+    });
+
+    expect(result.dispute.resolutionNote).toContain("陪审 1 票");
+    expect(result.auditLog.detail.decisionBasis).toMatchObject({
+      finalResult: "mediate",
+      refundAmount: 20,
+      providerPayout: 20,
+      jury: {
+        total: 1,
+        counts: { publisher: 0, provider: 0, mediate: 1 },
+        leader: "mediate"
+      },
+      evidence: {
+        total: 2,
+        publisher: { count: 1 },
+        provider: { count: 1 }
+      }
+    });
+    expect(result.auditLog.detail.decisionBasis.summary).toContain("需求方证据 1 条，服务方证据 1 条");
+  });
+});
+
 describe("cookie and CSRF browser authentication", () => {
   test("requires X-CSRF-Token for cookie-authenticated mutations", async () => {
     const server = createBackendServer({

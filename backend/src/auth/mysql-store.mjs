@@ -3130,6 +3130,25 @@ SELECT JSON_OBJECT(
   async function finalizeDisputeWithoutFunction(input, finalResult, requestedRefund, reason) {
     const disputeId = Number(input.disputeId);
     const label = finalResultLabel(finalResult);
+    const dispute = await findDisputeById(disputeId);
+    if (!dispute) {
+      throw storeError("DISPUTE_NOT_FOUND", "Dispute was not found.");
+    }
+    const coinAmount = roundMoney(dispute?.order?.coinAmount ?? dispute?.request?.coinAmount ?? dispute?.freeze?.amount ?? 0);
+    const refundAmount = finalRefundAmount(finalResult, requestedRefund, coinAmount);
+    const providerPayout = roundMoney(Math.max(0, coinAmount - refundAmount));
+    const decisionBasis = finalDisputeDecisionBasis({
+      dispute,
+      order: dispute?.order,
+      request: dispute?.request,
+      evidence: Array.isArray(dispute?.evidence) ? dispute.evidence : await listDisputeEvidence(disputeId),
+      votes: await listJuryVotesForDisputeId(disputeId),
+      finalResult,
+      refundAmount,
+      providerPayout,
+      reason
+    });
+    const decisionBasisJson = JSON.stringify(decisionBasis);
     const sql = `
 START TRANSACTION;
 SET @resolved_at = CURRENT_TIMESTAMP;
@@ -3140,6 +3159,7 @@ SET @ip_address = ${sqlNullableString(input.ipAddress)};
 SET @final_result = ${sqlString(finalResult)};
 SET @final_label = ${sqlString(label)};
 SET @reason = ${sqlNullableString(reason)};
+SET @decision_basis_json = ${sqlString(decisionBasisJson)};
 SET @requested_refund = ${requestedRefund === null ? "NULL" : requestedRefund};
 SET @dispute_found = 0;
 SET @already_resolved = 0;
@@ -3224,7 +3244,7 @@ SELECT @payer_id, 'dispute', '纠纷终审已完成', CONCAT('订单「', @reque
 INSERT INTO \`notification\` (\`user_id\`, \`type\`, \`title\`, \`content\`, \`business_type\`, \`business_id\`, \`created_at\`)
 SELECT @provider_id, 'dispute', '纠纷终审已完成', CONCAT('订单「', @request_title, '」终审结果：', @final_label, '，结算 ', CAST(@provider_payout AS CHAR), ' 时间币。'), 'dispute', @dispute_id, @resolved_at WHERE @updated = 1;
 INSERT INTO \`audit_log\` (\`actor_id\`, \`actor_role\`, \`action\`, \`target_type\`, \`target_id\`, \`ip_address\`, \`detail\`, \`created_at\`)
-SELECT @actor_id, @actor_role, 'admin.dispute.finalize', 'dispute', @dispute_id, @ip_address, JSON_OBJECT('finalResult', @final_result, 'refundAmount', CAST(@refund_amount AS DOUBLE), 'providerPayout', CAST(@provider_payout AS DOUBLE), 'reason', @reason), @resolved_at WHERE @updated = 1;
+SELECT @actor_id, @actor_role, 'admin.dispute.finalize', 'dispute', @dispute_id, @ip_address, JSON_OBJECT('finalResult', @final_result, 'refundAmount', CAST(@refund_amount AS DOUBLE), 'providerPayout', CAST(@provider_payout AS DOUBLE), 'reason', @reason, 'decisionBasis', JSON_EXTRACT(@decision_basis_json, '$')), @resolved_at WHERE @updated = 1;
 SET @created_audit_id = IF(@updated = 1, LAST_INSERT_ID(), NULL);
 SET @transaction_sql = IF(@updated = 1, 'COMMIT', 'ROLLBACK');
 PREPARE transaction_statement FROM @transaction_sql;
@@ -3233,6 +3253,9 @@ DEALLOCATE PREPARE transaction_statement;
 SELECT JSON_OBJECT('disputeFound', @dispute_found, 'alreadyResolved', @already_resolved, 'closed', @closed, 'walletsFound', @wallets_found, 'insufficientBalance', @insufficient_balance, 'updated', @updated, 'orderId', @order_id, 'auditId', @created_audit_id);
 `;
     const result = await mysqlJson(sql);
+    if (Number(result?.updated ?? 0) === 1) {
+      await updateDisputeResolutionNoteIfSupported(disputeId, decisionBasis.summary);
+    }
     return finalizeDisputeResult(result, disputeId);
   }
 
@@ -3260,6 +3283,16 @@ SELECT JSON_OBJECT('disputeFound', @dispute_found, 'alreadyResolved', @already_r
       order: await findServiceOrderById(result.orderId),
       auditLog: await findAuditLogById(result.auditId)
     };
+  }
+
+  async function updateDisputeResolutionNoteIfSupported(disputeId, resolutionNote) {
+    try {
+      await pooledExecute("UPDATE `dispute` SET `resolution_note` = ? WHERE `dispute_id` = ? LIMIT 1", [resolutionNote, Number(disputeId)]);
+    } catch (error) {
+      if (error?.code !== "ER_BAD_FIELD_ERROR") {
+        throw error;
+      }
+    }
   }
 
   async function adminStats() {
@@ -6447,6 +6480,135 @@ function finalResultLabel(value) {
     ["cancelled", "已取消"]
   ]);
   return map.get(value) ?? "终审结案";
+}
+
+function finalRefundAmount(finalResult, rawRefundAmount, coinAmount) {
+  const requested = Number(rawRefundAmount);
+  const explicit = Number.isFinite(requested) ? Math.min(coinAmount, Math.max(0, requested)) : null;
+  if (finalResult === "publisher_win") {
+    return roundMoney(explicit === null ? coinAmount : explicit);
+  }
+  if (finalResult === "provider_win") {
+    return 0;
+  }
+  return roundMoney(explicit === null ? coinAmount / 2 : explicit);
+}
+
+function finalDisputeDecisionBasis(input) {
+  const evidence = Array.isArray(input.evidence) ? input.evidence : [];
+  const votes = Array.isArray(input.votes) ? input.votes : [];
+  const evidenceSummary = finalDisputeEvidenceSummary(evidence, input);
+  const jury = finalDisputeJurySummary(votes);
+  const reason = normalizeOptionalString(input.reason);
+  const summaryParts = [
+    `陪审 ${jury.total} 票，需求方 ${jury.counts.publisher}、服务方 ${jury.counts.provider}、调解 ${jury.counts.mediate}，领先意见：${jury.leaderText}`,
+    `需求方证据 ${evidenceSummary.publisher.count} 条，服务方证据 ${evidenceSummary.provider.count} 条，其他证据 ${evidenceSummary.other.count} 条`,
+    `终审结果：${finalResultLabel(input.finalResult)}，退款 ${roundMoney(input.refundAmount).toFixed(2)} 时间币，服务方结算 ${roundMoney(input.providerPayout).toFixed(2)} 时间币`
+  ];
+  if (reason) {
+    summaryParts.push(`管理员理由：${reason}`);
+  }
+  return {
+    summary: summaryParts.join("；"),
+    finalResult: input.finalResult,
+    refundAmount: roundMoney(input.refundAmount),
+    providerPayout: roundMoney(input.providerPayout),
+    reason,
+    jury,
+    evidence: evidenceSummary
+  };
+}
+
+function finalDisputeJurySummary(votes) {
+  const counts = { publisher: 0, provider: 0, mediate: 0 };
+  for (const vote of votes) {
+    const key = normalizeJuryVoteValue(vote?.vote);
+    counts[key] += 1;
+  }
+  const total = votes.length;
+  const leader = Object.entries(counts)
+    .sort((left, right) => right[1] - left[1] || juryTieOrder(left[0]) - juryTieOrder(right[0]))[0]?.[0] ?? "mediate";
+  return {
+    total,
+    counts,
+    leader,
+    leaderText: juryVoteLabel(leader),
+    votes: votes.map((vote) => ({
+      voteId: vote.voteId ?? null,
+      jurorId: vote.jurorId ?? null,
+      vote: normalizeJuryVoteValue(vote.vote),
+      voteText: juryVoteLabel(vote.vote),
+      reason: normalizeOptionalString(vote.reason),
+      createdAt: vote.createdAt ?? null
+    }))
+  };
+}
+
+function finalDisputeEvidenceSummary(evidence, input) {
+  const publisherIds = finalDisputePartyIds(input.request?.publisherId, input.dispute?.publisher?.userId, input.dispute?.initiatorId);
+  const providerIds = finalDisputePartyIds(input.order?.providerId, input.dispute?.provider?.userId, input.dispute?.respondentId);
+  const groups = {
+    publisher: [],
+    provider: [],
+    other: []
+  };
+  for (const item of evidence) {
+    const uploaderId = Number(item?.uploaderId);
+    const target = publisherIds.has(uploaderId) ? "publisher" : providerIds.has(uploaderId) ? "provider" : "other";
+    groups[target].push(item);
+  }
+  return {
+    total: evidence.length,
+    publisher: finalDisputeEvidenceGroup(groups.publisher),
+    provider: finalDisputeEvidenceGroup(groups.provider),
+    other: finalDisputeEvidenceGroup(groups.other)
+  };
+}
+
+function finalDisputePartyIds(primary, secondary, fallback) {
+  const ids = [primary, secondary]
+    .filter((value) => value !== undefined && value !== null)
+    .map(Number)
+    .filter((value) => Number.isFinite(value));
+  if (ids.length === 0 && fallback !== undefined && fallback !== null) {
+    const fallbackId = Number(fallback);
+    if (Number.isFinite(fallbackId)) {
+      ids.push(fallbackId);
+    }
+  }
+  return new Set(ids);
+}
+
+function finalDisputeEvidenceGroup(items) {
+  return {
+    count: items.length,
+    items: items.slice(0, 10).map((item) => ({
+      evidenceId: item.evidenceId ?? null,
+      uploaderId: item.uploaderId ?? null,
+      evidenceType: item.evidenceType ?? "text",
+      content: summarizeDecisionText(item.content, 120),
+      attachmentCount: Array.isArray(item.attachments) ? item.attachments.length : 0,
+      createdAt: item.createdAt ?? null
+    }))
+  };
+}
+
+function juryTieOrder(value) {
+  return ({ mediate: 0, publisher: 1, provider: 2 })[value] ?? 3;
+}
+
+function juryVoteLabel(value) {
+  const map = {
+    publisher: "建议需求方胜诉",
+    provider: "建议服务方胜诉",
+    mediate: "建议调解处理"
+  };
+  return map[normalizeJuryVoteValue(value)] ?? "建议调解处理";
+}
+
+function summarizeDecisionText(value, limit = 120) {
+  const content = String(value ?? "").replace(/\s+/g, " ").trim();
+  return content.length > limit ? `${content.slice(0, limit)}...` : content;
 }
 
 function disputeProgress(dispute, evidence) {
