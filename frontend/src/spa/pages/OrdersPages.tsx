@@ -10,6 +10,7 @@ import {
   numberValue,
   PageHeader,
   PaginationControls,
+  SegmentedTabs,
   StateView,
   statusLabel,
   statusTone,
@@ -45,6 +46,9 @@ export function OrdersPage({ api }: { api: ApiClient }) {
   const state = useAsync(() => api.orders.list(query), [api, params.toString()]);
   const orders = asArray<Record<string, unknown>>(state.data, "orders");
   const pagination = asRecord(state.data?.pagination);
+  const activeCount = orders.filter((item) => ["accepted", "payer_confirmed", "provider_confirmed", "both_confirmed"].includes(String(item.status))).length;
+  const completedCount = orders.filter((item) => String(item.status) === "completed").length;
+  const disputedCount = orders.filter((item) => String(item.status) === "disputed").length;
   const updateQuery = (patch: Record<string, unknown>) => {
     setParams((current) => {
       const next = new URLSearchParams(current);
@@ -63,13 +67,18 @@ export function OrdersPage({ api }: { api: ApiClient }) {
 
   return (
     <>
-      <PageHeader title="我的订单" />
-      <section className="panel filter-panel">
-        <div className="filter-row" aria-label="订单角色">
-          {ORDER_ROLE_FILTERS.map(([value, label]) => (
-            <button key={value} className={`chip ${query.role === value ? "active" : ""}`} onClick={() => updateQuery({ role: value, page: 1 })}>{label}</button>
-          ))}
+      <section className="orders-header">
+        <PageHeader title="我的订单" description="跟踪发布、接单、确认、评价和纠纷状态。" />
+        <div className="order-stats">
+          <div className="ostat"><div className="ostat-num">{activeCount}</div><div className="ostat-lbl">进行中</div></div>
+          <div className="ostat"><div className="ostat-num">{completedCount}</div><div className="ostat-lbl">已完成</div></div>
+          <div className="ostat"><div className="ostat-num">{disputedCount}</div><div className="ostat-lbl">争议中</div></div>
         </div>
+      </section>
+      <section className="orders-tabs">
+        <SegmentedTabs items={ORDER_ROLE_FILTERS} value={query.role} onChange={(value) => updateQuery({ role: value, page: 1 })} ariaLabel="订单角色" />
+      </section>
+      <section className="filter-panel">
         <div className="filter-row" aria-label="订单状态">
           {ORDER_STATUS_FILTERS.map(([value, label]) => (
             <button key={value} className={`chip ${query.status === value ? "active" : ""}`} onClick={() => updateQuery({ status: value, page: 1 })}>{label}</button>
@@ -77,7 +86,7 @@ export function OrdersPage({ api }: { api: ApiClient }) {
         </div>
       </section>
       <StateView loading={state.loading} error={state.error} empty={orders.length === 0}>
-        <div className="card-list">{orders.map((order) => <OrderCard key={text(order.orderId)} order={order} />)}</div>
+        <div className="orders-list">{orders.map((order) => <OrderCard key={text(order.orderId)} order={order} />)}</div>
       </StateView>
       <PaginationControls pagination={pagination} onPageChange={(page) => updateQuery({ page })} />
     </>
@@ -99,26 +108,36 @@ export function OrderDetailPage({ api }: { api: ApiClient }) {
     <>
       <PageHeader title="订单详情" action={<Link className="btn btn--secondary" to="/orders">返回订单</Link>} />
       <StateView loading={state.loading} error={state.error} empty={!order.orderId}>
-        <article className="panel detail-panel">
-          <div className="section-heading">
-            <h2>{text(request.title, `订单 #${text(order.orderId ?? id)}`)}</h2>
+        <article className="detail-body">
+          <section className="info-card">
+            <div className="order-no">#{text(order.orderId ?? id)}</div>
+            <div className="section-heading">
+              <h2 className="order-title">{text(request.title, `订单 #${text(order.orderId ?? id)}`)}</h2>
             <Badge tone={statusTone(order.status)}>{statusLabel(order.status)}</Badge>
-          </div>
-          <p>{text(request.description, "暂无需求描述")}</p>
-          <div className="metric-grid">
-            <div className="metric-card"><span>时间币</span><strong>{text(order.coinAmount)}</strong></div>
-            <div className="metric-card"><span>我的角色</span><strong>{myRoleLabel(order.myRole)}</strong></div>
-            <div className="metric-card"><span>需求方确认</span><strong>{confirmation.payerConfirmed ? "已确认" : "未确认"}</strong></div>
-            <div className="metric-card"><span>服务方确认</span><strong>{confirmation.providerConfirmed ? "已确认" : "未确认"}</strong></div>
-          </div>
-          <section className="panel nested-panel">
-            <h3>参与方</h3>
-            <div className="meta-row">
-              <Link to={`/users/${text(publisher.userId)}`}>需求方：{text(publisher.displayName ?? publisher.username)}</Link>
-              <Link to={`/users/${text(provider.userId)}`}>服务方：{text(provider.displayName ?? provider.username)}</Link>
+            </div>
+            <p>{text(request.description, "暂无需求描述")}</p>
+            <div className="info-row metric-grid">
+              <div className="metric-card info-cell"><span>时间币</span><strong className="amount">⏂ {text(order.coinAmount)}</strong></div>
+              <div className="metric-card info-cell"><span>我的角色</span><strong>{myRoleLabel(order.myRole)}</strong></div>
+              <div className="metric-card info-cell"><span>需求方确认</span><strong>{confirmation.payerConfirmed ? "已确认" : "未确认"}</strong></div>
+              <div className="metric-card info-cell"><span>服务方确认</span><strong>{confirmation.providerConfirmed ? "已确认" : "未确认"}</strong></div>
             </div>
           </section>
-          <section className="panel nested-panel">
+          <section className="party-row">
+            <Link className="party-card" to={`/users/${text(publisher.userId)}`}>
+              <div className="party-role">需求方</div>
+              <span className="avatar lg avatar-initial">{text(publisher.displayName ?? publisher.username, "需").slice(0, 1)}</span>
+              <strong>{text(publisher.displayName ?? publisher.username)}</strong>
+              <div className={`party-confirm ${confirmation.payerConfirmed ? "confirmed" : ""}`}>{confirmation.payerConfirmed ? "已确认" : "未确认"}</div>
+            </Link>
+            <Link className="party-card" to={`/users/${text(provider.userId)}`}>
+              <div className="party-role">服务方</div>
+              <span className="avatar lg avatar-initial">{text(provider.displayName ?? provider.username, "服").slice(0, 1)}</span>
+              <strong>{text(provider.displayName ?? provider.username)}</strong>
+              <div className={`party-confirm ${confirmation.providerConfirmed ? "confirmed" : ""}`}>{confirmation.providerConfirmed ? "已确认" : "未确认"}</div>
+            </Link>
+          </section>
+          <section className="panel nested-panel timeline">
             <h3>订单时间线</h3>
             <ol className="timeline-list">
               <li><strong>创建订单</strong><span>{dateText(order.createdAt)}</span></li>
@@ -210,14 +229,15 @@ function OrderCard({ order }: { order: Record<string, unknown> }) {
   const request = asRecord(order.request);
   const reviewState = asRecord(order.reviewState);
   return (
-    <Link className="card interactive" to={`/orders/${text(order.orderId)}`}>
-      <div className="section-heading">
-        <div className="card-title">{text(request.title, `订单 #${text(order.orderId)}`)}</div>
+    <Link className="order-card interactive" to={`/orders/${text(order.orderId)}`}>
+      <div className="oc-top section-heading">
+        <div className="oc-title card-title">{text(request.title, `订单 #${text(order.orderId)}`)}</div>
         <Badge tone={statusTone(order.status)}>{statusLabel(order.status)}</Badge>
       </div>
-      <p>{text(request.descriptionSummary ?? request.description, "暂无需求描述")}</p>
-      <div className="meta-row">
-        <span>{text(order.coinAmount)} 时间币</span>
+      <div className="oc-id">#{text(order.orderId)}</div>
+      <p className="oc-desc">{text(request.descriptionSummary ?? request.description, "暂无需求描述")}</p>
+      <div className="oc-meta meta-row">
+        <span className="oc-amount">⏂ {text(order.coinAmount)}</span>
         <span>{myRoleLabel(order.myRole)}</span>
         <span>{dateText(order.createdAt)}</span>
         {order.canConfirm ? <span className="chip active">待我确认</span> : null}

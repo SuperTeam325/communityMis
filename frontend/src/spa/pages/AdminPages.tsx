@@ -6,6 +6,7 @@ import {
   Badge,
   DataTable,
   Field,
+  AdminMetricCard,
   PageHeader,
   PaginationControls,
   StateView,
@@ -52,26 +53,34 @@ export function AdminDashboardPage({ api }: { api: ApiClient }) {
   const alerts = asArray<Row>(asRecord(state.data).alerts ?? asRecord(state.data).highlights ?? asRecord(state.data).recentItems, "items");
   return (
     <>
-      <PageHeader title="管理仪表盘" />
+      <PageHeader title="管理仪表盘" kicker="Overview" description="平台运营、交易、纠纷、内容风险和 AI 调用的实时概览。" />
       <StateView loading={state.loading} error={state.error} empty={!Object.keys(metrics).length && !alerts.length}>
-        <section className="metric-grid admin-metric-grid">
+        <section className="metric-grid admin-metric-grid stat-grid">
           {[
-            ["用户", metrics.userCount],
-            ["订单", metrics.orderCount],
-            ["纠纷", metrics.disputeCount],
-            ["流通时间币", metrics.circulatingCoins],
-            ["待审核内容", metrics.pendingRiskCount],
-            ["高风险请求", metrics.highRiskCount]
-          ].map(([label, value]) => <div className="metric-card" key={String(label)}><span>{String(label)}</span><strong>{text(value, "0")}</strong></div>)}
+            ["用户", metrics.userCount, "注册用户总数"],
+            ["订单", metrics.orderCount, "订单总量"],
+            ["纠纷", metrics.disputeCount, "争议处理"],
+            ["流通时间币", metrics.circulatingCoins, "平台流通"],
+            ["待审核内容", metrics.pendingRiskCount, "内容安全"],
+            ["高风险请求", metrics.highRiskCount, "AI / 风控"]
+          ].map(([label, value, hint]) => <AdminMetricCard key={String(label)} label={String(label)} value={text(value, "0")} hint={String(hint)} />)}
         </section>
-        <section className="panel">
+        <section className="activity-section panel">
           <h2>后台快捷入口</h2>
-          <div className="action-row">
-            <Link className="btn btn--secondary" to="/admin/users">用户管理</Link>
-            <Link className="btn btn--secondary" to="/admin/transactions">交易流水</Link>
-            <Link className="btn btn--secondary" to="/admin/disputes">争议处理</Link>
-            <Link className="btn btn--secondary" to="/admin/risk-content">内容风险</Link>
-            <Link className="btn btn--secondary" to="/admin/system">系统设置</Link>
+          <div className="quick-actions">
+            {[
+              ["/admin/users", "用户管理", "查看、搜索、启用/禁用用户账号"],
+              ["/admin/transactions", "交易流水", "查看订单转账、冻结释放与退款"],
+              ["/admin/disputes", "争议处理", "查看证据并进入终审裁决"],
+              ["/admin/risk-content", "内容风险", "处理敏感词命中和违规沟通"],
+              ["/admin/system", "系统设置", "快照、维护模式与审计提示"]
+            ].map(([href, title, desc]) => (
+              <Link key={href} className="quick-action-card" to={href}>
+                <span className="qa-icon">⏂</span>
+                <span className="qa-body"><span className="qa-title">{title}</span><span className="qa-desc">{desc}</span></span>
+                <span className="qa-arrow">→</span>
+              </Link>
+            ))}
           </div>
         </section>
         {alerts.length ? (
@@ -484,7 +493,7 @@ export function AdminPageByRoute({ api, route }: { api: ApiClient; route: AppRou
 function AdminPage({ title, filters, children }: { title: string; filters?: React.ReactNode; children: React.ReactNode }) {
   return (
     <>
-      <PageHeader title={title} />
+      <PageHeader title={title} kicker="Management" description="筛选、查看和处理真实后台数据。" />
       {filters}
       {children}
     </>
@@ -492,7 +501,7 @@ function AdminPage({ title, filters, children }: { title: string; filters?: Reac
 }
 
 function FilterBar({ children }: { children: React.ReactNode }) {
-  return <section className="panel filter-panel admin-filter-panel">{children}</section>;
+  return <section className="filter-bar filter-panel admin-filter-panel">{children}</section>;
 }
 
 function TextFilter({ label, value, onChange, placeholder = "" }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string }) {

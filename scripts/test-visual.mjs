@@ -1,12 +1,12 @@
 import { createBackendServer } from "../backend/src/app.mjs";
 import { createFrontendServer } from "../frontend/server.mjs";
-import { responsiveViewports } from "../frontend/src/spa/route-data.mjs";
+import { appRoutes, responsiveViewports, routePath } from "../frontend/src/spa/route-data.mjs";
 import { chromium } from "playwright";
 
 const checks = [];
-const publicRoutes = ["/", "/login", "/register", "/feed"];
-const userRoutes = ["/post", "/messages", "/wallet"];
-const adminRoutes = ["/admin/dashboard", "/admin/system"];
+const publicRoutes = visualRoutesFor("none");
+const userRoutes = visualRoutesFor("user");
+const adminRoutes = visualRoutesFor("admin");
 
 await run();
 
@@ -105,6 +105,10 @@ async function loginAdmin(page, baseUrl) {
 
 function record(ok, message) {
   checks.push({ ok: Boolean(ok), message });
+}
+
+function visualRoutesFor(auth) {
+  return [...new Set(appRoutes.filter((route) => route.auth === auth).map(routePath))];
 }
 
 function listen(server, port = 0) {

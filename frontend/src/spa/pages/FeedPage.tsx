@@ -7,6 +7,8 @@ import {
   dateText,
   PageHeader,
   PaginationControls,
+  PostCard,
+  SearchBar,
   StateView,
   statusLabel,
   statusTone,
@@ -48,27 +50,29 @@ export function FeedPage({ api }: { api: ApiClient }) {
 
   return (
     <>
-      <PageHeader title="首页信息流" action={<Link className="btn btn--primary" to="/post">发布需求</Link>} />
-      <section className="panel filter-panel">
-        <form className="inline-form" onSubmit={(event) => {
+      <section className="feed-header">
+        <PageHeader title="首页信息流" description="发现社区里的真实互助需求和邻里动态。" action={<Link className="btn btn--primary" to="/post">发布需求</Link>} />
+        <SearchBar
+          placeholder="搜索需求、地点或标签"
+          defaultValue={query.keyword}
+          action={<Link className="ai-filter-btn" to={`/ai/results?prompt=${encodeURIComponent(query.keyword || "帮我筛选附近可接的高信用需求")}&scene=request_filter`}>AI 筛选</Link>}
+          onSubmit={(event) => {
           event.preventDefault();
           const form = new FormData(event.currentTarget);
           updateQuery({ keyword: form.get("keyword"), page: 1 });
-        }}>
-          <input name="keyword" placeholder="搜索需求、地点或标签" defaultValue={query.keyword} />
-          <button className="btn btn--secondary">搜索</button>
-        </form>
-        <div className="filter-row" aria-label="需求状态">
+        }}
+        />
+        <div className="category-tabs filter-row" aria-label="需求状态">
           {[
             ["open", "待接单"],
             ["accepted", "已接单"],
             ["completed", "已完成"],
             ["all", "全部"]
           ].map(([value, label]) => (
-            <button key={value} className={`chip ${query.status === value ? "active" : ""}`} onClick={() => updateQuery({ status: value, page: 1 })}>{label}</button>
+            <button key={value} className={`chip ${query.status === value ? "active" : ""}`} aria-label={`筛选${label}`} onClick={() => updateQuery({ status: value, page: 1 })}>{label}</button>
           ))}
         </div>
-        <div className="filter-row" aria-label="服务类别">
+        <div className="category-tabs filter-row" aria-label="服务类别">
           <button className={`chip ${!query.categoryId ? "active" : ""}`} onClick={() => updateQuery({ categoryId: "", page: 1 })}>全部类别</button>
           {categories.map((category) => (
             <button
@@ -84,20 +88,7 @@ export function FeedPage({ api }: { api: ApiClient }) {
       <StateView loading={state.loading} error={state.error} empty={requests.length === 0}>
         <div className="card-list feed-content">
           {requests.map((item) => (
-            <Link className="card interactive" key={text(item.requestId)} to={`/posts/${text(item.requestId)}`}>
-              <div className="section-heading">
-                <div className="card-title">{text(item.title)}</div>
-                <Badge tone={statusTone(item.status)}>{statusLabel(item.status)}</Badge>
-              </div>
-              <p>{text(item.descriptionSummary || item.description || item.content)}</p>
-              <div className="meta-row">
-                <span>{text((item.category as Record<string, unknown>)?.name ?? item.categoryName)}</span>
-                <span>{text(item.coinAmount ?? item.rewardAmount ?? item.reward)} 时间币</span>
-                <span>{text(item.estimatedHours)} 小时</span>
-                <span>{text((item.publisher as Record<string, unknown>)?.displayName ?? (item.publisher as Record<string, unknown>)?.username, "匿名邻居")}</span>
-                <span>{dateText(item.createdAt)}</span>
-              </div>
-            </Link>
+            <PostCard key={text(item.requestId)} item={item} href={`/posts/${text(item.requestId)}`} />
           ))}
         </div>
       </StateView>

@@ -258,15 +258,15 @@ export function AiAssistantPage({ api }: { api: ApiClient }) {
 
   return (
     <>
-      <PageHeader title="AI 助手" action={
+      <PageHeader title="AI 助手" description="用于需求筛选、发布草稿、规则问答和摘要辅助，关键操作仍在业务页确认。" action={
         <div className="ai-page-actions">
           <button className="btn btn--secondary" onClick={() => openScene("request_filter", "帮我找一个信用高的英语辅导需求")}>筛选需求</button>
           <button className="btn btn--secondary" onClick={() => openScene("request_draft", "帮我写一段发布代取快递任务的描述")}>发布辅助</button>
           <button className="btn btn--secondary" onClick={() => openScene("rules", "如何发起纠纷？")}>规则问答</button>
         </div>
       } />
-      <section className="panel ai-shell">
-        <div className="ai-scene-bar">
+      <section className="ai-shell ai-page-shell">
+        <div className="ai-scene-bar ai-modal-scene-bar">
           {SCENE_OPTIONS.map((item) => (
             <button key={item.value} type="button" className={`scene-chip${scene === item.value ? " active" : ""}`} onClick={() => openScene(item.value, item.prompt)}>
               {item.label}
@@ -274,7 +274,7 @@ export function AiAssistantPage({ api }: { api: ApiClient }) {
           ))}
         </div>
         <div className="ai-layout">
-          <aside className="ai-sidebar">
+          <aside className="ai-sidebar hist-panel">
             <div className="ai-sidebar-head">
               <h3>历史会话</h3>
               <button className="btn btn--secondary btn--sm" type="button" onClick={() => { setConversationId(null); setMessages([]); setInputValue(""); setScene("all"); }}>新对话</button>
@@ -298,9 +298,10 @@ export function AiAssistantPage({ api }: { api: ApiClient }) {
             </div>
           </aside>
           <div className="ai-chat-column">
-            <div className="chat-window" ref={chatRef}>
+            <div className="chat-window ai-chat-area" ref={chatRef}>
               {currentMessages.length === 0 ? (
-                <div className="ai-empty">
+                <div className="ai-empty ai-welcome">
+                  <div className="welcome-icon">AI</div>
                   <h2>你好，我是邻帮 AI 助手</h2>
                   <p>我可以帮你查找服务、解答规则、筛选需求，以及辅助发布内容。你仍然需要在业务页面完成关键动作。</p>
                   <div className="suggested-qs">
@@ -340,7 +341,7 @@ export function AiAssistantPage({ api }: { api: ApiClient }) {
                 />
               ))}
             </div>
-            <form className="inline-form ai-input-form" onSubmit={sendMessage}>
+            <form className="inline-form ai-input-form ai-input-bar" onSubmit={sendMessage}>
               <Field label="输入问题">
                 <textarea
                   name="content"
@@ -398,7 +399,7 @@ export function AiResultsPage({ api }: { api: ApiClient }) {
 
   return (
     <>
-      <PageHeader title="AI 筛选结果" />
+      <PageHeader title="AI 筛选结果" description="用自然语言条件筛选任务，结果仍以任务详情页为准。" />
       <section className="panel form-grid">
         <Field label="筛选描述">
           <textarea value={draftPrompt} rows={4} placeholder="例如：找一个信用高、今天发布的电脑维修需求" onChange={(event) => setDraftPrompt(event.currentTarget.value)} />
@@ -822,7 +823,7 @@ function AiAdminPageShell({
   ] as const;
   return (
     <>
-      <PageHeader title={title} />
+      <PageHeader title={title} kicker="AI Ops" description="审计 AI 调用、会话、反馈、异常与配置。" />
       <nav className="ai-subnav" aria-label="AI 管理子页">
         {tabs.map((item) => <Link key={item.id} className={item.id === active ? "active" : ""} to={item.href}>{item.label}</Link>)}
       </nav>

@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import { ApiError } from "../api";
 
 export function useAsync<T>(loader: (signal?: AbortSignal) => Promise<T>, deps: React.DependencyList = []) {
@@ -45,13 +46,152 @@ export function StateView({ loading, error, empty, children }: {
   return <>{children}</>;
 }
 
-export function PageHeader({ title, action }: { title: string; action?: React.ReactNode }) {
+export function PageHeader({ title, action, kicker, description }: { title: string; action?: React.ReactNode; kicker?: string; description?: React.ReactNode }) {
   return (
-    <header className="page-header">
-      <h1>{title}</h1>
+    <header className="page-header page-head">
+      <div>
+        {kicker ? <div className="head-kicker">{kicker}</div> : null}
+        <h1>{title}</h1>
+        {description ? <p>{description}</p> : null}
+      </div>
       {action}
     </header>
   );
+}
+
+export const PrototypePageHeader = PageHeader;
+
+export function SearchBar({
+  name = "keyword",
+  defaultValue = "",
+  placeholder,
+  buttonLabel = "搜索",
+  action,
+  onSubmit
+}: {
+  name?: string;
+  defaultValue?: string;
+  placeholder: string;
+  buttonLabel?: string;
+  action?: React.ReactNode;
+  onSubmit: React.FormEventHandler<HTMLFormElement>;
+}) {
+  return (
+    <form className="search-row inline-form" role="search" onSubmit={onSubmit}>
+      <label className="search-box">
+        <SearchIcon />
+        <input name={name} defaultValue={defaultValue} placeholder={placeholder} />
+      </label>
+      {action}
+      <button className="btn btn--secondary">{buttonLabel}</button>
+    </form>
+  );
+}
+
+export function IconButton({ label, children, className = "", ...props }: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+} & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return <button className={`icon-btn ${className}`.trim()} aria-label={label} title={label} {...props}>{children}</button>;
+}
+
+export function SegmentedTabs({ items, value, onChange, ariaLabel }: {
+  items: readonly (readonly [string, string])[];
+  value: string;
+  onChange: (value: string) => void;
+  ariaLabel?: string;
+}) {
+  return (
+    <div className="tabs segmented-tabs" role="tablist" aria-label={ariaLabel}>
+      {items.map(([nextValue, label]) => (
+        <button key={nextValue} type="button" className={value === nextValue ? "active" : ""} onClick={() => onChange(nextValue)}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
+export function FormSection({ title, children, description }: { title?: string; description?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section className="form-section">
+      {title ? <h3>{title}</h3> : null}
+      {description ? <p className="helper">{description}</p> : null}
+      {children}
+    </section>
+  );
+}
+
+export function TaskCard({ item, action, compact = false }: { item: Record<string, unknown>; action?: React.ReactNode; compact?: boolean }) {
+  const category = asRecord(item.category);
+  const publisher = asRecord(item.publisher);
+  const credit = asRecord(item.creditSummary);
+  const href = `/posts/${text(item.requestId)}`;
+  return (
+    <article className={`task-card card${compact ? " compact" : ""}`}>
+      <div className="card-top">
+        <LinkLike href={href} className="task-title">{text(item.title)}</LinkLike>
+        <span className="reward-badge">⏂ {text(item.coinAmount ?? item.rewardAmount ?? item.reward, "0")}</span>
+      </div>
+      <p className="task-desc">{text(item.descriptionSummary || item.description || item.content)}</p>
+      <div className="meta-row">
+        <span>{text(category.name ?? item.categoryName)}</span>
+        <span>{text(item.estimatedHours)} 小时</span>
+        <span>{text(item.location, "未填写地点")}</span>
+        <Badge tone={statusTone(item.status)}>{statusLabel(item.status)}</Badge>
+      </div>
+      <div className="card-footer">
+        <LinkLike href={`/users/${text(publisher.userId, "")}`} className="publisher-info">
+          <span className="avatar sm avatar-initial">{text(publisher.displayName ?? publisher.username, "邻").slice(0, 1)}</span>
+          <span>
+            <strong>{text(publisher.displayName ?? publisher.username, "匿名邻居")}</strong>
+            <span className="rating">信誉 {text(credit.averageRating, "0")}</span>
+          </span>
+        </LinkLike>
+        {action ?? <LinkLike href={href} className="btn btn--primary btn--sm accept-btn">查看详情</LinkLike>}
+      </div>
+    </article>
+  );
+}
+
+export function PostCard({ item, href }: { item: Record<string, unknown>; href: string }) {
+  const publisher = asRecord(item.publisher);
+  return (
+    <article className="post-card card">
+      <div className="author-row">
+        <LinkLike href={`/users/${text(publisher.userId, "")}`} className="author-link">
+          <span className="avatar avatar-initial">{text(publisher.displayName ?? publisher.username, "邻").slice(0, 1)}</span>
+          <span className="author-info">
+            <strong className="author-name">{text(publisher.displayName ?? publisher.username, "匿名邻居")}</strong>
+            <span className="author-meta">{dateText(item.createdAt)}</span>
+          </span>
+        </LinkLike>
+        <Badge tone={statusTone(item.status)}>{statusLabel(item.status)}</Badge>
+      </div>
+      <LinkLike href={href} className="post-body-link">
+        <h2>{text(item.title)}</h2>
+        <p className="post-body-text">{text(item.descriptionSummary || item.description || item.content)}</p>
+      </LinkLike>
+      <div className="post-actions-row">
+        <span>{text(item.coinAmount ?? item.rewardAmount ?? item.reward)} 时间币</span>
+        <span>{text(item.estimatedHours)} 小时</span>
+        <span>{text(item.location, "未填写地点")}</span>
+      </div>
+    </article>
+  );
+}
+
+export function AdminMetricCard({ label, value, hint, tone = "neutral" }: { label: string; value: React.ReactNode; hint?: React.ReactNode; tone?: string }) {
+  return (
+    <div className={`metric-card stat-card tone-${tone}`}>
+      <div className="label">{label}</div>
+      <div className="value">{value}</div>
+      {hint ? <div className="hint">{hint}</div> : null}
+    </div>
+  );
+}
+
+export function AdminDataShell({ children }: { children: React.ReactNode }) {
+  return <div className="data-shell">{children}</div>;
 }
 
 export type PaginationData = {
@@ -82,7 +222,7 @@ export function PaginationControls({ pagination, onPageChange }: {
 
 export function DataTable({ columns, rows }: { columns: string[]; rows: React.ReactNode[][] }) {
   return (
-    <div className="table-wrap">
+    <div className="table-wrap data-shell table-scroll">
       <table className="data-table">
         <thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
         <tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, i) => <td key={i}>{cell}</td>)}</tr>)}</tbody>
@@ -96,7 +236,7 @@ export function Field({ label, children }: { label: string; children: React.Reac
 }
 
 export function Badge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: string }) {
-  return <span className={`badge-state badge-state--${tone}`}>{children}</span>;
+  return <span className={`badge-state badge-state--${tone} ${tone}`}>{children}</span>;
 }
 
 export function FileUpload({ purpose, businessType, businessId, visibility, onUploaded }: {
@@ -287,4 +427,17 @@ export function useMutationTracker() {
 
 export function isAbortError(error: unknown) {
   return Boolean(error && typeof error === "object" && "name" in error && (error as { name?: string }).name === "AbortError");
+}
+
+function SearchIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </svg>
+  );
+}
+
+function LinkLike({ href, className, children }: { href: string; className?: string; children: React.ReactNode }) {
+  return <Link className={className} to={href}>{children}</Link>;
 }

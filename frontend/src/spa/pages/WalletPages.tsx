@@ -64,29 +64,43 @@ export function WalletPage({ api }: { api: ApiClient }) {
 
   return (
     <>
-      <PageHeader title="时间币钱包" action={<Link className="btn btn--secondary" to="/wallet/freeze">冻结明细</Link>} />
-      <section className="panel filter-panel">
-        <div className="filter-row" aria-label="交易类型筛选">
-          {TRANSACTION_TYPES.map(([value, label]) => (
-            <button key={value} type="button" className={`chip${type === value ? " active" : ""}`} onClick={() => setWalletParam(setParams, "type", value)}>{label}</button>
-          ))}
-        </div>
-      </section>
       <StateView loading={state.loading} error={state.error}>
-        <section className="metric-grid">
-          <div className="metric-card"><span>余额</span><strong>{moneyText(wallet.balance)}</strong></div>
-          <div className="metric-card"><span>冻结</span><strong>{moneyText(wallet.frozenBalance)}</strong></div>
-          <div className="metric-card"><span>可用余额</span><strong>{moneyText(available)}</strong></div>
-          <div className="metric-card"><span>本页收入 / 支出</span><strong>{moneyText(income)} / {moneyText(expense)}</strong></div>
+        <section className="wallet-header">
+          <PageHeader title="时间币钱包" action={<Link className="btn btn--secondary" to="/wallet/freeze">冻结明细</Link>} />
+          <div className="balance-section">
+            <div className="balance-label">当前余额</div>
+            <div className="balance-amount"><span className="unit">⏂</span>{moneyText(wallet.balance)}</div>
+            <div className="balance-sub">可用余额 {moneyText(available)} · 冻结 {moneyText(wallet.frozenBalance)}</div>
+          </div>
+          <div className="quick-stats">
+            <div className="quick-stat"><div className="qs-val income">+ {moneyText(income)}</div><div className="qs-lbl">本页收入</div></div>
+            <div className="qs-divider" />
+            <div className="quick-stat"><div className="qs-val expense">- {moneyText(expense)}</div><div className="qs-lbl">本页支出</div></div>
+          </div>
+          <div className="wallet-actions-row">
+            <Link className="wallet-action-btn" to="/profile">个人中心</Link>
+            <Link className="wallet-action-btn freeze-link" to="/wallet/freeze">冻结明细</Link>
+            <Link className="wallet-action-btn primary-action" to="/tasks">去赚时间币</Link>
+          </div>
         </section>
+        <section className="tx-section">
+          <div className="tx-section-header">
+            <h2>交易明细</h2>
+            <div className="tx-filter-tabs filter-row compact-filter" aria-label="交易类型筛选">
+              {TRANSACTION_TYPES.map(([value, label]) => (
+                <button key={value} type="button" className={`chip${type === value ? " active" : ""}`} onClick={() => setWalletParam(setParams, "type", value)}>{label}</button>
+              ))}
+            </div>
+          </div>
         <StateView empty={tx.length === 0}>
-          <div className="finance-list">
+          <div className="finance-list tx-list">
             {tx.map((item) => (
               <FinanceRecord key={text(item.logId)} item={item} type="transaction" />
             ))}
           </div>
           <PaginationControls pagination={state.data?.transactions?.pagination} onPageChange={(nextPage) => setWalletPage(setParams, nextPage)} />
         </StateView>
+        </section>
       </StateView>
     </>
   );
@@ -101,8 +115,8 @@ export function WalletFreezePage({ api }: { api: ApiClient }) {
   const rows = asArray<Record<string, unknown>>(state.data, "freezes");
   return (
     <>
-      <PageHeader title="冻结明细" action={<Link className="btn btn--secondary" to="/wallet">返回钱包</Link>} />
-      <section className="panel filter-panel">
+      <PageHeader title="冻结明细" description="查看时间币冻结原因、解冻规则和相关业务。" action={<Link className="btn btn--secondary" to="/wallet">返回钱包</Link>} />
+      <section className="filter-panel">
         <div className="filter-row" aria-label="冻结状态筛选">
           {FREEZE_STATUSES.map(([value, label]) => (
             <button key={value} type="button" className={`chip${status === value ? " active" : ""}`} onClick={() => setWalletParam(setParams, "status", value)}>{label}</button>
@@ -130,19 +144,22 @@ function FinanceRecord({ item, type }: { item: Record<string, unknown>; type: "t
   const href = safeInternalHref(item.href, "");
   const timeline = asArray<Record<string, unknown>>(item.timeline, "");
   return (
-    <article className="card finance-card">
-      <div className="section-heading">
-        <div>
-          <span className="card-title">{text(item.relatedTitle ?? item.reason ?? item.remark ?? item.description, type === "freeze" ? "冻结记录" : "钱包流水")}</span>
-          <div className="meta-row">
-            <Badge tone={toneForFinance(item.status ?? item.type)}>{type === "freeze" ? labelFromMap(item.status, FREEZE_STATUS_LABELS) : labelFromMap(item.type, TRANSACTION_LABELS)}</Badge>
-            <span className="muted">{fullDateText(item.createdAt)}</span>
-            <span className="muted">{labelFromMap(item.reasonType ?? item.businessType, FREEZE_REASON_LABELS, text(item.businessType, "业务"))}</span>
-          </div>
+    <article className="finance-card tx-item">
+      <div className={`tx-icon ${String(item.type ?? item.status ?? "neutral")}`}>{type === "freeze" ? "⏸" : financeIcon(item.type)}</div>
+      <div className="tx-body">
+        <div className="tx-title card-title">{text(item.relatedTitle ?? item.reason ?? item.remark ?? item.description, type === "freeze" ? "冻结记录" : "钱包流水")}</div>
+        <div className="tx-order-id">
+          {type === "freeze" ? labelFromMap(item.status, FREEZE_STATUS_LABELS) : labelFromMap(item.type, TRANSACTION_LABELS)}
+          {" · "}
+          {labelFromMap(item.reasonType ?? item.businessType, FREEZE_REASON_LABELS, text(item.businessType, "业务"))}
         </div>
-        <strong className="finance-amount">{type === "freeze" ? moneyText(item.amount) : signedMoneyText(item.amount, item.type)}</strong>
+        <div className="tx-time">{fullDateText(item.createdAt)}</div>
       </div>
-      <p className="muted">{text(item.remark ?? item.reason ?? item.releaseCondition, "暂无说明")}</p>
+      <div className="tx-amount-cell">
+        <strong className={`finance-amount tx-amount ${String(item.type ?? item.status)}`}>{type === "freeze" ? moneyText(item.amount) : signedMoneyText(item.amount, item.type)}</strong>
+        <div className="tx-balance">{type === "transaction" ? `余额 ${moneyText(item.balanceAfter, "-")}` : dateText(item.releasedAt, "未释放")}</div>
+      </div>
+      <p className="muted tx-note">{text(item.remark ?? item.reason ?? item.releaseCondition, "暂无说明")}</p>
       {type === "transaction" ? (
         <div className="meta-row">
           <span>余额变动后: {moneyText(item.balanceAfter, "-")}</span>
@@ -199,4 +216,11 @@ function toneForFinance(value: unknown) {
   if (["freeze", "active", "dispute"].includes(key)) return "warning";
   if (["expense"].includes(key)) return "danger";
   return "neutral";
+}
+
+function financeIcon(value: unknown) {
+  const key = String(value ?? "");
+  if (["income", "release", "refund"].includes(key)) return "+";
+  if (["expense", "freeze"].includes(key)) return "-";
+  return "⏂";
 }

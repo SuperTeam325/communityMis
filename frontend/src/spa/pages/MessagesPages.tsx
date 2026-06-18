@@ -13,6 +13,7 @@ import {
   labelFromMap,
   pageFromParams,
   safeInternalHref,
+  SearchBar,
   text,
   useAsync,
   useMutationTracker,
@@ -71,45 +72,43 @@ export function MessagesPage({ api }: { api: ApiClient }) {
 
   return (
     <>
-      <PageHeader title="消息中心" />
-      <section className="panel filter-panel">
-        <form className="inline-form" role="search" onSubmit={(event) => {
+      <section className="messages-header">
+        <PageHeader title="消息中心" description="会话、系统通知和业务更新集中处理。" />
+        <SearchBar placeholder="搜索会话、用户或消息内容" defaultValue={keyword} onSubmit={(event) => {
           event.preventDefault();
           const form = new FormData(event.currentTarget);
           updateFilter("keyword", text(form.get("keyword"), ""));
-        }}>
-          <input name="keyword" defaultValue={keyword} placeholder="搜索会话、用户或消息内容" />
-          <button className="btn btn--secondary">搜索</button>
-        </form>
+        }} />
       </section>
 
       <StateView loading={state.loading} error={state.error} empty={conversations.length === 0 && !prefillUserId}>
         <div className="message-shell">
-          <aside className="message-list" aria-label="会话列表">
+          <aside className="message-list conv-list" aria-label="会话列表">
             {conversations.map((item) => {
               const key = conversationKey(item);
               const href = safeInternalHref(item.href, "");
+              const unreadCount = Number(item.unreadCount ?? 0);
               return (
                 <button
-                  className={`conversation-card${key === conversationKey(active) ? " active" : ""}`}
+                  className={`conversation-card conv-item${key === conversationKey(active) ? " active" : ""}`}
                   key={key}
                   type="button"
                   onClick={() => setActiveId(key)}
                 >
-                  <span className="conversation-title">{text(item.title)}</span>
-                  <span className="conversation-preview">{text(item.preview, "暂无消息内容")}</span>
-                  <span className="conversation-meta">
-                    <span>{dateText(item.updatedAt)}</span>
-                    {Number(item.unreadCount ?? 0) > 0 ? <Badge tone="warning">{String(item.unreadCount)} 未读</Badge> : <Badge>已读</Badge>}
+                  <span className="conv-avatar"><span className="avatar avatar-initial">{text(item.title, "邻").slice(0, 1)}</span></span>
+                  <span className="conv-body">
+                    <span className="conv-top"><span className="conversation-title conv-name">{text(item.title)}</span><span className="conv-time">{dateText(item.updatedAt)}</span></span>
+                    <span className="conversation-preview conv-preview">{text(item.preview, "暂无消息内容")}</span>
                   </span>
+                  <span className="conv-right">{unreadCount > 0 ? <span className="unread-badge">{String(unreadCount)}</span> : <Badge>已读</Badge>}</span>
                   {href ? <Link className="conversation-link" to={href}>关联业务</Link> : null}
                 </button>
               );
             })}
           </aside>
 
-          <section className="panel message-detail">
-            <div className="section-heading">
+          <section className="message-detail chat-view">
+            <div className="chat-header section-heading">
               <div>
                 <h2>{active ? text(active.title) : prefillUserId ? `发送给用户 #${prefillUserId}` : "选择会话"}</h2>
                 <p className="muted">
@@ -119,7 +118,7 @@ export function MessagesPage({ api }: { api: ApiClient }) {
               {businessHref ? <Link className="btn btn--secondary" to={businessHref}>查看关联业务</Link> : null}
             </div>
             {active ? (
-              <div className="message-thread">
+              <div className="message-thread chat-messages">
                 <div className="chat-bubble chat-bubble--assistant">
                   <strong>{text(participant.displayName ?? participant.username ?? active.title)}</strong>
                   <p>{text(active.preview, "暂无消息内容")}</p>
@@ -152,7 +151,7 @@ function MessageForm({ api, defaultReceiverId, onSent }: { api: ApiClient; defau
   }, [defaultReceiverId]);
 
   return (
-    <form className="inline-form" onSubmit={async (event) => {
+    <form className="inline-form chat-input-bar" onSubmit={async (event) => {
       event.preventDefault();
       const formElement = event.currentTarget;
       const form = new FormData(formElement);
@@ -229,10 +228,11 @@ export function NotificationsPage({ api }: { api: ApiClient }) {
     <>
       <PageHeader
         title="通知中心"
+        description="按类型和状态筛选来自订单、钱包、互动和 AI 的提醒。"
         action={<button className="btn btn--secondary" disabled={readAllMutation.busy} onClick={() => readAllMutation.run(() => api.notifications.readAll(), () => state.reload()).catch(() => {})}>{readAllMutation.busy ? "处理中..." : "全部已读"}</button>}
       />
 
-      <section className="panel filter-panel">
+      <section className="filter-panel notif-filter-panel">
         <div className="filter-row" aria-label="通知类型筛选">
           {NOTIFICATION_TYPES.map(([value, label]) => (
             <button key={value} type="button" className={`chip${type === value ? " active" : ""}`} onClick={() => updateParam("type", value)}>{label}</button>

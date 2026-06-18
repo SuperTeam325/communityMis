@@ -9,11 +9,15 @@ import {
   FileUpload,
   Field,
   friendlyError,
+  FormSection,
   PageHeader,
   PaginationControls,
+  SearchBar,
+  SegmentedTabs,
   StateView,
   statusLabel,
   statusTone,
+  TaskCard,
   text,
   useAsync,
   useMutationTracker,
@@ -67,22 +71,24 @@ export function TasksPage({ api }: { api: ApiClient }) {
 
   return (
     <>
-      <PageHeader title="任务市场" action={<Link className="btn btn--primary" to="/post">发布</Link>} />
-      <section className="panel filter-panel">
-        <form className="inline-form" onSubmit={(event) => {
+      <section className="tasks-header">
+        <PageHeader title="任务市场" description="浏览可接单的社区互助任务。" action={<Link className="btn btn--primary" to="/post">发布</Link>} />
+        <SearchBar
+          placeholder="搜索任务"
+          defaultValue={query.keyword}
+          action={<Link className="ai-filter-btn" to={`/ai/results?prompt=${encodeURIComponent(query.keyword || "帮我找适合今天完成的任务")}&scene=request_filter`}>AI 筛选</Link>}
+          onSubmit={(event) => {
           event.preventDefault();
           const form = new FormData(event.currentTarget);
           updateQuery({ keyword: form.get("keyword"), page: 1 });
-        }}>
-          <input name="keyword" placeholder="搜索任务" defaultValue={query.keyword} />
-          <button className="btn btn--secondary">搜索</button>
-        </form>
-        <div className="filter-row" aria-label="任务状态">
+        }}
+        />
+        <div className="filter-bar filter-row" aria-label="任务状态">
           {REQUEST_STATUS_FILTERS.map(([value, label]) => (
-            <button key={value} className={`chip ${query.status === value ? "active" : ""}`} onClick={() => updateQuery({ status: value, page: 1 })}>{label}</button>
+            <button key={value} className={`chip ${query.status === value ? "active" : ""}`} aria-label={`筛选${label}`} onClick={() => updateQuery({ status: value, page: 1 })}>{label}</button>
           ))}
         </div>
-        <div className="filter-row" aria-label="任务类别">
+        <div className="filter-bar filter-row" aria-label="任务类别">
           <button className={`chip ${!query.categoryId ? "active" : ""}`} onClick={() => updateQuery({ categoryId: "", page: 1 })}>全部类别</button>
           {categories.map((category) => (
             <button
@@ -94,14 +100,17 @@ export function TasksPage({ api }: { api: ApiClient }) {
             </button>
           ))}
         </div>
-        <div className="filter-row" aria-label="排序">
+      </section>
+      <div className="sort-row">
+        <span className="result-count">共 {Number(pagination.total ?? requests.length)} 个任务</span>
+        <div className="sort-options filter-row compact-filter" aria-label="排序">
           {REQUEST_SORTS.map(([value, label]) => (
             <button key={value} className={`chip ${query.sort === value ? "active" : ""}`} onClick={() => updateQuery({ sort: value, page: 1 })}>{label}</button>
           ))}
         </div>
-      </section>
+      </div>
       <StateView loading={state.loading} error={state.error} empty={requests.length === 0}>
-        <div className="card-list">
+        <div className="task-grid">
           {requests.map((item) => (
             <RequestCard key={text(item.requestId)} item={item} />
           ))}
@@ -137,11 +146,11 @@ export function PostPage({ api }: { api: ApiClient }) {
 
   return (
     <>
-      <PageHeader title="发布需求" />
-      <section className="panel publish-tabs" aria-label="发布类型">
-        <button className={`chip active`} type="button" data-tab="task">{publishTab === "task" ? "需求发布" : "发布"}</button>
+      <PageHeader title="发布需求" description="把任务说清楚，系统会用真实表单提交到任务市场。" />
+      <section className="publish-tabs" aria-label="发布类型">
+        <button className="active" type="button" data-tab="task">{publishTab === "task" ? "需求发布" : "发布"}</button>
       </section>
-      <form className="panel form-grid" onSubmit={async (event) => {
+      <form className="panel post-form form-grid" onSubmit={async (event) => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
         await mutation.run(async () => {
@@ -166,29 +175,9 @@ export function PostPage({ api }: { api: ApiClient }) {
           return payload;
         });
       }}>
-        <Field label="标题"><input id="task-title" name="title" required minLength={2} maxLength={100} /></Field>
-        <Field label="描述"><textarea id="task-description" name="description" rows={6} required minLength={5} maxLength={2000} value={draft} onChange={(event) => setDraft(event.currentTarget.value)} /></Field>
-        <Field label="类别">
-          <select name="categoryId" required defaultValue="">
-            <option value="" disabled>请选择类别</option>
-            {categories.map((category) => <option key={text(category.categoryId)} value={text(category.categoryId)}>{text(category.name)}</option>)}
-          </select>
-        </Field>
-        <div className="form-two-col">
-          <Field label="预计耗时"><input id="task-hours" name="estimatedHours" type="number" min="0.5" step="0.5" required /></Field>
-          <Field label="时间币报酬"><input id="task-coins" name="coinAmount" type="number" min="1" step="0.01" required /></Field>
-        </div>
-        <Field label="服务地点"><input id="task-location" name="location" maxLength={120} placeholder="如 2 号楼 802" /></Field>
-        <Field label="标签">
-          <input name="tags" placeholder="可手动输入，多个标签用逗号分隔" />
-        </Field>
-        <div id="task-tags" className="filter-row" aria-label="推荐标签">
-          {tags.slice(0, 16).map((tag) => {
-            const name = text(tag.name, "");
-            return <button key={name} type="button" className={`chip tag-chip ${selectedTags.includes(name) ? "active" : ""}`} onClick={() => toggleTag(name)}>{name}</button>;
-          })}
-        </div>
-        <div className="action-row">
+        <FormSection title="基本信息">
+          <Field label="标题"><input id="task-title" name="title" required minLength={2} maxLength={100} placeholder="一句话说明你需要什么帮助" /></Field>
+          <Field label="描述"><textarea id="task-description" name="description" rows={6} required minLength={5} maxLength={2000} value={draft} onChange={(event) => setDraft(event.currentTarget.value)} /></Field>
           <button className="btn btn--secondary" type="button" disabled={draftBusy} onClick={async (event) => {
             setDraftBusy(true);
             setDraftError("");
@@ -213,16 +202,44 @@ export function PostPage({ api }: { api: ApiClient }) {
               setDraftBusy(false);
             }
           }}>{draftBusy ? "生成中..." : "AI 草稿"}</button>
-        </div>
-        <FileUpload purpose="request-image" businessType="request" visibility="public" onUploaded={async (formData) => {
+        </FormSection>
+        <FormSection title="分类与报酬" description="1 小时约 5 时间币可作为参考，最终以双方协商为准。">
+          <Field label="类别">
+            <select name="categoryId" required defaultValue="">
+              <option value="" disabled>请选择类别</option>
+              {categories.map((category) => <option key={text(category.categoryId)} value={text(category.categoryId)}>{text(category.name)}</option>)}
+            </select>
+          </Field>
+          <div className="form-two-col">
+            <Field label="预计耗时"><input id="task-hours" name="estimatedHours" type="number" min="0.5" step="0.5" required /></Field>
+            <Field label="时间币报酬"><input id="task-coins" name="coinAmount" type="number" min="1" step="0.01" required /></Field>
+          </div>
+        </FormSection>
+        <FormSection title="地点与标签">
+          <Field label="服务地点"><input id="task-location" name="location" maxLength={120} placeholder="如 2 号楼 802" /></Field>
+          <Field label="标签">
+            <input name="tags" placeholder="可手动输入，多个标签用逗号分隔" />
+          </Field>
+          <div id="task-tags" className="tag-grid filter-row" aria-label="推荐标签">
+            {tags.slice(0, 16).map((tag) => {
+              const name = text(tag.name, "");
+              return <button key={name} type="button" className={`chip tag-chip ${selectedTags.includes(name) ? "active" : ""}`} onClick={() => toggleTag(name)}>{name}</button>;
+            })}
+          </div>
+        </FormSection>
+        <FormSection title="附件">
+          <FileUpload purpose="request-image" businessType="request" visibility="public" onUploaded={async (formData) => {
           const result = await api.files.upload(formData);
           const file = asRecord(result.file);
           const fileId = text(file.fileId ?? result.fileId, "");
           if (fileId) setFiles((current) => [...current, { fileId, name: text(file.originalName ?? file.filename ?? file.name, fileId) }]);
-        }} />
-        {files.length ? <p className="muted">已上传 {files.map((file) => file.name).join("、")}</p> : null}
+          }} />
+          {files.length ? <p className="muted">已上传 {files.map((file) => file.name).join("、")}</p> : null}
+        </FormSection>
         {draftError || mutation.error ? <p className="field-error" role="alert">{draftError || mutation.error}</p> : null}
-        <button id="submit-btn" className="btn btn--primary" disabled={mutation.busy}>{mutation.busy ? "发布中..." : "发布需求"}</button>
+        <div className="submit-bar">
+          <button id="submit-btn" className="btn btn--primary btn--lg btn--full" disabled={mutation.busy}>{mutation.busy ? "发布中..." : "发布需求"}</button>
+        </div>
       </form>
       {published ? (
         <section id="publish-success-panel" className="panel" role="status">
@@ -275,22 +292,26 @@ export function RequestDetailPage({ api }: { api: ApiClient }) {
     <>
       <PageHeader title="帖子详情" action={<Link className="btn btn--secondary" to="/tasks">返回任务市场</Link>} />
       <StateView loading={detail.loading} error={detail.error} empty={!request.requestId}>
-        <article className="panel detail-panel">
-          <div className="section-heading">
-            <h2>{text(request.title)}</h2>
-            <Badge tone={statusTone(request.status)}>{statusLabel(request.status)}</Badge>
+        <article className="post-card card detail-panel">
+          <div className="post-detail-header">
+            <div className="author-row">
+              <Link className="author-link" to={`/users/${text(publisher.userId)}`}>
+                <span className="avatar avatar-initial">{text(publisher.displayName ?? publisher.username, "邻").slice(0, 1)}</span>
+                <span className="author-info">
+                  <strong className="author-name">{text(publisher.displayName ?? publisher.username, "发布者")}</strong>
+                  <span className="author-meta">信誉 {text(credit.averageRating, "0")} · {dateText(request.createdAt)}</span>
+                </span>
+              </Link>
+              <Badge tone={statusTone(request.status)}>{statusLabel(request.status)}</Badge>
+            </div>
           </div>
-          <p>{text(request.description || request.content)}</p>
+          <h2>{text(request.title)}</h2>
+          <p className="post-body-text">{text(request.description || request.content)}</p>
           <div className="metric-grid">
             <div className="metric-card"><span>时间币</span><strong>{text(request.coinAmount)}</strong></div>
             <div className="metric-card"><span>预计耗时</span><strong>{text(request.estimatedHours)} 小时</strong></div>
             <div className="metric-card"><span>类别</span><strong>{text(category.name)}</strong></div>
             <div className="metric-card"><span>地点</span><strong>{text(request.location, "未填写")}</strong></div>
-          </div>
-          <div className="meta-row">
-            <Link to={`/users/${text(publisher.userId)}`}>{text(publisher.displayName ?? publisher.username, "发布者")}</Link>
-            <span>信誉 {text(credit.averageRating, "0")}</span>
-            <span>{dateText(request.createdAt)}</span>
           </div>
           <div className="meta-row">
             {asArray<string>(request.tags, "").map((tag) => <span key={tag} className="chip">{tag}</span>)}
@@ -314,7 +335,7 @@ export function RequestDetailPage({ api }: { api: ApiClient }) {
           {acceptMutation.error ? <p className="field-error">{acceptMutation.error}</p> : null}
         </article>
       </StateView>
-      <section className="panel">
+      <section className="comment-section">
         <h2>评论</h2>
         <StateView loading={commentsState.loading} error={commentsState.error} empty={comments.length === 0}>
           <div className="comment-list">{comments.map((comment) => (
@@ -346,28 +367,5 @@ export function RequestDetailPage({ api }: { api: ApiClient }) {
 }
 
 function RequestCard({ item }: { item: Record<string, unknown> }) {
-  const category = asRecord(item.category);
-  const publisher = asRecord(item.publisher);
-  const credit = asRecord(item.creditSummary);
-  return (
-    <article className="card">
-      <div className="section-heading">
-        <Link className="card-title" to={`/posts/${text(item.requestId)}`}>{text(item.title)}</Link>
-        <Badge tone={statusTone(item.status)}>{statusLabel(item.status)}</Badge>
-      </div>
-      <p>{text(item.descriptionSummary || item.description || item.content)}</p>
-      <div className="meta-row">
-        <span>{text(category.name)}</span>
-        <span>{text(item.coinAmount)} 时间币</span>
-        <span>{text(item.estimatedHours)} 小时</span>
-        <span>{text(item.location, "未填写地点")}</span>
-      </div>
-      <div className="meta-row">
-        <Link to={`/users/${text(publisher.userId)}`}>{text(publisher.displayName ?? publisher.username, "匿名邻居")}</Link>
-        <span>信誉 {text(credit.averageRating, "0")}</span>
-        <span>{dateText(item.createdAt)}</span>
-      </div>
-      <div className="action-row"><Link className="btn btn--secondary" to={`/posts/${text(item.requestId)}`}>查看详情</Link></div>
-    </article>
-  );
+  return <TaskCard item={item} action={<Link className="btn btn--primary btn--sm accept-btn" to={`/posts/${text(item.requestId)}`}>查看详情</Link>} />;
 }

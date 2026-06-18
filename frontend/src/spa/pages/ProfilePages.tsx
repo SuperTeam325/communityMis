@@ -406,9 +406,9 @@ export function SettingsPage({ api }: { api: ApiClient }) {
   const prefs = (settings.preferences ?? {}) as Record<string, unknown>;
   return (
     <>
-      <PageHeader title="设置" />
+      <PageHeader title="设置" description="管理通知、隐私、通用偏好和账号体验。" />
       <StateView loading={state.loading} error={state.error}>
-        <form className="panel form-grid" onSubmit={async (event) => {
+        <form className="settings-content form-grid" onSubmit={async (event) => {
           event.preventDefault();
           const form = new FormData(event.currentTarget);
           await mutation.run(() => api.settings.updateMe({
@@ -430,39 +430,51 @@ export function SettingsPage({ api }: { api: ApiClient }) {
             }
           }), () => state.reload());
         }}>
-          <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>通知提醒</h3>
-          <label className="check-row"><input type="checkbox" name="notif_messages" defaultChecked={Boolean(notif.newMessages ?? true)} /> 新消息提醒</label>
-          <label className="check-row"><input type="checkbox" name="notif_interactions" defaultChecked={Boolean(notif.interactions ?? true)} /> 互动提醒</label>
-          <label className="check-row"><input type="checkbox" name="notif_orders" defaultChecked={Boolean(notif.orderStatus ?? true)} /> 订单状态提醒</label>
-          <label className="check-row"><input type="checkbox" name="notif_announcements" defaultChecked={Boolean(notif.announcements ?? true)} /> 平台公告</label>
-          <h3 style={{ fontSize: 18, fontWeight: 700, marginTop: "var(--space-lg)", marginBottom: 4 }}>隐私设置</h3>
-          <label className="check-row"><input type="checkbox" name="priv_community" defaultChecked={Boolean(priv.showCommunity ?? true)} /> 在社区可见</label>
-          <label className="check-row"><input type="checkbox" name="priv_searchable" defaultChecked={Boolean(priv.searchable ?? true)} /> 允许被搜索</label>
-          <label className="check-row"><input type="checkbox" name="priv_phone" defaultChecked={Boolean(priv.phoneVisible ?? false)} /> 手机号可见</label>
-          <h3 style={{ fontSize: 18, fontWeight: 700, marginTop: "var(--space-lg)", marginBottom: 4 }}>通用偏好</h3>
-          <Field label="帖子可见范围">
-            <select name="pref_post_visibility" defaultValue={text(prefs.postVisibility, "community")}>
-              <option value="community">全社区</option>
-              <option value="nearby">附近邻里</option>
-              <option value="private">仅自己</option>
-            </select>
-          </Field>
-          <Field label="语言">
-            <select name="pref_language" defaultValue={text(prefs.language, "zh-CN")}>
-              <option value="zh-CN">简体中文</option>
-              <option value="zh-TW">繁體中文</option>
-              <option value="en">English</option>
-            </select>
-          </Field>
-          <Field label="深色模式">
-            <select name="pref_dark_mode" defaultValue={text(prefs.darkMode, "system")}>
-              <option value="system">跟随系统</option>
-              <option value="light">浅色</option>
-              <option value="dark">深色</option>
-            </select>
-          </Field>
+          <div className="settings-group">
+            <div className="settings-group-title">通知</div>
+            <div className="settings-card">
+              <SettingsCheckRow icon="✉" label="新消息提醒" desc="有人私信你时推送通知" name="notif_messages" defaultChecked={Boolean(notif.newMessages ?? true)} />
+              <SettingsCheckRow icon="♥" label="互动提醒" desc="点赞、评论、关注等互动提醒" name="notif_interactions" defaultChecked={Boolean(notif.interactions ?? true)} />
+              <SettingsCheckRow icon="✓" label="订单状态提醒" desc="有人接单、完成、即将截止等提醒" name="notif_orders" defaultChecked={Boolean(notif.orderStatus ?? true)} />
+              <SettingsCheckRow icon="!" label="平台公告" desc="物业通知、社区活动等广播消息" name="notif_announcements" defaultChecked={Boolean(notif.announcements ?? true)} />
+            </div>
+          </div>
+          <div className="settings-group">
+            <div className="settings-group-title">隐私</div>
+            <div className="settings-card">
+              <SettingsCheckRow icon="⌂" label="在社区可见" desc="资料页和帖子中展示你的公开资料" name="priv_community" defaultChecked={Boolean(priv.showCommunity ?? true)} />
+              <SettingsCheckRow icon="⌕" label="允许被搜索" desc="允许邻居通过搜索找到你" name="priv_searchable" defaultChecked={Boolean(priv.searchable ?? true)} />
+              <SettingsCheckRow icon="☎" label="手机号可见" desc="仅在你同意时展示联系方式" name="priv_phone" defaultChecked={Boolean(priv.phoneVisible ?? false)} />
+            </div>
+          </div>
+          <div className="settings-group">
+            <div className="settings-group-title">通用</div>
+            <div className="settings-card settings-form-card">
+              <Field label="帖子可见范围">
+                <select name="pref_post_visibility" defaultValue={text(prefs.postVisibility, "community")}>
+                  <option value="community">全社区</option>
+                  <option value="nearby">附近邻里</option>
+                  <option value="private">仅自己</option>
+                </select>
+              </Field>
+              <Field label="语言">
+                <select name="pref_language" defaultValue={text(prefs.language, "zh-CN")}>
+                  <option value="zh-CN">简体中文</option>
+                  <option value="zh-TW">繁體中文</option>
+                  <option value="en">English</option>
+                </select>
+              </Field>
+              <Field label="深色模式">
+                <select name="pref_dark_mode" defaultValue={text(prefs.darkMode, "system")}>
+                  <option value="system">跟随系统</option>
+                  <option value="light">浅色</option>
+                  <option value="dark">深色</option>
+                </select>
+              </Field>
+            </div>
+          </div>
           {mutation.error ? <p className="field-error" role="alert">{mutation.error}</p> : null}
-          <button className="btn btn--primary" disabled={mutation.busy}>{mutation.busy ? "保存中..." : "保存设置"}</button>
+          <button className="btn btn--primary btn--full" disabled={mutation.busy}>{mutation.busy ? "保存中..." : "保存设置"}</button>
         </form>
       </StateView>
     </>
@@ -483,7 +495,7 @@ export function UserPublicPage({ api }: { api: ApiClient }) {
 
   return (
     <>
-      <PageHeader title="服务者公开主页" action={
+      <PageHeader title="服务者公开主页" description="查看对方公开信用、技能标签和联系入口。" action={
         !isSelf ? (
           <button className={"btn " + (following ? "btn--secondary" : "btn--primary")}
             onClick={async () => {
@@ -500,7 +512,7 @@ export function UserPublicPage({ api }: { api: ApiClient }) {
         ) : null
       } />
       <StateView loading={state.loading} error={state.error} empty={!user}>
-        <section className="profile-header-bg" style={PROFILE_HEADER_STYLE}>
+        <section className="profile-header-bg public-hero" style={PROFILE_HEADER_STYLE}>
           {avatarUrl
             ? <img className="avatar xl" style={AVATAR_IMG_STYLE} src={avatarUrl} alt="" />
             : <div className="avatar xl" style={AVATAR_XL_STYLE}>{text(user?.displayName ?? user?.username).slice(0, 1)}</div>}
@@ -530,6 +542,10 @@ export function UserPublicPage({ api }: { api: ApiClient }) {
               </>
             )}
           </div>
+          <aside className="hero-score" aria-label="信用评分">
+            <div className="score-number">{text(credit.averageRating, "0")}</div>
+            <div className="score-label">信用评分 · {text(credit.reviewCount, "0")} 条评价</div>
+          </aside>
         </section>
       </StateView>
     </>
@@ -548,7 +564,7 @@ export function CreditPage({ api }: { api: ApiClient }) {
     <>
       <PageHeader title="信用详情" />
       <StateView loading={state.loading} error={state.error}>
-        <section className="panel" style={{ textAlign: "center" }}>
+        <section className="credit-hero panel" style={{ textAlign: "center" }}>
           <div style={{ fontSize: 48, fontWeight: 800, color: "var(--fg)", fontFamily: "var(--font-display)" }}>
             {text(credit?.averageRating, "—")}
           </div>
@@ -616,29 +632,45 @@ export function CreditPage({ api }: { api: ApiClient }) {
 export function HelpPage() {
   return (
     <>
-      <PageHeader title="帮助与规则" />
-      <section className="panel prose">
-        <h2>平台规则</h2>
-        <p>发布需求、接单、评价和纠纷处理均以真实账户与订单记录为准。</p>
-        <h3>发布规则</h3>
-        <ul>
-          <li>任务描述应清晰明确，包含具体需求和预期完成时间。</li>
-          <li>合理设置报酬，系统默认最低 2.5 时间币。</li>
-          <li>发布内容不得包含违法、违规或敏感信息。</li>
-        </ul>
-        <h3>接单规则</h3>
-        <ul>
-          <li>接单后应在约定时间内完成任务。</li>
-          <li>确认完成后双方进行评价，评价将影响信用评分。</li>
-          <li>如遇纠纷可通过平台申诉流程解决。</li>
-        </ul>
-        <h3>信用规则</h3>
-        <ul>
-          <li>信用评分按已完成订单的公开评价平均分计算，满分 5.0。</li>
-          <li>4 星和 5 星计入好评率。</li>
-          <li>手机号等私密资料不会出现在公开主页或信用页。</li>
-        </ul>
+      <section className="help-hero">
+        <PageHeader title="帮助与规则" description="覆盖发布、接单、时间币、信用、纠纷和 AI 助手边界。" action={<Link className="btn btn--primary" to="/ai/assistant?scene=rules">询问 AI 助手</Link>} />
       </section>
+      <div className="help-grid">
+        <aside className="quick-links">
+          <Link className="quick-link" to="/wallet"><span>时间币钱包</span><span>→</span></Link>
+          <Link className="quick-link" to="/wallet/freeze"><span>冻结明细</span><span>→</span></Link>
+          <Link className="quick-link" to="/post"><span>发布需求</span><span>→</span></Link>
+          <Link className="quick-link" to="/tasks"><span>任务市场</span><span>→</span></Link>
+          <Link className="quick-link" to="/orders"><span>我的订单</span><span>→</span></Link>
+          <Link className="quick-link" to="/disputes/new"><span>发起纠纷</span><span>→</span></Link>
+        </aside>
+        <section className="faq-list prose">
+          {[
+            ["时间币是什么？如何获得？", "时间币用于衡量社区互助服务价值。完成订单、参与平台活动或获得奖励后会增加余额。"],
+            ["我的时间币为什么被冻结？", "发布任务或进入纠纷流程时，相关时间币会被冻结，待订单完成、取消或裁决后释放或结算。"],
+            ["发布需求和接单有哪些限制？", "需求描述应清晰真实，报酬要合理，接单后应按约定完成并保留必要沟通记录。"],
+            ["订单如何确认完成并结算？", "服务完成后双方确认，系统根据订单金额自动结算并生成钱包流水。"],
+            ["评价会怎样影响信用分？", "公开评价会进入信用详情，评分、标签和文字反馈都会影响后续匹配与信任判断。"],
+            ["什么时候可以发起纠纷？", "服务未完成、质量争议或沟通无法达成一致时，可从订单页发起纠纷并提交证据。"],
+            ["AI 助手能做什么，不能做什么？", "AI 可辅助筛选、草稿和规则问答，但关键操作仍必须由用户或管理员在业务页面确认。"]
+          ].map(([question, answer]) => (
+            <article className="faq-card open" key={question}>
+              <div className="faq-question"><span>{question}</span><span className="tag">规则</span></div>
+              <div className="faq-answer"><p>{answer}</p></div>
+            </article>
+          ))}
+        </section>
+      </div>
     </>
+  );
+}
+
+function SettingsCheckRow({ icon, label, desc, name, defaultChecked }: { icon: string; label: string; desc: string; name: string; defaultChecked: boolean }) {
+  return (
+    <label className="settings-row">
+      <span className="row-icon">{icon}</span>
+      <span className="row-text"><span className="row-label">{label}</span><span className="row-desc">{desc}</span></span>
+      <span className="row-right"><input type="checkbox" name={name} defaultChecked={defaultChecked} /></span>
+    </label>
   );
 }
