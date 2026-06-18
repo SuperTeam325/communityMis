@@ -2263,6 +2263,17 @@ export function createMemoryAuthStore(options = {}) {
     const coinAmount = roundMoney(order.coinAmount ?? 0);
     const refundAmount = finalRefundAmount(finalResult, input.refundAmount, coinAmount);
     const providerPayout = roundMoney(Math.max(0, coinAmount - refundAmount));
+    const decisionBasis = finalDisputeDecisionBasis({
+      dispute,
+      order,
+      request,
+      evidence: listDisputeEvidence(disputeId),
+      votes: listJuryVotesForDisputeId(disputeId),
+      finalResult,
+      refundAmount,
+      providerPayout,
+      reason: input.reason
+    });
     if (providerPayout > payerWallet.balance) {
       throw storeError("INSUFFICIENT_BALANCE", "Payer wallet balance is insufficient.");
     }
@@ -2283,6 +2294,7 @@ export function createMemoryAuthStore(options = {}) {
       dispute.status = "resolved";
       dispute.finalResult = finalResult;
       dispute.refundAmount = refundAmount;
+      dispute.resolutionNote = decisionBasis.summary;
       dispute.updatedAt = now;
       dispute.resolvedAt = now;
 
@@ -2382,7 +2394,8 @@ export function createMemoryAuthStore(options = {}) {
           finalResult,
           refundAmount,
           providerPayout,
-          reason: normalizeOptionalString(input.reason)
+          reason: normalizeOptionalString(input.reason),
+          decisionBasis
         },
         createdAt: now
       });
@@ -4618,6 +4631,7 @@ function normalizeDispute(input) {
     status: normalizeDisputeStatus(input.status),
     finalResult: normalizeOptionalString(input.finalResult ?? input.final_result),
     refundAmount: input.refundAmount === undefined || input.refundAmount === null ? null : roundMoney(input.refundAmount),
+    resolutionNote: normalizeOptionalString(input.resolutionNote ?? input.resolution_note),
     createdAt: input.createdAt ?? input.created_at ?? now,
     updatedAt: input.updatedAt ?? input.updated_at ?? input.createdAt ?? input.created_at ?? now,
     resolvedAt: input.resolvedAt ?? input.resolved_at ?? null
@@ -5647,6 +5661,123 @@ function finalRefundAmount(finalResult, rawRefundAmount, coinAmount) {
     return 0;
   }
   return roundMoney(explicit === null ? coinAmount / 2 : explicit);
+}
+
+function finalDisputeDecisionBasis(input) {
+  const evidence = Array.isArray(input.evidence) ? input.evidence : [];
+  const votes = Array.isArray(input.votes) ? input.votes : [];
+  const evidenceSummary = finalDisputeEvidenceSummary(evidence, input);
+  const jury = finalDisputeJurySummary(votes);
+  const reason = normalizeOptionalString(input.reason);
+  const summaryParts = [
+    `陪审 ${jury.total} 票，需求方 ${jury.counts.publisher}、服务方 ${jury.counts.provider}、调解 ${jury.counts.mediate}，领先意见：${jury.leaderText}`,
+    `需求方证据 ${evidenceSummary.publisher.count} 条，服务方证据 ${evidenceSummary.provider.count} 条，其他证据 ${evidenceSummary.other.count} 条`,
+    `终审结果：${finalResultLabel(input.finalResult)}，退款 ${roundMoney(input.refundAmount).toFixed(2)} 时间币，服务方结算 ${roundMoney(input.providerPayout).toFixed(2)} 时间币`
+  ];
+  if (reason) {
+    summaryParts.push(`管理员理由：${reason}`);
+  }
+  return {
+    summary: summaryParts.join("；"),
+    finalResult: input.finalResult,
+    refundAmount: roundMoney(input.refundAmount),
+    providerPayout: roundMoney(input.providerPayout),
+    reason,
+    jury,
+    evidence: evidenceSummary
+  };
+}
+
+function finalDisputeJurySummary(votes) {
+  const counts = { publisher: 0, provider: 0, mediate: 0 };
+  for (const vote of votes) {
+    const key = normalizeJuryVoteValue(vote?.vote);
+    counts[key] += 1;
+  }
+  const total = votes.length;
+  const leader = Object.entries(counts)
+    .sort((left, right) => right[1] - left[1] || juryTieOrder(left[0]) - juryTieOrder(right[0]))[0]?.[0] ?? "mediate";
+  return {
+    total,
+    counts,
+    leader,
+    leaderText: juryVoteLabel(leader),
+    votes: votes.map((vote) => ({
+      voteId: vote.voteId ?? null,
+      jurorId: vote.jurorId ?? null,
+      vote: normalizeJuryVoteValue(vote.vote),
+      voteText: juryVoteLabel(vote.vote),
+      reason: normalizeOptionalString(vote.reason),
+      createdAt: vote.createdAt ?? null
+    }))
+  };
+}
+
+function finalDisputeEvidenceSummary(evidence, input) {
+  const publisherIds = finalDisputePartyIds(input.request?.publisherId, input.dispute?.publisher?.userId, input.dispute?.initiatorId);
+  const providerIds = finalDisputePartyIds(input.order?.providerId, input.dispute?.provider?.userId, input.dispute?.respondentId);
+  const groups = {
+    publisher: [],
+    provider: [],
+    other: []
+  };
+  for (const item of evidence) {
+    const uploaderId = Number(item?.uploaderId);
+    const target = publisherIds.has(uploaderId) ? "publisher" : providerIds.has(uploaderId) ? "provider" : "other";
+    groups[target].push(item);
+  }
+  return {
+    total: evidence.length,
+    publisher: finalDisputeEvidenceGroup(groups.publisher),
+    provider: finalDisputeEvidenceGroup(groups.provider),
+    other: finalDisputeEvidenceGroup(groups.other)
+  };
+}
+
+function finalDisputePartyIds(primary, secondary, fallback) {
+  const ids = [primary, secondary]
+    .filter((value) => value !== undefined && value !== null)
+    .map(Number)
+    .filter((value) => Number.isFinite(value));
+  if (ids.length === 0 && fallback !== undefined && fallback !== null) {
+    const fallbackId = Number(fallback);
+    if (Number.isFinite(fallbackId)) {
+      ids.push(fallbackId);
+    }
+  }
+  return new Set(ids);
+}
+
+function finalDisputeEvidenceGroup(items) {
+  return {
+    count: items.length,
+    items: items.slice(0, 10).map((item) => ({
+      evidenceId: item.evidenceId ?? null,
+      uploaderId: item.uploaderId ?? null,
+      evidenceType: item.evidenceType ?? "text",
+      content: summarizeDecisionText(item.content, 120),
+      attachmentCount: Array.isArray(item.attachments) ? item.attachments.length : 0,
+      createdAt: item.createdAt ?? null
+    }))
+  };
+}
+
+function juryTieOrder(value) {
+  return ({ mediate: 0, publisher: 1, provider: 2 })[value] ?? 3;
+}
+
+function juryVoteLabel(value) {
+  const map = {
+    publisher: "建议需求方胜诉",
+    provider: "建议服务方胜诉",
+    mediate: "建议调解处理"
+  };
+  return map[normalizeJuryVoteValue(value)] ?? "建议调解处理";
+}
+
+function summarizeDecisionText(value, limit = 120) {
+  const content = String(value ?? "").replace(/\s+/g, " ").trim();
+  return content.length > limit ? `${content.slice(0, limit)}...` : content;
 }
 
 function finalResultLabel(value) {

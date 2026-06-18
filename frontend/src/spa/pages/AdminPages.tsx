@@ -29,7 +29,7 @@ type QueryState = Record<string, string>;
 
 const USER_STATUS_OPTIONS: readonly Option[] = [["all", "全部状态"], ["active", "启用"], ["disabled", "禁用"]];
 const TRANSACTION_TYPE_OPTIONS: readonly Option[] = [["all", "全部类型"], ["income", "收入"], ["expense", "支出"], ["freeze", "冻结"], ["release", "解冻"], ["refund", "退款"], ["system_fee", "平台费用"]];
-const DISPUTE_STATUS_OPTIONS: readonly Option[] = [["all", "全部"], ["pending", "待受理"], ["todo", "待处理"], ["in_progress", "处理中"], ["processing", "处理中"], ["reviewing", "复核中"], ["resolved", "已结案"], ["ruled", "已裁决"], ["closed", "已关闭"]];
+const DISPUTE_STATUS_OPTIONS: readonly Option[] = [["all", "全部"], ["pending", "待受理"], ["in_progress", "处理中"], ["resolved", "已结案"]];
 const SENSITIVE_LEVEL_OPTIONS: readonly Option[] = [["all", "全部等级"], ["block", "阻断"], ["warn", "警告"], ["review", "复核"]];
 const RISK_STATUS_OPTIONS: readonly Option[] = [["all", "全部状态"], ["pending", "待处理"], ["reviewing", "复核中"], ["approved", "已通过"], ["removed", "已移除"], ["ignored", "已忽略"], ["resolved", "已处理"]];
 const RISK_LEVEL_OPTIONS: readonly Option[] = [["all", "全部风险"], ["high", "高风险"], ["medium", "中风险"], ["low", "低风险"]];
@@ -196,12 +196,20 @@ export function AdminDisputeFinalPage({ api }: { api: ApiClient }) {
   const [refundAmount, setRefundAmount] = React.useState("");
   const [reason, setReason] = React.useState("管理员根据双方证据作出终审处理。");
   const detail = useAsync(() => disputeId ? api.admin.dispute(disputeId) : Promise.resolve({}), [api, disputeId]);
+  const dispute = asRecord(asRecord(detail.data).dispute ?? detail.data);
   const mutation = useMutationTracker();
+
   return (
     <AdminPage title="纠纷终审">
       <div className="admin-split">
         <StateView loading={detail.loading} error={detail.error} empty={!disputeId}>
           <DetailPanel title="纠纷资金与证据" rows={disputeRows(detail.data)} />
+          <section className="panel detail-panel admin-detail-panel">
+            <h2>裁决依据</h2>
+            <div className="detail-list">
+              {disputeDecisionRows(dispute).map(([label, value]) => <div key={label} className="detail-item"><div className="label">{label}</div><div className="value">{value}</div></div>)}
+            </div>
+          </section>
         </StateView>
         <section className="panel form-grid">
           <h2>终审表单</h2>
@@ -253,6 +261,7 @@ export function AdminCategoriesPage({ api }: { api: ApiClient }) {
       <div className="admin-split admin-split--stacked">
         <section className="panel">
           <h2>类别</h2>
+          <AdminCategoryCreateForm api={api} onDone={state.reload} />
           <StateView loading={state.loading} error={state.error} empty={!categories.length}>
             <DataTable columns={["名称", "编码", "状态", "排序", "说明", "操作"]} rows={categories.map((item) => [
               text(item.name),
@@ -266,6 +275,7 @@ export function AdminCategoriesPage({ api }: { api: ApiClient }) {
         </section>
         <section className="panel">
           <h2>标签</h2>
+          <AdminTagCreateForm api={api} categories={categories} onDone={state.reload} />
           <StateView loading={state.loading} error={state.error} empty={!tags.length}>
             <DataTable columns={["名称", "类别", "状态", "排序", "操作"]} rows={tags.map((item) => [
               text(item.name),
@@ -278,6 +288,85 @@ export function AdminCategoriesPage({ api }: { api: ApiClient }) {
         </section>
       </div>
     </AdminPage>
+  );
+}
+
+function AdminCategoryCreateForm({ api, onDone }: { api: ApiClient; onDone: () => void }) {
+  const mutation = useMutationTracker();
+  const [name, setName] = React.useState("");
+  const [code, setCode] = React.useState("");
+  const [sortOrder, setSortOrder] = React.useState("0");
+  const [description, setDescription] = React.useState("");
+  return (
+    <div className="form-grid">
+      <div className="form-two-col">
+        <TextFilter label="类别名称" value={name} onChange={(value) => {
+          setName(value);
+          if (!code.trim()) setCode(slugCode(value));
+        }} />
+        <TextFilter label="类别编码" value={code} onChange={setCode} />
+      </div>
+      <div className="form-two-col">
+        <TextFilter label="排序" value={sortOrder} onChange={setSortOrder} />
+        <TextFilter label="说明" value={description} onChange={setDescription} />
+      </div>
+      <div className="action-row">
+        <button className="btn btn--primary" disabled={mutation.busy || !name.trim() || !code.trim()} onClick={async () => {
+          await mutation.run(() => api.admin.createCategory({
+            name,
+            code,
+            sortOrder: Number(sortOrder) || 0,
+            description,
+            status: "active"
+          }), () => {
+            setName("");
+            setCode("");
+            setSortOrder("0");
+            setDescription("");
+            onDone();
+          });
+        }}>{mutation.busy ? "添加中..." : "添加类别"}</button>
+        {mutation.error ? <span className="field-error">{mutation.error}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function AdminTagCreateForm({ api, categories, onDone }: { api: ApiClient; categories: Row[]; onDone: () => void }) {
+  const mutation = useMutationTracker();
+  const [name, setName] = React.useState("");
+  const [categoryId, setCategoryId] = React.useState("");
+  const [sortOrder, setSortOrder] = React.useState("0");
+
+  React.useEffect(() => {
+    if (!categoryId && categories[0]?.categoryId) {
+      setCategoryId(text(categories[0].categoryId, ""));
+    }
+  }, [categories, categoryId]);
+
+  return (
+    <div className="form-grid">
+      <div className="form-two-col">
+        <TextFilter label="标签名称" value={name} onChange={setName} />
+        <SelectFilter label="所属类别" value={categoryId} options={categories.map((item) => [text(item.categoryId, ""), text(item.name)] as const)} onChange={setCategoryId} />
+      </div>
+      <TextFilter label="排序" value={sortOrder} onChange={setSortOrder} />
+      <div className="action-row">
+        <button className="btn btn--primary" disabled={mutation.busy || !name.trim() || !categoryId} onClick={async () => {
+          await mutation.run(() => api.admin.createTag({
+            name,
+            categoryId: Number(categoryId),
+            sortOrder: Number(sortOrder) || 0,
+            status: "active"
+          }), () => {
+            setName("");
+            setSortOrder("0");
+            onDone();
+          });
+        }}>{mutation.busy ? "添加中..." : "添加标签"}</button>
+        {mutation.error ? <span className="field-error">{mutation.error}</span> : null}
+      </div>
+    </div>
   );
 }
 
@@ -770,13 +859,17 @@ function disputeBadge(value: unknown) {
   const key = String(value ?? "");
   return <Badge tone={["resolved", "ruled", "closed"].includes(key) ? "success" : "warning"}>{labelFromMap(key, {
     pending: "待受理",
+    evidence_collecting: "举证中",
     todo: "待处理",
     in_progress: "处理中",
     processing: "处理中",
     reviewing: "复核中",
+    jury_voting: "陪审中",
+    admin_review: "待终审",
     resolved: "已结案",
     ruled: "已裁决",
-    closed: "已关闭"
+    closed: "已关闭",
+    cancelled: "已取消"
   })}</Badge>;
 }
 
@@ -798,6 +891,60 @@ function disputeRows(payload: unknown): Array<[string, React.ReactNode]> {
   ];
 }
 
+function disputeDecisionRows(dispute: Row): Array<[string, React.ReactNode]> {
+  if (!Object.keys(dispute).length) return [["裁决依据", "暂无纠纷详情"]];
+  const juryResult = asRecord(dispute.juryResult);
+  const counts = asRecord(juryResult.counts);
+  const evidence = asArray<Row>(dispute.evidence, "");
+  const publisherIds = disputePartyIds(
+    nested(dispute, "publisher").userId,
+    nested(dispute, "request").publisherId,
+    dispute.initiatorId ?? nested(dispute, "initiator").userId
+  );
+  const providerIds = disputePartyIds(
+    nested(dispute, "provider").userId,
+    nested(dispute, "order").providerId,
+    dispute.respondentId ?? nested(dispute, "respondent").userId
+  );
+  const publisherEvidence = evidence.filter((item) => publisherIds.has(text(item.uploaderId, "__none__")));
+  const providerEvidence = evidence.filter((item) => providerIds.has(text(item.uploaderId, "__none__")));
+  const otherEvidence = evidence.length - publisherEvidence.length - providerEvidence.length;
+  return [
+    ["陪审投票", `${text(juryResult.total, "0")} 票；需求方 ${text(counts.publisher, "0")}，服务方 ${text(counts.provider, "0")}，调解 ${text(counts.mediate, "0")}；领先意见 ${text(juryResult.leaderText ?? labelFromMap(juryResult.leader, { publisher: "建议需求方胜诉", provider: "建议服务方胜诉", mediate: "建议调解处理" }), "暂无")}`],
+    ["陪审建议终审", labelFromMap(finalResultFromJuryLeader(juryResult.leader), { publisher_win: "支持需求方", provider_win: "支持服务方", mediate: "调解处理" }, "暂无")],
+    ["需求方证据", evidenceSummaryText(publisherEvidence)],
+    ["服务方证据", evidenceSummaryText(providerEvidence)],
+    ["其他证据", otherEvidence > 0 ? `${otherEvidence} 条` : "无"],
+    ["处理说明", text(dispute.resolutionNote, "终审提交时将把投票、双方证据和理由写入审计记录。")]
+  ];
+}
+
+function evidenceSummaryText(items: Row[]) {
+  if (!items.length) return "无";
+  const preview = items
+    .slice(0, 2)
+    .map((item) => text(item.content || item.evidenceType || item.evidenceId, "证据"))
+    .join("；");
+  return `${items.length} 条${preview ? `：${preview}` : ""}`;
+}
+
+function disputePartyIds(primary: unknown, secondary: unknown, fallback: unknown) {
+  const ids = [primary, secondary].map((value) => text(value, "")).filter(Boolean);
+  if (!ids.length) {
+    const fallbackId = text(fallback, "");
+    if (fallbackId) ids.push(fallbackId);
+  }
+  return new Set(ids);
+}
+
+function finalResultFromJuryLeader(leader: unknown) {
+  const key = String(leader ?? "");
+  if (key === "publisher") return "publisher_win";
+  if (key === "provider") return "provider_win";
+  if (key === "mediate") return "mediate";
+  return "";
+}
+
 function looseTable(data: unknown, title: string) {
   const rows = Array.isArray(data) ? data as Row[] : asArray<Row>(data, "items");
   if (!rows.length) return null;
@@ -812,6 +959,17 @@ function looseTable(data: unknown, title: string) {
 
 function metricValue(value: unknown) {
   return value && typeof value === "object" && "value" in value ? (value as { value?: unknown }).value : value;
+}
+
+function slugCode(value: string) {
+  const raw = value.trim().toLowerCase();
+  const ascii = raw.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  if (ascii) return ascii.slice(0, 50);
+  let hash = 0;
+  for (const char of raw) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+  return `category_${hash.toString(36) || Date.now().toString(36)}`.slice(0, 50);
 }
 
 function nested(item: Row, key: string): Row {
