@@ -686,7 +686,8 @@ async function normalizeCreateRequestInput(store, input) {
       99999.99,
       2
     ),
-    tags: normalizeRequestTags(input?.tags ?? input?.tag)
+    tags: normalizeRequestTags(input?.tags ?? input?.tag),
+    attachments: normalizeAttachments(input?.attachments ?? input?.attachment ?? input?.files ?? input?.file)
   };
 }
 
@@ -1633,6 +1634,7 @@ function requestSummaryDto(item) {
     location: item.location,
     category: categoryDto(item.category),
     tags: item.tags ?? [],
+    attachments: Array.isArray(item.attachments) ? item.attachments.map(attachmentDto) : [],
     publisher: publicPublisherDto(item.publisher),
     creditSummary: item.credit,
     createdAt: item.createdAt,

@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import type { ApiClient } from "../api";
 import { avatarImageUrl } from "../avatar";
 import { useAuth } from "../auth";
-import { FileUpload, Field, PageHeader, StateView, asArray, text, useAsync, useMutationTracker, useQueryParams } from "./shared";
+import { AttachmentPreviewList, Field, PageHeader, StateView, asArray, asRecord, text, useAsync, useMutationTracker, useQueryParams } from "./shared";
 
 /* ===== Helper ===== */
 function timeAgo(dateStr: unknown): string {
@@ -198,18 +198,18 @@ export function ProfilePage({ api }: { api: ApiClient }) {
       <StateView loading={loading} error={error} empty={!user}>
         <section className="profile-header-bg" style={PROFILE_HEADER_STYLE}>
           <div className="avatar-wrap" style={AVATAR_WRAP_STYLE}>
-            {avatarUrl
-              ? <img className="avatar xl" style={AVATAR_IMG_STYLE} src={avatarUrl} alt="" />
-              : <div className="avatar xl" style={AVATAR_XL_STYLE}>{text(user?.displayName ?? user?.username).slice(0, 1)}</div>}
-            <FileUpload purpose="avatar" businessType="user" visibility="public" onUploaded={async (formData) => {
-              const result = await api.files.upload(formData);
-              const fileId = text((result.file as Record<string, unknown>)?.fileId ?? result.fileId, "");
-              if (fileId) {
-                await api.users.avatar(fileId);
-                await auth.refresh("user");
-              }
-              userState.reload();
-            }} />
+            <AvatarUploadTarget
+              avatarUrl={avatarUrl}
+              fallback={text(user?.displayName ?? user?.username).slice(0, 1)}
+              api={api}
+              onUploaded={async (updatedUser) => {
+                auth.updateSessionUser({ ...auth.session?.user, ...updatedUser }, "user");
+                const refreshed = await api.users.me();
+                const refreshedUser = (refreshed as { user?: unknown }).user;
+                if (refreshedUser) auth.updateSessionUser({ ...auth.session?.user, ...asRecord(refreshedUser) }, "user");
+                userState.setData(refreshed);
+              }}
+            />
           </div>
           <h2 className="profile-name" style={NAME_STYLE}>{text(user?.displayName ?? user?.username)}</h2>
           <p className="profile-bio" style={BIO_STYLE}>{text(user?.bio, "暂无简介")}</p>
@@ -264,22 +264,22 @@ export function ProfilePage({ api }: { api: ApiClient }) {
         <div className="content-list" style={CONTENT_LIST_STYLE}>
           {tab === "posts" && (
             <TabPanel loading={postsState.loading} error={postsState.error} empty={posts.length === 0}>
-              {posts.map((post: Record<string, unknown>) => <MiniCard key={text(post.postId)} data={post} type="post" />)}
+              {posts.map((post: Record<string, unknown>) => <MiniCard key={text(post.postId)} data={post} type="post" api={api} />)}
             </TabPanel>
           )}
           {tab === "tasks" && (
             <TabPanel loading={requestsState.loading} error={requestsState.error} empty={requests.length === 0}>
-              {requests.map((req: Record<string, unknown>) => <MiniCard key={text(req.requestId)} data={req} type="request" />)}
+              {requests.map((req: Record<string, unknown>) => <MiniCard key={text(req.requestId)} data={req} type="request" api={api} />)}
             </TabPanel>
           )}
           {tab === "accepted" && (
             <TabPanel loading={ordersState.loading} error={ordersState.error} empty={orders.length === 0}>
-              {orders.map((order: Record<string, unknown>) => <MiniCard key={text(order.orderId)} data={order} type="order" />)}
+              {orders.map((order: Record<string, unknown>) => <MiniCard key={text(order.orderId)} data={order} type="order" api={api} />)}
             </TabPanel>
           )}
           {tab === "collections" && (
             <TabPanel loading={collectionsState.loading} error={collectionsState.error} empty={collections.length === 0}>
-              {collections.map((col: Record<string, unknown>) => <MiniCard key={text(col.targetId)} data={col} type="collection" />)}
+              {collections.map((col: Record<string, unknown>) => <MiniCard key={text(col.targetId)} data={col} type="collection" api={api} />)}
             </TabPanel>
           )}
           <Link className="wallet-card" style={{ ...WALLET_CARD_STYLE, display: "block", textDecoration: "none" }} to="/wallet">
@@ -316,6 +316,66 @@ export function ProfilePage({ api }: { api: ApiClient }) {
 }
 
 /* ===== Sub-components ===== */
+function AvatarUploadTarget({ avatarUrl, fallback, api, onUploaded }: {
+  avatarUrl: string;
+  fallback: string;
+  api: ApiClient;
+  onUploaded: (updatedUser: Record<string, unknown>) => Promise<void> | void;
+}) {
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const inputId = React.useId();
+  return (
+    <>
+      <label htmlFor={inputId} className="avatar-upload-target" style={{ display: "block", cursor: busy ? "wait" : "pointer" }} aria-label="上传头像">
+        {avatarUrl
+          ? <img className="avatar xl" style={AVATAR_IMG_STYLE} src={avatarUrl} alt="" />
+          : <div className="avatar xl" style={AVATAR_XL_STYLE}>{fallback}</div>}
+      </label>
+      <input
+        id={inputId}
+        className="avatar-upload-input"
+        type="file"
+        accept="image/*"
+        aria-label="上传头像"
+        disabled={busy}
+        style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
+        onChange={async (event) => {
+          const input = event.currentTarget;
+          const file = input.files?.[0];
+          if (!file) return;
+          if (file.size > 10 * 1024 * 1024) {
+            setError("文件不能超过 10MB。");
+            input.value = "";
+            return;
+          }
+          setBusy(true);
+          setError("");
+          const formData = new FormData();
+          formData.set("file", file);
+          formData.set("purpose", "avatar");
+          formData.set("visibility", "public");
+          formData.set("businessType", "user");
+          try {
+            const result = await api.files.upload(formData);
+            const fileId = text((result.file as Record<string, unknown>)?.fileId ?? result.fileId, "");
+            if (fileId) {
+              const avatarResult = await api.users.avatar(fileId);
+              await onUploaded(asRecord(avatarResult.user));
+            }
+          } catch (reason) {
+            setError(reason instanceof Error ? reason.message : "头像上传失败。");
+          } finally {
+            setBusy(false);
+            input.value = "";
+          }
+        }}
+      />
+      {busy ? <small className="muted">上传中...</small> : null}
+      {error ? <small className="field-error" role="alert">{error}</small> : null}
+    </>
+  );
+}
 
 function SettingsItem({ icon, iconBg, iconColor, title, desc, href }: {
   icon: string; iconBg: string; iconColor: string; title: string; desc: string; href: string;
@@ -332,7 +392,7 @@ function SettingsItem({ icon, iconBg, iconColor, title, desc, href }: {
   );
 }
 
-function MiniCard({ data, type }: { data: Record<string, unknown>; type: string }) {
+function MiniCard({ data, type, api }: { data: Record<string, unknown>; type: string; api: ApiClient }) {
   const title = text(
     data.title ?? (data as any).target?.title ?? ("Item " + text(data.postId ?? data.requestId ?? data.orderId ?? data.targetId))
   );
@@ -363,6 +423,7 @@ function MiniCard({ data, type }: { data: Record<string, unknown>; type: string 
           {badge}
         </span>
       </div>
+      <AttachmentPreviewList attachments={miniCardAttachments(data)} api={api} compact />
       <div style={{ display: "flex", alignItems: "center", gap: "var(--space-lg)", fontSize: 12, color: "var(--muted)", marginTop: "var(--space-sm)" }}>
         {type === "post" && (
           <>
@@ -673,4 +734,19 @@ function SettingsCheckRow({ icon, label, desc, name, defaultChecked }: { icon: s
       <span className="row-right"><input type="checkbox" name={name} defaultChecked={defaultChecked} /></span>
     </label>
   );
+}
+
+function miniCardAttachments(data: Record<string, unknown>) {
+  const direct = [
+    ...asArray<Record<string, unknown>>(data.attachments, ""),
+    ...asArray<Record<string, unknown>>(data.images, "")
+  ];
+  if (direct.length > 0) return direct;
+  const target = data.target && typeof data.target === "object" && !Array.isArray(data.target)
+    ? data.target as Record<string, unknown>
+    : {};
+  return [
+    ...asArray<Record<string, unknown>>(target.attachments, ""),
+    ...asArray<Record<string, unknown>>(target.images, "")
+  ];
 }

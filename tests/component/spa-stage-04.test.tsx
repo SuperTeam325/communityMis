@@ -74,13 +74,26 @@ describe("stage 04 SPA support domains", () => {
     );
 
     await screen.findAllByText("服务质量争议");
+    expect((await screen.findByRole("img", { name: "课堂截图.png" })).getAttribute("src")).toBe("http://api.test/api/files/evidence-1");
+    fireEvent.change(document.querySelector('.upload-box input[type="file"]') as HTMLInputElement, {
+      target: { files: [new File(["evidence"], "evidence.png", { type: "image/png" })] }
+    });
+    await waitFor(() => expect(api.files.upload).toHaveBeenCalled());
+    expect((await screen.findByRole("img", { name: "evidence.png" })).getAttribute("src")).toBe("http://api.test/api/files/file-1");
     fireEvent.change(screen.getByLabelText("证据说明"), { target: { value: "补充聊天记录说明" } });
     fireEvent.click(screen.getByRole("button", { name: "提交证据" }));
 
     await waitFor(() => expect(api.disputes.evidence).toHaveBeenCalledWith("8001", {
-      evidenceType: "text",
+      evidenceType: "file",
       content: "补充聊天记录说明",
-      attachments: []
+      attachments: [
+        expect.objectContaining({
+          fileId: "file-1",
+          name: "evidence.png",
+          mimeType: "image/png",
+          url: "http://api.test/api/files/file-1"
+        })
+      ]
     }));
     await waitFor(() => expect(api.disputes.detail.mock.calls.length).toBeGreaterThanOrEqual(2));
   });
@@ -191,7 +204,8 @@ function apiStub() {
       })
     },
     files: {
-      upload: vi.fn().mockResolvedValue({ file: { fileId: "file-1", originalName: "evidence.png", mimeType: "image/png", sizeBytes: 123 } })
+      upload: vi.fn().mockResolvedValue({ file: { fileId: "file-1", originalName: "evidence.png", mimeType: "image/png", sizeBytes: 123 } }),
+      url: vi.fn((fileId: string) => `http://api.test/api/files/${fileId}`)
     }
   };
 }
@@ -211,7 +225,14 @@ function disputeFixture() {
     publisher: { userId: 1001, displayName: "张叔" },
     provider: { userId: 1003, displayName: "李老师" },
     progress: { steps: [{ key: "created", title: "纠纷创建", detail: "用户发起纠纷", state: "done" }] },
-    evidence: [{ evidenceId: 8101, evidenceType: "text", content: "课堂内容不一致", uploaderId: 1001, createdAt: "2026-06-01T10:00:00.000Z", attachments: [] }],
+    evidence: [{
+      evidenceId: 8101,
+      evidenceType: "text",
+      content: "课堂内容不一致",
+      uploaderId: 1001,
+      createdAt: "2026-06-01T10:00:00.000Z",
+      attachments: [{ fileId: "evidence-1", name: "课堂截图.png", mimeType: "image/png", url: "/api/files/evidence-1", size: 123 }]
+    }],
     freeze: { freezeId: 4601, status: "dispute", amount: 40, reason: "纠纷冻结", releaseCondition: "终审后释放" },
     juryResult: { total: 0, counts: { publisher: 0, provider: 0, mediate: 0 }, votes: [], myVote: null },
     href: "/disputes/8001",

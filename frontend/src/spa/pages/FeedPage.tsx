@@ -3,15 +3,11 @@ import type { ApiClient } from "../api";
 import {
   asArray,
   asRecord,
-  Badge,
-  dateText,
   PageHeader,
   PaginationControls,
   PostCard,
   SearchBar,
   StateView,
-  statusLabel,
-  statusTone,
   text,
   useAsync,
   useQueryParams
@@ -88,7 +84,7 @@ export function FeedPage({ api }: { api: ApiClient }) {
       <StateView loading={state.loading} error={state.error} empty={requests.length === 0}>
         <div className="card-list feed-content">
           {requests.map((item) => (
-            <PostCard key={text(item.requestId)} item={item} href={`/posts/${text(item.requestId)}`} />
+            <PostCard key={text(item.requestId)} item={item} href={`/posts/${text(item.requestId)}`} api={api} />
           ))}
         </div>
       </StateView>

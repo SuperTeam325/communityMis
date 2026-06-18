@@ -43,6 +43,7 @@ describe("stage 03 user flow surfaces", () => {
     );
 
     await screen.findAllByText("测试任务");
+    expect((await screen.findAllByRole("img", { name: "任务图片.png" })).length).toBeGreaterThan(0);
     expect(screen.getAllByText("搜索").length).toBeGreaterThan(0);
     expect(screen.getAllByText("全部类别").length).toBeGreaterThan(0);
     expect(screen.getAllByText("上一页").length).toBeGreaterThan(0);
@@ -50,6 +51,7 @@ describe("stage 03 user flow surfaces", () => {
 
   test("post page can draft and submit request data", async () => {
     const api = apiStub();
+    api.files.url = vi.fn((fileId: string) => `http://api.test/api/files/${fileId}`);
     window.history.replaceState({}, "", "/post");
     render(
       <MemoryRouter>
@@ -61,6 +63,11 @@ describe("stage 03 user flow surfaces", () => {
     );
 
     await screen.findAllByText("维修");
+    fireEvent.change(document.querySelector('.upload-box input[type="file"]') as HTMLInputElement, {
+      target: { files: [new File(["demo"], "demo.png", { type: "image/png" })] }
+    });
+    await waitFor(() => expect(api.files.upload).toHaveBeenCalled());
+    expect((await screen.findByRole("img", { name: "demo.png" })).getAttribute("src")).toBe("http://api.test/api/files/f1");
     fireEvent.change(screen.getByLabelText("标题"), { target: { value: "新需求" } });
     fireEvent.change(screen.getByLabelText("描述"), { target: { value: "需要修灯并调试" } });
     fireEvent.click(screen.getByRole("button", { name: "AI 草稿" }));
@@ -80,6 +87,14 @@ describe("stage 03 user flow surfaces", () => {
 
     await waitFor(() => expect(api.requests.create).toHaveBeenCalled());
     expect(api.requests.create.mock.calls[0][0].title).toBe("新需求");
+    expect(api.requests.create.mock.calls[0][0].attachments).toEqual([
+      expect.objectContaining({
+        fileId: "f1",
+        name: "demo.png",
+        mimeType: "image/png",
+        url: "http://api.test/api/files/f1"
+      })
+    ]);
   });
 
   test("request detail accepts and refreshes locally", async () => {
@@ -117,28 +132,43 @@ describe("stage 03 user flow surfaces", () => {
     const api = apiStub();
     api.files.url = vi.fn((fileId: string) => `http://api.test/api/files/${fileId}`);
     window.history.replaceState({}, "", "/profile");
-    (api.auth.me as ReturnType<typeof vi.fn>).mockResolvedValue({
-      user: {
-        userId: 1001,
-        username: "user_a",
-        displayName: "user_a",
-        role: "user",
-        avatarFileId: "avatar-1",
-        avatarUrl: "/api/files/avatar-1"
-      }
-    });
-    (api.users.me as ReturnType<typeof vi.fn>).mockResolvedValue({
-      user: {
-        userId: 1001,
-        username: "user_a",
-        displayName: "user_a",
-        role: "user",
-        avatarFileId: "avatar-1",
-        avatarUrl: "/api/files/avatar-1"
-      },
-      wallet: { balance: 10 },
-      credit: { averageRating: 4.8, reviewCount: 2 }
-    });
+    (api.auth.me as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        user: {
+          userId: 1001,
+          username: "user_a",
+          displayName: "user_a",
+          role: "user",
+          avatarFileId: "avatar-1",
+          avatarUrl: "/api/files/avatar-1"
+        }
+      })
+      .mockRejectedValueOnce(new Error("Unauthorized"));
+    (api.users.me as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        user: {
+          userId: 1001,
+          username: "user_a",
+          displayName: "user_a",
+          role: "user",
+          avatarFileId: "avatar-1",
+          avatarUrl: "/api/files/avatar-1"
+        },
+        wallet: { balance: 10 },
+        credit: { averageRating: 4.8, reviewCount: 2 }
+      })
+      .mockResolvedValueOnce({
+        user: {
+          userId: 1001,
+          username: "user_a",
+          displayName: "user_a",
+          role: "user",
+          avatarFileId: "f1",
+          avatarUrl: "/api/files/f1"
+        },
+        wallet: { balance: 10 },
+        credit: { averageRating: 4.8, reviewCount: 2 }
+      });
 
     render(
       <MemoryRouter initialEntries={["/profile"]}>
@@ -154,14 +184,19 @@ describe("stage 03 user flow surfaces", () => {
       expect(document.querySelector(".avatar-wrap img")?.getAttribute("src")).toBe("http://api.test/api/files/avatar-1");
     });
 
-    fireEvent.change(document.querySelector('.upload-box input[type="file"]') as HTMLInputElement, {
+    expect(document.querySelector(".avatar-wrap .upload-box")).toBeNull();
+    fireEvent.change(document.querySelector('.avatar-upload-input[type="file"]') as HTMLInputElement, {
       target: { files: [new File(["avatar"], "avatar.png", { type: "image/png" })] }
     });
 
     await waitFor(() => expect(api.files.upload).toHaveBeenCalled());
     await waitFor(() => expect(api.users.avatar).toHaveBeenCalledWith("f1"));
-    await waitFor(() => expect(api.auth.me).toHaveBeenCalledTimes(2));
+    expect(api.auth.me).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(api.users.me).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      expect(document.querySelector(".nav-avatar img")?.getAttribute("src")).toBe("http://api.test/api/files/f1");
+      expect(document.querySelector(".avatar-wrap img")?.getAttribute("src")).toBe("http://api.test/api/files/f1");
+    });
   });
 });
 
@@ -176,6 +211,7 @@ function apiStub() {
     location: "测试社区",
     status: "open",
     category: { categoryId: 11, name: "维修" },
+    attachments: [{ fileId: "request-image-1", name: "任务图片.png", mimeType: "image/png", url: "/api/files/request-image-1", size: 123 }],
     publisher: { userId: 1001, displayName: "user_a", username: "user_a" },
     creditSummary: { averageRating: 4.8 }
   };
@@ -198,7 +234,10 @@ function apiStub() {
     categories: { list: vi.fn().mockResolvedValue({ categories: [{ categoryId: 11, name: "维修" }] }) },
     tags: { list: vi.fn().mockResolvedValue({ tags: [{ name: "维修" }] }) },
     ai: { requestDraft: vi.fn().mockResolvedValue({ draft: { title: "AI 草稿", description: "AI 生成的真实任务描述" } }) },
-    files: { upload: vi.fn().mockResolvedValue({ file: { fileId: "f1", originalName: "demo.png" } }) },
+    files: {
+      upload: vi.fn().mockResolvedValue({ file: { fileId: "f1", originalName: "demo.png", mimeType: "image/png", sizeBytes: 123 } }),
+      url: vi.fn((fileId: string) => `http://api.test/api/files/${fileId}`)
+    },
     requests: {
       list: vi.fn().mockResolvedValue({ requests: [request], pagination: { page: 1, pageSize: 12, total: 24, totalPages: 2, hasNext: true, hasPrev: false } }),
       create: vi.fn().mockResolvedValue({ request }),
@@ -222,7 +261,7 @@ function apiStub() {
       me: vi.fn().mockResolvedValue({ user: { userId: 1001, username: "user_a", displayName: "user_a" }, wallet: { balance: 10 }, credit: { averageRating: 4.8, reviewCount: 2 } }),
       public: vi.fn().mockResolvedValue({ user: { userId: 1001, username: "user_a", displayName: "user_a" }, viewer: { isSelf: true }, credit: { averageRating: 4.8 } }),
       credit: vi.fn().mockResolvedValue({ credit: { averageRating: 4.8, reviewCount: 2 }, reviews: [] }),
-      avatar: vi.fn().mockResolvedValue({ ok: true }),
+      avatar: vi.fn().mockResolvedValue({ user: { userId: 1001, username: "user_a", displayName: "user_a", avatarFileId: "f1", avatarUrl: "/api/files/f1" } }),
       follow: vi.fn().mockResolvedValue({ ok: true }),
       unfollow: vi.fn().mockResolvedValue({ ok: true })
     },

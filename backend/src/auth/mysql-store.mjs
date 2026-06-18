@@ -906,7 +906,8 @@ FROM (
 ) q;
 `;
     const rows = await mysqlJson(sql, { optional: true });
-    return Array.isArray(rows) ? rows.map(normalizeServiceRequest).map(withRequestExtras) : [];
+    const requests = Array.isArray(rows) ? rows.map(normalizeServiceRequest) : [];
+    return (await hydrateRequestAttachments(requests)).map(withRequestExtras);
   }
 
   async function findServiceRequestById(requestId) {
@@ -921,6 +922,16 @@ FROM (
   async function createServiceRequest(input) {
     await assertActiveCategory(input.categoryId);
     const tags = Array.isArray(input.tags) ? input.tags.map((item) => String(item).trim()).filter(Boolean).slice(0, 8) : [];
+    const attachments = normalizeFileAttachments(input.attachments);
+    const fileAttachments = attachments.filter((item) => item.fileId);
+    if (fileAttachments.length > 0) {
+      const fileIds = fileAttachments.map((item) => item.fileId);
+      const placeholders = fileIds.map(() => "?").join(", ");
+      const rows = await pooledRows(`SELECT \`file_id\` AS fileId FROM \`file_asset\` WHERE \`owner_id\` = ? AND \`file_id\` IN (${placeholders})`, [Number(input.publisherId), ...fileIds]);
+      if (rows.length !== fileIds.length) {
+        throw storeError("FILE_NOT_FOUND", "Request attachment file was not found.");
+      }
+    }
     const sql = `
 INSERT INTO \`service_request\` (
   \`publisher_id\`,
@@ -977,7 +988,23 @@ LIMIT 1;
 `;
     const created = normalizeServiceRequest(await mysqlJson(sql));
     if (created) {
-      requestExtras.set(created.requestId, { tags });
+      if (fileAttachments.length > 0) {
+        const pool = await mysqlPool();
+        const connection = await pool.getConnection();
+        try {
+          await connection.beginTransaction();
+          for (const attachment of fileAttachments) {
+            await connection.execute("UPDATE `file_asset` SET `business_type` = 'request', `business_id` = ?, `visibility` = 'public' WHERE `file_id` = ? AND `owner_id` = ?", [created.requestId, attachment.fileId, Number(input.publisherId)]);
+          }
+          await connection.commit();
+        } catch (error) {
+          await connection.rollback();
+          throw error;
+        } finally {
+          connection.release();
+        }
+      }
+      requestExtras.set(created.requestId, { tags, attachments });
     }
     return withRequestExtras(created);
   }
@@ -2517,7 +2544,40 @@ FROM (
       return null;
     }
     const extra = requestExtras.get(request.requestId);
-    return extra ? { ...request, tags: extra.tags ?? request.tags } : request;
+    return extra ? { ...request, tags: extra.tags ?? request.tags, attachments: extra.attachments ?? request.attachments } : request;
+  }
+
+  async function hydrateRequestAttachments(requests) {
+    if (!Array.isArray(requests) || requests.length === 0) {
+      return [];
+    }
+    const ids = requests.map((request) => Number(request.requestId)).filter((id) => Number.isFinite(id));
+    if (ids.length === 0) {
+      return requests;
+    }
+    const rows = await pooledRows(`
+SELECT
+  \`business_id\` AS requestId,
+  \`file_id\` AS fileId,
+  \`purpose\`,
+  \`original_name\` AS originalName,
+  \`mime_type\` AS mimeType,
+  \`size_bytes\` AS sizeBytes
+FROM \`file_asset\`
+WHERE \`business_type\` = 'request'
+  AND \`business_id\` IN (${ids.map(() => "?").join(", ")})
+ORDER BY \`business_id\`, \`created_at\`, \`file_id\`
+`, ids);
+    const byRequest = new Map();
+    for (const row of rows) {
+      const list = byRequest.get(Number(row.requestId)) ?? [];
+      list.push(normalizeFileAttachment(row));
+      byRequest.set(Number(row.requestId), list);
+    }
+    return requests.map((request) => ({
+      ...request,
+      attachments: byRequest.get(Number(request.requestId)) ?? request.attachments ?? []
+    }));
   }
 
   function withReviewExtras(review) {
@@ -5619,6 +5679,7 @@ function normalizeServiceRequest(input) {
     coinAmount: Number(input.coinAmount ?? 0),
     status: String(input.status ?? "open"),
     tags: Array.isArray(input.tags) ? input.tags : [],
+    attachments: normalizeFileAttachments(input.attachments),
     visible: input.visible !== false && input.visible !== 0,
     createdAt: input.createdAt ?? null,
     updatedAt: input.updatedAt ?? input.createdAt ?? null,
@@ -6123,6 +6184,35 @@ function normalizeMessageAttachment(input) {
     sizeBytes: Number(input.sizeBytes ?? input.size_bytes ?? 0),
     url: `/api/files/${encodeURIComponent(fileId)}`
   };
+}
+
+function normalizeFileAttachment(input) {
+  if (!input || typeof input !== "object") {
+    const name = normalizeOptionalString(input);
+    return name ? { name, type: "file", size: 0, url: null } : null;
+  }
+  const fileId = normalizeOptionalString(input.fileId ?? input.file_id);
+  const name = normalizeOptionalString(input.name ?? input.originalName ?? input.original_name ?? input.filename ?? input.fileName) ?? fileId;
+  if (!name && !fileId) {
+    return null;
+  }
+  const mimeType = normalizeOptionalString(input.mimeType ?? input.mime_type ?? input.type);
+  const size = Number(input.size ?? input.sizeBytes ?? input.size_bytes ?? 0);
+  return {
+    fileId,
+    name,
+    originalName: normalizeOptionalString(input.originalName ?? input.original_name) ?? name,
+    type: normalizeOptionalString(input.type) ?? mimeType ?? "file",
+    mimeType,
+    size: Number.isFinite(size) ? Math.max(0, Math.round(size)) : 0,
+    sizeBytes: Number.isFinite(size) ? Math.max(0, Math.round(size)) : 0,
+    url: normalizeOptionalString(input.url ?? input.fileUrl ?? input.file_url) ?? (fileId ? `/api/files/${encodeURIComponent(fileId)}` : null)
+  };
+}
+
+function normalizeFileAttachments(value) {
+  const list = Array.isArray(value) ? value : value ? [value] : [];
+  return list.map(normalizeFileAttachment).filter(Boolean).slice(0, 8);
 }
 
 function normalizeMessageAttachments(value) {

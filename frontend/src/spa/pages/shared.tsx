@@ -1,6 +1,8 @@
 import React from "react";
 import { Link } from "react-router-dom";
+import type { ApiClient } from "../api";
 import { ApiError } from "../api";
+import { fileAssetUrl, isImageAsset } from "../avatar";
 
 export function useAsync<T>(loader: (signal?: AbortSignal) => Promise<T>, deps: React.DependencyList = []) {
   const [data, setData] = React.useState<T | null>(null);
@@ -121,7 +123,12 @@ export function FormSection({ title, children, description }: { title?: string; 
   );
 }
 
-export function TaskCard({ item, action, compact = false }: { item: Record<string, unknown>; action?: React.ReactNode; compact?: boolean }) {
+export function TaskCard({ item, action, compact = false, api }: {
+  item: Record<string, unknown>;
+  action?: React.ReactNode;
+  compact?: boolean;
+  api?: Pick<ApiClient, "files">;
+}) {
   const category = asRecord(item.category);
   const publisher = asRecord(item.publisher);
   const credit = asRecord(item.creditSummary);
@@ -133,6 +140,7 @@ export function TaskCard({ item, action, compact = false }: { item: Record<strin
         <span className="reward-badge">⏂ {text(item.coinAmount ?? item.rewardAmount ?? item.reward, "0")}</span>
       </div>
       <p className="task-desc">{text(item.descriptionSummary || item.description || item.content)}</p>
+      {api ? <AttachmentPreviewList attachments={asArray<Record<string, unknown>>(item.attachments, "")} api={api} compact /> : null}
       <div className="meta-row">
         <span>{text(category.name ?? item.categoryName)}</span>
         <span>{text(item.estimatedHours)} 小时</span>
@@ -153,7 +161,7 @@ export function TaskCard({ item, action, compact = false }: { item: Record<strin
   );
 }
 
-export function PostCard({ item, href }: { item: Record<string, unknown>; href: string }) {
+export function PostCard({ item, href, api }: { item: Record<string, unknown>; href: string; api?: Pick<ApiClient, "files"> }) {
   const publisher = asRecord(item.publisher);
   return (
     <article className="post-card card">
@@ -171,6 +179,7 @@ export function PostCard({ item, href }: { item: Record<string, unknown>; href: 
         <h2>{text(item.title)}</h2>
         <p className="post-body-text">{text(item.descriptionSummary || item.description || item.content)}</p>
       </LinkLike>
+      {api ? <AttachmentPreviewList attachments={asArray<Record<string, unknown>>(item.attachments, "")} api={api} compact /> : null}
       <div className="post-actions-row">
         <span>{text(item.coinAmount ?? item.rewardAmount ?? item.reward)} 时间币</span>
         <span>{text(item.estimatedHours)} 小时</span>
@@ -237,6 +246,30 @@ export function Field({ label, children }: { label: string; children: React.Reac
 
 export function Badge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: string }) {
   return <span className={`badge-state badge-state--${tone} ${tone}`}>{children}</span>;
+}
+
+export function AttachmentPreviewList({ attachments, api, compact = false }: {
+  attachments: Record<string, unknown>[];
+  api: Pick<ApiClient, "files">;
+  compact?: boolean;
+}) {
+  if (attachments.length === 0) return null;
+  return (
+    <div className={`attachment-preview-list${compact ? " attachment-preview-list--compact" : ""}`}>
+      {attachments.map((file, index) => {
+        const name = text(file.name ?? file.originalName ?? file.fileId ?? index);
+        const url = fileAssetUrl(file, api);
+        if (url && isImageAsset(file)) {
+          return (
+            <a className="attachment-preview" href={url} target="_blank" rel="noreferrer" key={text(file.fileId ?? file.url ?? name ?? index)}>
+              <img src={url} alt={name} />
+            </a>
+          );
+        }
+        return <Badge key={text(file.fileId ?? file.url ?? name ?? index)}>{name}</Badge>;
+      })}
+    </div>
+  );
 }
 
 export function FileUpload({ purpose, businessType, businessId, visibility, onUploaded }: {

@@ -6,6 +6,7 @@ type AuthContextValue = {
   session: AuthSession | null;
   loading: boolean;
   refresh: (role?: "user" | "admin") => Promise<AuthSession | null>;
+  updateSessionUser: (user: unknown, role?: "user" | "admin") => AuthSession | null;
   loginUser: (payload: unknown) => Promise<AuthSession>;
   registerUser: (payload: unknown) => Promise<AuthSession>;
   loginAdmin: (payload: unknown) => Promise<AuthSession>;
@@ -32,6 +33,16 @@ export function AuthProvider({ api, children }: { api: ApiClient; children: Reac
       setLoading(false);
     }
   }, [api]);
+
+  const updateSessionUser = React.useCallback((user: unknown, role: "user" | "admin" = "user") => {
+    try {
+      const next = normalizeSession(user, role);
+      setSession(next);
+      return next;
+    } catch {
+      return null;
+    }
+  }, []);
 
   const loginUser = React.useCallback(async (payload: unknown) => {
     const result = await api.auth.login(payload);
@@ -70,11 +81,12 @@ export function AuthProvider({ api, children }: { api: ApiClient; children: Reac
     session,
     loading,
     refresh,
+    updateSessionUser,
     loginUser,
     registerUser,
     loginAdmin,
     logout
-  }), [loading, loginAdmin, loginUser, logout, refresh, registerUser, session]);
+  }), [loading, loginAdmin, loginUser, logout, refresh, registerUser, session, updateSessionUser]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
