@@ -1,0 +1,8 @@
+{
+  "apiBaseUrl": "https://www.learningbjtu.asia",
+  "appEnv": "production",
+  "buildVersion": "manual",
+  "sentryDsn": "",
+  "sentryTracesSampleRate": 0,
+  "sentryIngestOrigin": ""
+}
